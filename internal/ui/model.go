@@ -244,9 +244,7 @@ func (m Model) viewLog(contentHeight int) string {
 		return styleMuted.Render("  no revisions found")
 	}
 
-	// Each entry takes 2 lines (subject + meta).
-	linesPerEntry := 2
-	visibleEntries := contentHeight / linesPerEntry
+	visibleEntries := contentHeight - 1
 	if visibleEntries < 1 {
 		visibleEntries = 1
 	}
@@ -265,6 +263,8 @@ func (m Model) viewLog(contentHeight int) string {
 	}
 
 	var b strings.Builder
+	b.WriteString("\n")
+
 	for i := m.offset; i < end; i++ {
 		e := m.logEntries[i]
 
@@ -300,28 +300,26 @@ func (m Model) viewLog(contentHeight int) string {
 			subject = "(no description set)"
 		}
 
-		line := fmt.Sprintf("%s %s %s %s%s",
+		line := fmt.Sprintf("%s %s %s %s  %s %s %s%s",
 			cursor,
 			style.Render(symbol),
 			styleChangeID.Render(e.ChangeID),
 			style.Render(subject),
-			bookmarkStr,
-		)
-
-		meta := fmt.Sprintf("    %s  %s  %s",
 			styleAuthor.Render(e.Authors),
 			styleDate.Render(e.Date),
 			styleCommitID.Render(e.CommitID),
+			bookmarkStr,
 		)
 
 		if i == m.cursor {
-			line = styleSelected.Width(m.width).Render(line)
-			meta = styleSelected.Width(m.width).Render(meta)
+			sel := lipgloss.NewStyle().
+				Background(colorDarkPurple).
+				Width(m.width).
+				Inline(true)
+			line = sel.Render(line)
 		}
 
 		b.WriteString(line)
-		b.WriteString("\n")
-		b.WriteString(meta)
 		b.WriteString("\n")
 	}
 

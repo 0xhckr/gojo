@@ -40,8 +40,9 @@ type LogEntry struct {
 	IsImmutable   bool
 }
 
-// Each field is separated by a record separator (\x1e) and entries by \x1f.
-const logTemplate = `change_id.short() ++ "\x1e" ++ commit_id.short() ++ "\x1e" ++ author.name() ++ "\x1e" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "\x1e" ++ if(current_working_copy, "Y", "N") ++ "\x1e" ++ if(immutable, "Y", "N") ++ "\x1e" ++ bookmarks.join(",") ++ "\x1e" ++ description.first_line() ++ "\x1f"` + "\n"
+// One line per commit, pipe-delimited.
+// Fields: change_id|commit_id|author|date|wc|immutable|bookmarks|subject
+const logTemplate = `change_id.short() ++ "|" ++ commit_id.short() ++ "|" ++ author.name() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "|" ++ description.first_line() ++ "\n"`
 
 // Log returns the revlog parsed into entries.
 func (r *Runner) Log(ctx context.Context, revset string, limit int) ([]LogEntry, error) {
@@ -65,23 +66,13 @@ func parseLog(raw string) []LogEntry {
 		return nil
 	}
 	var entries []LogEntry
-	// Split by the separator we know jj will output literally: \x1f
-	// But jj outputs the literal characters from the template. Since we have \x1f
-	// as a Go escape in the template string, let's just split by the actual separator.
-	// Actually, jj templates output literal \x1f bytes from the "\x1f" in the template.
-	// Wait - jj templates don't interpret Go escapes. We need to use jj's own escaping.
-	// Let's use a simple approach: split by newlines, then split fields by tab.
-	// Actually, the \x1f is interpreted by jj template engine as a literal byte? Let me check.
-	// The template has "\x1f" which jj would render as the literal string \x1f or the byte?
-	// In jj templates, "\x1f" is a string literal containing the byte 0x1F.
-	// So we can split on that byte.
-	blocks := strings.Split(raw, "\x1f")
-	for _, block := range blocks {
-		block = strings.TrimSpace(block)
-		if block == "" {
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
-		fields := strings.Split(block, "\x1e")
+		// Use SplitN so subjects containing "|" don't get split.
+		fields := strings.SplitN(line, "|", 8)
 		if len(fields) < 8 {
 			continue
 		}
@@ -89,7 +80,7 @@ func parseLog(raw string) []LogEntry {
 		if fields[6] != "" {
 			bms = strings.Split(fields[6], ",")
 		}
-		entry := LogEntry{
+		entries = append(entries, LogEntry{
 			ChangeID:      fields[0],
 			CommitID:      fields[1],
 			Authors:       fields[2],
@@ -98,8 +89,7 @@ func parseLog(raw string) []LogEntry {
 			IsImmutable:   fields[5] == "Y",
 			Bookmarks:     bms,
 			Subject:       fields[7],
-		}
-		entries = append(entries, entry)
+		})
 	}
 	return entries
 }
@@ -119,14 +109,6 @@ func (r *Runner) Status(ctx context.Context) ([]StatusEntry, error) {
 	return parseStatus(out), nil
 }
 
-// jj status output looks like:
-//
-//	Working copy changes:
-//	A file1
-//	M file2
-//	D file3
-//
-// But actually jj outputs just the file lines. Let's parse robustly.
 func parseStatus(raw string) []StatusEntry {
 	var entries []StatusEntry
 	for _, line := range strings.Split(raw, "\n") {
@@ -141,7 +123,6 @@ func parseStatus(raw string) []StatusEntry {
 		if len(line) < 3 {
 			continue
 		}
-		// Format: "A path/to/file"
 		statusChar := line[0]
 		path := strings.TrimSpace(line[1:])
 		if path == "" {
