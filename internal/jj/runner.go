@@ -152,6 +152,16 @@ func (r *Runner) Diff(ctx context.Context, rev string) (string, error) {
 }
 
 // Describe updates the description of a revision.
+// DiffSummary returns the changed files for a given revision (like jj diff --summary -r <rev>).
+func (r *Runner) DiffSummary(ctx context.Context, rev string) ([]StatusEntry, error) {
+	args := []string{"diff", "--summary", "-r", rev}
+	out, err := r.run(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	return parseStatus(out), nil
+}
+
 func (r *Runner) Describe(ctx context.Context, rev, message string) error {
 	_, err := r.run(ctx, "describe", "-r", rev, "-m", message)
 	return err
