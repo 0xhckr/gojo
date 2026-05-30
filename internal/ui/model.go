@@ -16,8 +16,6 @@ type View int
 
 const (
 	ViewLog View = iota
-	ViewStatus
-	ViewDiff
 	ViewHelp
 )
 
@@ -25,10 +23,6 @@ func (v View) String() string {
 	switch v {
 	case ViewLog:
 		return "log"
-	case ViewStatus:
-		return "status"
-	case ViewDiff:
-		return "diff"
 	case ViewHelp:
 		return "help"
 	default:
@@ -51,7 +45,8 @@ type Model struct {
 	// Status view state.
 	statusEntries []jj.StatusEntry
 
-	// Diff view state.
+	// Inline diff panel state.
+	diffOpen    bool
 	diffContent string
 	diffRev     string
 	diffVP      viewport.Model
@@ -84,7 +79,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.diffVP = viewport.New(msg.Width, msg.Height-3) // title + status + help
+		m.diffVP = viewport.New(msg.Width, 1) // height set dynamically later
 		m.diffVP.HighPerformanceRendering = false
 		m.diffReady = true
 		return m, nil
@@ -128,20 +123,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// Global keys.
 		switch msg.String() {
-		case "q", "ctrl+c":
-			if m.view == ViewHelp || m.view == ViewDiff {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "q":
+			if m.view == ViewHelp {
 				m.view = ViewLog
 				return m, nil
 			}
+			if m.diffOpen {
+				m.diffOpen = false
+				return m, nil
+			}
 			return m, tea.Quit
-		case "1":
-			m.view = ViewLog
-			m.message = "refreshing…"
-			return m, m.loadLog()
-		case "2":
-			m.view = ViewStatus
-			return m, m.loadStatus()
 		case "?":
+			if m.diffOpen {
+				m.diffOpen = false
+				return m, nil
+			}
 			m.view = ViewHelp
 			return m, nil
 		case "r":
@@ -153,8 +151,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.view {
 		case ViewLog:
 			return m.updateLog(msg)
-		case ViewDiff:
-			return m.updateDiff(msg)
 		}
 	}
 
@@ -166,17 +162,22 @@ func (m Model) View() string {
 		return "loading…"
 	}
 
-	// ── Bottom bars (always present) ──
-	helpBar := styleHelpBar.Width(m.width).Render(" 1:log  2:status  ?:help  r:refresh  q:quit ")
+	// ── Help bar (always at the bottom) ──
+	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  e:edit  n:new  ?:help  r:refresh  q:quit ")
 
+	// ── Status bar (second from bottom) ──
 	var statusBar string
 	if m.err != "" {
 		statusBar = styleError.Width(m.width).Render(" ✖ " + truncate(m.err, m.width-4))
 	} else if m.message != "" {
 		statusBar = styleMuted.Width(m.width).Render(" " + m.message)
 	} else {
-		// Show current view + repo info
-		statusBar = styleMuted.Width(m.width).Render(fmt.Sprintf(" %s view", m.view))
+		// Inline status: show changed file count
+		if len(m.statusEntries) > 0 {
+			statusBar = styleMuted.Width(m.width).Render(fmt.Sprintf(" %d changed file(s)", len(m.statusEntries)))
+		} else {
+			statusBar = styleMuted.Width(m.width).Render(" clean working copy ✓")
+		}
 	}
 
 	// Content area = total height minus the two bars.
@@ -189,10 +190,6 @@ func (m Model) View() string {
 	switch m.view {
 	case ViewLog:
 		content = m.viewLog(contentHeight)
-	case ViewStatus:
-		content = m.viewStatus(contentHeight)
-	case ViewDiff:
-		content = m.viewDiff()
 	case ViewHelp:
 		content = m.viewHelp(contentHeight)
 	}
@@ -206,6 +203,11 @@ func (m Model) View() string {
 // ── Log View ────────────────────────────────────────────────────────────────
 
 func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// If diff panel is open, keys control the diff.
+	if m.diffOpen {
+		return m.updateDiffPanel(msg)
+	}
+
 	switch msg.String() {
 	case "up", "k":
 		if m.cursor > 0 {
@@ -219,7 +221,8 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.logEntries) > 0 && m.cursor < len(m.logEntries) {
 			entry := m.logEntries[m.cursor]
 			m.diffRev = entry.CommitID
-			m.view = ViewDiff
+			m.diffOpen = true
+			m.message = ""
 			return m, m.loadDiff(entry.CommitID)
 		}
 	case "e":
@@ -239,12 +242,74 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateDiffPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		m.diffVP.LineUp(1)
+	case "down", "j":
+		m.diffVP.LineDown(1)
+	case "pgup", "b":
+		m.diffVP.HalfViewUp()
+	case "pgdown", "f":
+		m.diffVP.HalfViewDown()
+	case "G":
+		m.diffVP.GotoBottom()
+	case "g":
+		m.diffVP.GotoTop()
+	case "enter", "d":
+		// Toggle diff panel closed.
+		m.diffOpen = false
+	}
+	return m, nil
+}
+
+// diffPanelHeight returns how many lines the inline diff panel should take.
+// Roughly half the screen, min 3.
+func (m Model) diffPanelHeight(contentHeight int) int {
+	h := contentHeight / 2
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
 func (m Model) viewLog(contentHeight int) string {
 	if len(m.logEntries) == 0 {
 		return styleMuted.Render("  no revisions found")
 	}
 
-	visibleEntries := contentHeight - 1
+	var b strings.Builder
+	b.WriteString("\n")
+
+	// ── Inline diff panel (top half) ──
+	if m.diffOpen {
+		panelH := m.diffPanelHeight(contentHeight)
+		title := styleTitle.Width(m.width).Render(" Diff: " + m.diffRev + "  (press enter/q to close) ")
+		titleLines := lipgloss.Height(title)
+
+		m.diffVP.Width = m.width
+		m.diffVP.Height = panelH - titleLines - 1 // -1 for separator
+		if m.diffVP.Height < 1 {
+			m.diffVP.Height = 1
+		}
+
+		b.WriteString(title)
+		b.WriteString("\n")
+		b.WriteString(m.diffVP.View())
+		b.WriteString("\n")
+		// Separator line
+		b.WriteString(styleMuted.Render(strings.Repeat("─", m.width)))
+		b.WriteString("\n")
+	}
+
+	// ── Commit list (remaining space) ──
+	linesUsed := strings.Count(b.String(), "\n")
+	logHeight := contentHeight - linesUsed
+	if logHeight < 1 {
+		logHeight = 1
+	}
+
+	visibleEntries := logHeight - 1 // -1 for top padding already written
 	if visibleEntries < 1 {
 		visibleEntries = 1
 	}
@@ -262,15 +327,12 @@ func (m Model) viewLog(contentHeight int) string {
 		end = len(m.logEntries)
 	}
 
-	var b strings.Builder
-	b.WriteString("\n")
-
 	for i := m.offset; i < end; i++ {
 		e := m.logEntries[i]
 
 		// Cursor indicator.
 		cursor := " "
-		if i == m.cursor {
+		if i == m.cursor && !m.diffOpen {
 			cursor = styleCursor.Render("▸")
 		}
 
@@ -311,12 +373,8 @@ func (m Model) viewLog(contentHeight int) string {
 			bookmarkStr,
 		)
 
-		if i == m.cursor {
-			sel := lipgloss.NewStyle().
-				Background(colorDarkPurple).
-				Width(m.width).
-				Inline(true)
-			line = sel.Render(line)
+		if i == m.cursor && !m.diffOpen {
+			line = highlightLine(line, colorDarkPurple, m.width)
 		}
 
 		b.WriteString(line)
@@ -326,73 +384,6 @@ func (m Model) viewLog(contentHeight int) string {
 	return b.String()
 }
 
-// ── Status View ─────────────────────────────────────────────────────────────
-
-func (m Model) viewStatus(contentHeight int) string {
-	title := styleTitle.Width(m.width).Render(" Status ")
-
-	if len(m.statusEntries) == 0 {
-		return lipgloss.JoinVertical(lipgloss.Left,
-			title,
-			"",
-			styleMuted.Render("  working copy clean ✓"),
-		)
-	}
-
-	var b strings.Builder
-	b.WriteString(title)
-	b.WriteString("\n")
-
-	for _, e := range m.statusEntries {
-		var statusStr string
-		switch e.Status {
-		case "Added":
-			statusStr = styleAdded.Render("  A ")
-		case "Modified":
-			statusStr = styleModified.Render("  M ")
-		case "Removed":
-			statusStr = styleRemoved.Render("  D ")
-		case "Conflicted":
-			statusStr = styleConflict.Render("  C ")
-		default:
-			statusStr = "  ? "
-		}
-		b.WriteString(statusStr)
-		b.WriteString(stylePath.Render(e.Path))
-		b.WriteString("\n")
-	}
-
-	return b.String()
-}
-
-// ── Diff View ───────────────────────────────────────────────────────────────
-
-func (m Model) updateDiff(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "up", "k":
-		m.diffVP.LineUp(1)
-	case "down", "j":
-		m.diffVP.LineDown(1)
-	case "pgup", "b":
-		m.diffVP.HalfViewUp()
-	case "pgdown", "f":
-		m.diffVP.HalfViewDown()
-	case "G":
-		m.diffVP.GotoBottom()
-	case "g":
-		m.diffVP.GotoTop()
-	}
-	return m, nil
-}
-
-func (m Model) viewDiff() string {
-	title := styleTitle.Width(m.width).Render(" Diff: " + m.diffRev + " ")
-	if m.diffReady {
-		return lipgloss.JoinVertical(lipgloss.Left, title, m.diffVP.View())
-	}
-	return lipgloss.JoinVertical(lipgloss.Left, title, styleMuted.Render("  loading diff…"))
-}
-
 // ── Help View ───────────────────────────────────────────────────────────────
 
 func (m Model) viewHelp(contentHeight int) string {
@@ -400,27 +391,22 @@ func (m Model) viewHelp(contentHeight int) string {
 
 	help := []struct{ key, desc string }{
 		{"Global", ""},
-		{"  1", "log view"},
-		{"  2", "status view"},
 		{"  ?", "this help"},
-		{"  r", "refresh current view"},
-		{"  q", "quit / go back"},
+		{"  r", "refresh"},
+		{"  q", "quit / close diff"},
 		{"", ""},
 		{"Log View", ""},
 		{"  ↑/k, ↓/j", "navigate commits"},
-		{"  g", "jump to first commit"},
-		{"  G", "jump to last commit"},
-		{"  enter/d", "show diff for selected commit"},
-		{"  e", "edit (checkout) selected commit"},
-		{"  n", "create new change"},
+		{"  g / G", "first / last commit"},
+		{"  enter/d", "open diff panel"},
+		{"  e", "jj edit (checkout commit)"},
+		{"  n", "jj new (create change)"},
 		{"", ""},
-		{"Diff View", ""},
+		{"Diff Panel", ""},
 		{"  ↑/k, ↓/j", "scroll diff"},
-		{"  pgup/b", "scroll up half page"},
-		{"  pgdn/f", "scroll down half page"},
-		{"  g", "scroll to top"},
-		{"  G", "scroll to bottom"},
-		{"  q", "back to log"},
+		{"  pgup/b, pgdn/f", "half-page scroll"},
+		{"  g / G", "top / bottom"},
+		{"  enter/d/q", "close diff"},
 	}
 
 	var b strings.Builder
@@ -433,7 +419,7 @@ func (m Model) viewHelp(contentHeight int) string {
 		} else if h.key == "" {
 			b.WriteString("\n")
 		} else {
-			b.WriteString(fmt.Sprintf("  %-12s %s\n", styleCommitID.Render(h.key), h.desc))
+			b.WriteString(fmt.Sprintf("  %-16s %s\n", styleCommitID.Render(h.key), h.desc))
 		}
 	}
 
@@ -499,14 +485,7 @@ func (m Model) newRev() tea.Cmd {
 }
 
 func (m Model) refresh() tea.Cmd {
-	switch m.view {
-	case ViewLog:
-		return m.loadLog()
-	case ViewStatus:
-		return m.loadStatus()
-	default:
-		return m.loadLog()
-	}
+	return tea.Batch(m.loadLog(), m.loadStatus())
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -531,4 +510,42 @@ func padToHeight(s string, h int) string {
 		return s
 	}
 	return s + strings.Repeat("\n", h-lines)
+}
+
+// highlightLine re-applies a background color after every ESC[0m reset in the line.
+// This ensures the selection background persists behind all styled segments.
+func highlightLine(line string, bg lipgloss.Color, width int) string {
+	bgCode := fmt.Sprintf("\x1b[48;5;%sm", bg)
+	// Replace every ESC[0m (full reset) with reset+reapply background.
+	replaced := strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+bgCode)
+	// Prepend the background to the start.
+	replaced = bgCode + replaced
+	// Pad with spaces to fill width, then reset at the end.
+	// Measure visible width by stripping ANSI.
+	visible := stripAnsi(replaced)
+	if pad := width - len(visible); pad > 0 {
+		replaced += strings.Repeat(" ", pad)
+	}
+	replaced += "\x1b[0m"
+	return replaced
+}
+
+// stripAnsi removes ANSI escape sequences to get visible character count.
+func stripAnsi(s string) string {
+	var b strings.Builder
+	inEscape := false
+	for _, ch := range s {
+		if ch == '\x1b' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		b.WriteRune(ch)
+	}
+	return b.String()
 }
