@@ -46,11 +46,12 @@ type Model struct {
 	statusEntries []jj.StatusEntry
 
 	// Diff panel state.
-	diffOpen    bool
-	diffRev     string
-	diffVP      viewport.Model
-	diffReady   bool
-	diffLoading bool
+	diffOpen         bool
+	diffRev          string
+	diffVP           viewport.Model
+	diffReady        bool
+	diffLoading      bool
+	revStatusEntries []jj.StatusEntry
 
 	// Error/status message.
 	err     string
@@ -61,6 +62,7 @@ type Model struct {
 type logLoadedMsg struct{ entries []jj.LogEntry }
 type statusLoadedMsg struct{ entries []jj.StatusEntry }
 type diffLoadedMsg struct{ content string }
+type revStatusLoadedMsg struct{ entries []jj.StatusEntry }
 type errMsg struct{ err error }
 
 func NewModel(runner *jj.Runner) Model {
@@ -106,6 +108,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diffVP.SetContent(msg.content)
 		m.diffVP.GotoTop()
 		m.diffLoading = false
+		m.err = ""
+		m.message = ""
+		return m, nil
+
+	case revStatusLoadedMsg:
+		m.revStatusEntries = msg.entries
 		m.err = ""
 		m.message = ""
 		return m, nil
@@ -209,10 +217,11 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.logEntries) > 0 && m.cursor < len(m.logEntries) {
 			entry := m.logEntries[m.cursor]
 			m.diffRev = entry.CommitID
+			m.revStatusEntries = nil
 			m.diffOpen = true
 			m.diffLoading = true
 			m.message = ""
-			return m, m.loadDiff(entry.CommitID)
+			return m, tea.Batch(m.loadDiff(entry.CommitID), m.loadRevStatus(entry.CommitID))
 		}
 	case "e":
 		if len(m.logEntries) > 0 {
@@ -268,11 +277,13 @@ func (m Model) viewLog(contentHeight int) string {
 	var b strings.Builder
 	b.WriteString("\n")
 
-	// ── Commit list (top) ──
-	logHeight := contentHeight
+	// ── Panel (replaces commit list when open) ──
 	if m.diffOpen {
-		logHeight = contentHeight - m.diffPanelHeight(contentHeight)
+		return m.viewDiffPanel(contentHeight)
 	}
+
+	// ── Commit list (full screen) ──
+	logHeight := contentHeight
 
 	visibleEntries := logHeight - 1 // -1 for top padding
 	if visibleEntries < 1 {
@@ -342,36 +353,71 @@ func (m Model) viewLog(contentHeight int) string {
 		b.WriteString("\n")
 	}
 
-	// ── Diff panel (bottom) ──
-	if m.diffOpen {
-		b.WriteString(styleMuted.Render(strings.Repeat("─", m.width)))
-		b.WriteString("\n")
-
-		label := " Diff: " + m.diffRev
-		if m.diffLoading {
-			label += "  loading…"
-		}
-		label += "  (enter/q to close) "
-		title := styleTitle.Width(m.width).Render(label)
-		titleLines := lipgloss.Height(title)
-
-		panelH := m.diffPanelHeight(contentHeight)
-		m.diffVP.Width = m.width
-		m.diffVP.Height = panelH - 2 - titleLines // -2 for separator + title
-		if m.diffVP.Height < 1 {
-			m.diffVP.Height = 1
-		}
-
-		b.WriteString(title)
-		b.WriteString("\n")
-		b.WriteString(m.diffVP.View())
-		b.WriteString("\n")
-	}
-
 	return b.String()
 }
 
 // ── Help View ───────────────────────────────────────────────────────────────
+
+// viewDiffPanel shows status summary (top) and diff (bottom) for the selected revision.
+func (m Model) viewDiffPanel(contentHeight int) string {
+	var b strings.Builder
+	b.WriteString("\n")
+
+	// ── Title bar ──
+	label := " " + m.diffRev
+	if m.diffLoading {
+		label += "  loading…"
+	}
+	label += "  (enter/q to close) "
+	title := styleTitle.Width(m.width).Render(label)
+	b.WriteString(title)
+	b.WriteString("\n")
+
+	// ── Status summary (top) ──
+	statusTitle := styleMuted.Width(m.width).Render(" status ")
+	b.WriteString(statusTitle)
+	b.WriteString("\n")
+	if len(m.revStatusEntries) == 0 {
+		b.WriteString(styleMuted.Render("  (no changes)"))
+		b.WriteString("\n")
+	} else {
+		for _, e := range m.revStatusEntries {
+			var statusStr string
+			switch e.Status {
+			case "Added":
+				statusStr = styleAdded.Render("  A ")
+			case "Modified":
+				statusStr = styleModified.Render("  M ")
+			case "Removed":
+				statusStr = styleRemoved.Render("  D ")
+			case "Conflicted":
+				statusStr = styleConflict.Render("  C ")
+			default:
+				statusStr = "  ? "
+			}
+			b.WriteString(statusStr)
+			b.WriteString(stylePath.Render(e.Path))
+			b.WriteString("\n")
+		}
+	}
+
+	// ── Separator ──
+	b.WriteString(styleMuted.Render(strings.Repeat("─", m.width)))
+	b.WriteString("\n")
+
+	// ── Diff (bottom, fills remaining space) ──
+	linesUsed := strings.Count(b.String(), "\n")
+	remaining := contentHeight - linesUsed
+	if remaining < 1 {
+		remaining = 1
+	}
+	m.diffVP.Width = m.width
+	m.diffVP.Height = remaining
+	b.WriteString(m.diffVP.View())
+	b.WriteString("\n")
+
+	return b.String()
+}
 
 func (m Model) viewHelp(contentHeight int) string {
 	title := styleTitle.Width(m.width).Render(" gojo — keybindings ")
@@ -432,6 +478,16 @@ func (m Model) loadStatus() tea.Cmd {
 			return errMsg{err}
 		}
 		return statusLoadedMsg{entries}
+	}
+}
+
+func (m Model) loadRevStatus(rev string) tea.Cmd {
+	return func() tea.Msg {
+		entries, err := m.runner.DiffSummary(context.Background(), rev)
+		if err != nil {
+			return errMsg{err}
+		}
+		return revStatusLoadedMsg{entries}
 	}
 }
 
