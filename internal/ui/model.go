@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/hackr/gojo/internal/jj"
 )
@@ -37,17 +38,19 @@ type Model struct {
 	// Log view state.
 	logEntries []jj.LogEntry
 	cursor     int
-	offset     int // scroll offset for log list
+	offset     int
 	width      int
 	height     int
 
-	// Status view state.
+	// Working copy status (for status bar).
 	statusEntries []jj.StatusEntry
 
-	// Inline status panel state.
-	diffOpen         bool
-	diffRev          string
-	revStatusEntries []jj.StatusEntry
+	// Diff panel state.
+	diffOpen    bool
+	diffRev     string
+	diffVP      viewport.Model
+	diffReady   bool
+	diffLoading bool
 
 	// Error/status message.
 	err     string
@@ -57,7 +60,7 @@ type Model struct {
 // Messages for async operations.
 type logLoadedMsg struct{ entries []jj.LogEntry }
 type statusLoadedMsg struct{ entries []jj.StatusEntry }
-type revStatusLoadedMsg struct{ entries []jj.StatusEntry }
+type diffLoadedMsg struct{ content string }
 type errMsg struct{ err error }
 
 func NewModel(runner *jj.Runner) Model {
@@ -76,6 +79,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.diffVP = viewport.New(msg.Width, 1)
+		m.diffVP.HighPerformanceRendering = false
+		m.diffReady = true
 		return m, nil
 
 	case logLoadedMsg:
@@ -96,8 +102,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.message = ""
 		return m, nil
 
-	case revStatusLoadedMsg:
-		m.revStatusEntries = msg.entries
+	case diffLoadedMsg:
+		m.diffVP.SetContent(msg.content)
+		m.diffVP.GotoTop()
+		m.diffLoading = false
 		m.err = ""
 		m.message = ""
 		return m, nil
@@ -108,10 +116,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Handle keys based on current view.
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// Global keys.
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
@@ -137,7 +143,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.refresh()
 		}
 
-		// View-specific keys.
 		switch m.view {
 		case ViewLog:
 			return m.updateLog(msg)
@@ -152,17 +157,14 @@ func (m Model) View() string {
 		return "loading…"
 	}
 
-	// ── Help bar (always at the bottom) ──
 	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  e:edit  n:new  ?:help  r:refresh  q:quit ")
 
-	// ── Status bar (second from bottom) ──
 	var statusBar string
 	if m.err != "" {
 		statusBar = styleError.Width(m.width).Render(" ✖ " + truncate(m.err, m.width-4))
 	} else if m.message != "" {
 		statusBar = styleMuted.Width(m.width).Render(" " + m.message)
 	} else {
-		// Inline status: show changed file count
 		if len(m.statusEntries) > 0 {
 			statusBar = styleMuted.Width(m.width).Render(fmt.Sprintf(" %d changed file(s)", len(m.statusEntries)))
 		} else {
@@ -170,7 +172,6 @@ func (m Model) View() string {
 		}
 	}
 
-	// Content area = total height minus the two bars.
 	contentHeight := m.height - lipgloss.Height(helpBar) - lipgloss.Height(statusBar)
 	if contentHeight < 1 {
 		contentHeight = 1
@@ -184,16 +185,13 @@ func (m Model) View() string {
 		content = m.viewHelp(contentHeight)
 	}
 
-	// Ensure content fills exactly contentHeight lines.
 	content = padToHeight(content, contentHeight)
-
 	return lipgloss.JoinVertical(lipgloss.Left, content, statusBar, helpBar)
 }
 
 // ── Log View ────────────────────────────────────────────────────────────────
 
 func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// If diff panel is open, keys control the diff.
 	if m.diffOpen {
 		return m.updateDiffPanel(msg)
 	}
@@ -211,10 +209,10 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.logEntries) > 0 && m.cursor < len(m.logEntries) {
 			entry := m.logEntries[m.cursor]
 			m.diffRev = entry.CommitID
-			m.revStatusEntries = nil
 			m.diffOpen = true
+			m.diffLoading = true
 			m.message = ""
-			return m, m.loadRevStatus(entry.CommitID)
+			return m, m.loadDiff(entry.CommitID)
 		}
 	case "e":
 		if len(m.logEntries) > 0 {
@@ -235,15 +233,26 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateDiffPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "up", "k":
+		m.diffVP.LineUp(1)
+	case "down", "j":
+		m.diffVP.LineDown(1)
+	case "pgup", "b":
+		m.diffVP.HalfViewUp()
+	case "pgdown", "f":
+		m.diffVP.HalfViewDown()
+	case "G":
+		m.diffVP.GotoBottom()
+	case "g":
+		m.diffVP.GotoTop()
 	case "enter", "d":
 		m.diffOpen = false
 	}
 	return m, nil
 }
 
-// statusPanelHeight returns how many lines the bottom panel should take.
-// Roughly half the screen, min 3.
-func (m Model) statusPanelHeight(contentHeight int) int {
+// diffPanelHeight returns how many lines the bottom diff panel takes.
+func (m Model) diffPanelHeight(contentHeight int) int {
 	h := contentHeight / 2
 	if h < 3 {
 		h = 3
@@ -260,10 +269,9 @@ func (m Model) viewLog(contentHeight int) string {
 	b.WriteString("\n")
 
 	// ── Commit list (top) ──
-	// If status panel is open, log gets half the screen.
 	logHeight := contentHeight
 	if m.diffOpen {
-		logHeight = contentHeight - m.statusPanelHeight(contentHeight)
+		logHeight = contentHeight - m.diffPanelHeight(contentHeight)
 	}
 
 	visibleEntries := logHeight - 1 // -1 for top padding
@@ -271,7 +279,6 @@ func (m Model) viewLog(contentHeight int) string {
 		visibleEntries = 1
 	}
 
-	// Adjust scroll offset to keep cursor visible.
 	if m.cursor < m.offset {
 		m.offset = m.cursor
 	}
@@ -287,13 +294,11 @@ func (m Model) viewLog(contentHeight int) string {
 	for i := m.offset; i < end; i++ {
 		e := m.logEntries[i]
 
-		// Cursor indicator.
 		cursor := " "
-		if i == m.cursor && !m.diffOpen {
+		if i == m.cursor {
 			cursor = styleCursor.Render("▸")
 		}
 
-		// Symbols.
 		symbol := "○"
 		style := styleSubject
 		if e.IsWorkingCopy {
@@ -304,12 +309,11 @@ func (m Model) viewLog(contentHeight int) string {
 			style = styleImmutable
 		}
 
-		// Bookmarks.
 		var bookmarkStr string
 		if len(e.Bookmarks) > 0 {
 			var bms []string
-			for _, b := range e.Bookmarks {
-				bms = append(bms, styleBookmark.Render(b))
+			for _, bm := range e.Bookmarks {
+				bms = append(bms, styleBookmark.Render(bm))
 			}
 			bookmarkStr = " " + strings.Join(bms, " ")
 		}
@@ -338,37 +342,30 @@ func (m Model) viewLog(contentHeight int) string {
 		b.WriteString("\n")
 	}
 
-	// ── Status panel (bottom) ──
+	// ── Diff panel (bottom) ──
 	if m.diffOpen {
 		b.WriteString(styleMuted.Render(strings.Repeat("─", m.width)))
 		b.WriteString("\n")
-		title := styleTitle.Width(m.width).Render(" Status: " + m.diffRev + "  (enter/q to close) ")
+
+		label := " Diff: " + m.diffRev
+		if m.diffLoading {
+			label += "  loading…"
+		}
+		label += "  (enter/q to close) "
+		title := styleTitle.Width(m.width).Render(label)
+		titleLines := lipgloss.Height(title)
+
+		panelH := m.diffPanelHeight(contentHeight)
+		m.diffVP.Width = m.width
+		m.diffVP.Height = panelH - 2 - titleLines // -2 for separator + title
+		if m.diffVP.Height < 1 {
+			m.diffVP.Height = 1
+		}
+
 		b.WriteString(title)
 		b.WriteString("\n")
-
-		if len(m.revStatusEntries) == 0 {
-			b.WriteString(styleMuted.Render("  clean"))
-			b.WriteString("\n")
-		} else {
-			for _, e := range m.revStatusEntries {
-				var statusStr string
-				switch e.Status {
-				case "Added":
-					statusStr = styleAdded.Render("  A ")
-				case "Modified":
-					statusStr = styleModified.Render("  M ")
-				case "Removed":
-					statusStr = styleRemoved.Render("  D ")
-				case "Conflicted":
-					statusStr = styleConflict.Render("  C ")
-				default:
-					statusStr = "  ? "
-				}
-				b.WriteString(statusStr)
-				b.WriteString(stylePath.Render(e.Path))
-				b.WriteString("\n")
-			}
-		}
+		b.WriteString(m.diffVP.View())
+		b.WriteString("\n")
 	}
 
 	return b.String()
@@ -438,13 +435,13 @@ func (m Model) loadStatus() tea.Cmd {
 	}
 }
 
-func (m Model) loadRevStatus(rev string) tea.Cmd {
+func (m Model) loadDiff(rev string) tea.Cmd {
 	return func() tea.Msg {
-		entries, err := m.runner.DiffSummary(context.Background(), rev)
+		content, err := m.runner.Diff(context.Background(), rev)
 		if err != nil {
 			return errMsg{err}
 		}
-		return revStatusLoadedMsg{entries}
+		return diffLoadedMsg{content}
 	}
 }
 
@@ -490,7 +487,6 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-3] + "…"
 }
 
-// padToHeight ensures the output fills exactly h lines by padding with blank lines.
 func padToHeight(s string, h int) string {
 	lines := strings.Count(s, "\n")
 	if !strings.HasSuffix(s, "\n") && s != "" {
@@ -502,16 +498,10 @@ func padToHeight(s string, h int) string {
 	return s + strings.Repeat("\n", h-lines)
 }
 
-// highlightLine re-applies a background color after every ESC[0m reset in the line.
-// This ensures the selection background persists behind all styled segments.
 func highlightLine(line string, bg lipgloss.Color, width int) string {
 	bgCode := fmt.Sprintf("\x1b[48;5;%sm", bg)
-	// Replace every ESC[0m (full reset) with reset+reapply background.
 	replaced := strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+bgCode)
-	// Prepend the background to the start.
 	replaced = bgCode + replaced
-	// Pad with spaces to fill width, then reset at the end.
-	// Measure visible width by stripping ANSI.
 	visible := stripAnsi(replaced)
 	if pad := width - len(visible); pad > 0 {
 		replaced += strings.Repeat(" ", pad)
@@ -520,7 +510,6 @@ func highlightLine(line string, bg lipgloss.Color, width int) string {
 	return replaced
 }
 
-// stripAnsi removes ANSI escape sequences to get visible character count.
 func stripAnsi(s string) string {
 	var b strings.Builder
 	inEscape := false
