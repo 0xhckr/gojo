@@ -169,10 +169,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.aiLoading, msg.rev)
 		m.message = fmt.Sprintf("AI described %s: %s", msg.rev, truncate(msg.message, 60))
 		m.err = ""
-		if len(m.aiLoading) == 0 {
-			return m, m.loadLog()
-		}
-		// Still in-flight — reload log to show completed descriptions.
+		// Reload log to show new descriptions; keep spinner if others in-flight.
 		return m, m.loadLog()
 
 	case aiDescribeErrorMsg:
@@ -302,7 +299,7 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = ""
 			m.message = ""
 			cmds := []tea.Cmd{m.aiDescribe(entry.ChangeID)}
-			// Start spinner if this is the only in-flight request.
+			// Start spinner if this is the first in-flight request.
 			if len(m.aiLoading) == 1 {
 				m.aiSpinnerFrame = 0
 				cmds = append(cmds, m.aiSpinnerTick())
@@ -369,44 +366,61 @@ func (m Model) viewLog(contentHeight int) string {
 	}
 
 	// ── Commit list (full screen) ──
-	// Each entry is 2 lines: header (id/author/date) + subject.
-	linesPerEntry := 2
+	// Each entry is 2 lines + optional edge lines from jj's graph.
 	logHeight := contentHeight
-
-	visibleEntries := (logHeight - 1) / linesPerEntry // -1 for top padding
-	if visibleEntries < 1 {
-		visibleEntries = 1
+	availableLines := logHeight - 1 // -1 for top padding
+	if availableLines < 2 {
+		availableLines = 2
 	}
 
+	// commitDisplayLines returns how many terminal lines a commit occupies.
+	commitDisplayLines := func(idx int) int {
+		return 2 + len(m.logEntries[idx].EdgeLines)
+	}
+
+	// Ensure cursor is within offset range.
 	if m.cursor < m.offset {
 		m.offset = m.cursor
 	}
-	if m.cursor >= m.offset+visibleEntries {
-		m.offset = m.cursor - visibleEntries + 1
+
+	// Walk from offset, count how many commits fit.
+	end := m.offset
+	usedLines := 0
+	for end < len(m.logEntries) {
+		h := commitDisplayLines(end)
+		if usedLines+h > availableLines && end > m.offset {
+			break
+		}
+		usedLines += h
+		end++
 	}
 
-	end := m.offset + visibleEntries
-	if end > len(m.logEntries) {
-		end = len(m.logEntries)
+	// If cursor is past the visible range, recalculate from cursor.
+	if m.cursor >= end {
+		end = m.cursor + 1
+		usedLines = commitDisplayLines(m.cursor)
+		m.offset = m.cursor
+		for m.offset > 0 {
+			h := commitDisplayLines(m.offset - 1)
+			if usedLines+h > availableLines {
+				break
+			}
+			usedLines += h
+			m.offset--
+		}
 	}
 
 	for i := m.offset; i < end; i++ {
 		e := m.logEntries[i]
 
-		cursor := " "
-		if i == m.cursor {
-			cursor = styleCursor.Render("▸")
+		// Edge lines from graph branching (attached to this commit from parsing).
+		for _, edge := range e.EdgeLines {
+			b.WriteString(styleGraph.Render(edge))
+			b.WriteString("\n")
 		}
 
-		symbol := "○"
-		entryStyle := styleSubject
-		if e.IsWorkingCopy {
-			symbol = "@"
-			entryStyle = styleWorkingCopy
-		} else if e.IsImmutable {
-			symbol = "◆"
-			entryStyle = styleImmutable
-		}
+		// Style the node character in the header graph prefix.
+		headerPrefix := styleNodeInPrefix(e)
 
 		var bookmarkStr string
 		if len(e.Bookmarks) > 0 {
@@ -417,15 +431,9 @@ func (m Model) viewLog(contentHeight int) string {
 			bookmarkStr = " " + strings.Join(bms, " ")
 		}
 
-		subject := e.Subject
-		if subject == "" {
-			subject = "(no description set)"
-		}
-
-		// Line 1: symbol  change_id  author  date  commit_id  bookmarks
-		header := fmt.Sprintf("%s %s %s %s %s %s%s",
-			cursor,
-			entryStyle.Render(symbol),
+		// Line 1: graph_prefix + change_id author date commit_id bookmarks
+		header := fmt.Sprintf("%s%s %s %s %s%s",
+			headerPrefix,
 			styleChangeID.Render(e.ChangeID),
 			styleAuthor.Render(e.Authors),
 			styleDate.Render(e.Date),
@@ -433,19 +441,24 @@ func (m Model) viewLog(contentHeight int) string {
 			bookmarkStr,
 		)
 
-		// Graph edge: │ between commits, blank for last visible entry.
-		edge := styleGraph.Render("│")
-		if i == end-1 {
-			edge = " "
+		// Line 2: graph body_prefix + subject
+		entryStyle := styleSubject
+		if e.IsWorkingCopy {
+			entryStyle = styleWorkingCopy
+		} else if e.IsImmutable {
+			entryStyle = styleImmutable
 		}
 
-		// Line 2: indented subject (or spinner if AI-loading)
 		var body string
 		if m.aiLoading[e.ChangeID] {
 			frame := spinnerFrames[m.aiSpinnerFrame]
-			body = fmt.Sprintf("  %s %s", edge, styleSpinner.Render(fmt.Sprintf("%s generating…", frame)))
+			body = fmt.Sprintf("%s%s", styleGraph.Render(e.BodyPrefix), styleSpinner.Render(fmt.Sprintf(" %s generating…", frame)))
 		} else {
-			body = fmt.Sprintf("  %s %s", edge, entryStyle.Render(subject))
+			subject := e.Subject
+			if subject == "" {
+				subject = "(no description set)"
+			}
+			body = fmt.Sprintf("%s %s", styleGraph.Render(e.BodyPrefix), entryStyle.Render(subject))
 		}
 
 		if i == m.cursor {
@@ -460,6 +473,50 @@ func (m Model) viewLog(contentHeight int) string {
 	}
 
 	return b.String()
+}
+
+// styleNodeInPrefix replaces the node character (@/○) in the graph prefix
+// with a styled version based on commit type. Graph edge characters before
+// the node are dimmed.
+func styleNodeInPrefix(e jj.LogEntry) string {
+	prefix := e.HeaderPrefix
+	runes := []rune(prefix)
+
+	// Find the last node character in the prefix.
+	nodeIdx := -1
+	for i := len(runes) - 1; i >= 0; i-- {
+		r := runes[i]
+		if r == '@' || r == '○' || r == '◆' {
+			nodeIdx = i
+			break
+		}
+	}
+
+	if nodeIdx < 0 {
+		return styleGraph.Render(prefix)
+	}
+
+	// Determine styled node.
+	var styledNode string
+	switch {
+	case e.IsWorkingCopy:
+		styledNode = styleWorkingCopy.Render("@")
+	case e.IsImmutable:
+		styledNode = styleImmutable.Render("◆")
+	default:
+		styledNode = styleGraph.Render("○")
+	}
+
+	before := string(runes[:nodeIdx])
+	after := string(runes[nodeIdx+1:])
+
+	var result string
+	if before != "" {
+		result = styleGraph.Render(before)
+	}
+	result += styledNode
+	result += after // trailing spaces, no styling needed
+	return result
 }
 
 // ── Help View ───────────────────────────────────────────────────────────────
@@ -665,19 +722,16 @@ func (m Model) aiSpinnerTick() tea.Cmd {
 // aiDescribe fetches the diff, sends it to OpenRouter, and applies the result.
 func (m Model) aiDescribe(rev string) tea.Cmd {
 	return func() tea.Msg {
-		// Get the diff for this revision.
 		diff, err := m.runner.Diff(context.Background(), rev)
 		if err != nil {
 			return aiDescribeErrorMsg{rev: rev, err: err}
 		}
 
-		// Ask the AI to generate a commit message.
 		msg, err := m.aiClient.GenerateCommitMessage(context.Background(), diff)
 		if err != nil {
 			return aiDescribeErrorMsg{rev: rev, err: err}
 		}
 
-		// Apply it via jj describe.
 		if err := m.runner.Describe(context.Background(), rev, msg); err != nil {
 			return aiDescribeErrorMsg{rev: rev, err: err}
 		}

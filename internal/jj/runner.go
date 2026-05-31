@@ -38,15 +38,25 @@ type LogEntry struct {
 	Bookmarks     []string
 	IsWorkingCopy bool
 	IsImmutable   bool
+
+	// Graph rendering (from jj's graph output).
+	// HeaderPrefix is the graph prefix for the metadata line (e.g. "│ ○  ").
+	// The node character is always the last @ or ○ in this prefix.
+	HeaderPrefix string
+	// BodyPrefix is the graph prefix for the subject line (e.g. "│ │  ").
+	BodyPrefix string
+	// EdgeLines are pure graph edge lines rendered between this commit and the next.
+	EdgeLines []string
 }
 
-// One line per commit, pipe-delimited.
-// Fields: change_id|commit_id|author|date|wc|immutable|bookmarks|subject
-const logTemplate = `change_id.short() ++ "|" ++ commit_id.short() ++ "|" ++ author.name() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "|" ++ description.first_line() ++ "\n"`
+// Two-line template with \x01 marker to separate graph prefix from data.
+// Line 1: \x01 + pipe-delimited metadata
+// Line 2: \x01 + subject
+const logTemplate = `"\x01" ++ change_id.short() ++ "|" ++ commit_id.short() ++ "|" ++ author.name() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"`
 
-// Log returns the revlog parsed into entries.
+// Log returns the revlog parsed into entries with graph info.
 func (r *Runner) Log(ctx context.Context, revset string, limit int) ([]LogEntry, error) {
-	args := []string{"log", "--no-graph", "-T", logTemplate}
+	args := []string{"log", "--color", "never", "-T", logTemplate}
 	if revset != "" {
 		args = append(args, "-r", revset)
 	}
@@ -65,22 +75,66 @@ func parseLog(raw string) []LogEntry {
 	if raw == "" {
 		return nil
 	}
-	var entries []LogEntry
+
+	type parsedLine struct {
+		prefix string // graph prefix before \x01
+		data   string // data after \x01
+		isData bool
+	}
+
+	var parsed []parsedLine
 	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSpace(line)
+		line = strings.TrimRight(line, "\r")
 		if line == "" {
 			continue
 		}
-		// Use SplitN so subjects containing "|" don't get split.
-		fields := strings.SplitN(line, "|", 8)
-		if len(fields) < 8 {
+		idx := strings.IndexByte(line, '\x01')
+		if idx >= 0 {
+			parsed = append(parsed, parsedLine{
+				prefix: line[:idx],
+				data:   line[idx+1:],
+				isData: true,
+			})
+		} else {
+			// Pure graph edge line (no data).
+			parsed = append(parsed, parsedLine{prefix: line})
+		}
+	}
+
+	// Group into commits.
+	// Pattern: [edge_lines...] header_data body_data [edge_lines...] header_data body_data ...
+	// Edge lines between commits are attached to the preceding commit.
+	var entries []LogEntry
+	var pendingEdges []string
+	i := 0
+	for i < len(parsed) {
+		p := parsed[i]
+		if !p.isData {
+			pendingEdges = append(pendingEdges, p.prefix)
+			i++
 			continue
 		}
+
+		// Header line — parse pipe-delimited fields (7 fields, no subject).
+		fields := strings.SplitN(p.data, "|", 7)
+		if len(fields) < 7 {
+			i++
+			continue
+		}
+
+		// Attach pending edge lines to the previous commit.
+		if len(entries) > 0 {
+			entries[len(entries)-1].EdgeLines = pendingEdges
+		}
+		pendingEdges = nil
+
 		var bms []string
 		if fields[6] != "" {
 			bms = strings.Split(fields[6], ",")
 		}
-		entries = append(entries, LogEntry{
+
+		entry := LogEntry{
+			HeaderPrefix:  p.prefix,
 			ChangeID:      fields[0],
 			CommitID:      fields[1],
 			Authors:       fields[2],
@@ -88,9 +142,24 @@ func parseLog(raw string) []LogEntry {
 			IsWorkingCopy: fields[4] == "Y",
 			IsImmutable:   fields[5] == "Y",
 			Bookmarks:     bms,
-			Subject:       fields[7],
-		})
+		}
+
+		// Next line should be the body (subject).
+		i++
+		if i < len(parsed) && parsed[i].isData {
+			entry.BodyPrefix = parsed[i].prefix
+			entry.Subject = parsed[i].data
+			i++
+		}
+
+		entries = append(entries, entry)
 	}
+
+	// Attach any trailing edge lines to the last commit.
+	if len(pendingEdges) > 0 && len(entries) > 0 {
+		entries[len(entries)-1].EdgeLines = append(entries[len(entries)-1].EdgeLines, pendingEdges...)
+	}
+
 	return entries
 }
 
@@ -116,7 +185,6 @@ func parseStatus(raw string) []StatusEntry {
 		if line == "" {
 			continue
 		}
-		// Skip header lines
 		if strings.HasPrefix(line, "Working copy") || strings.HasPrefix(line, "Parent commit") {
 			continue
 		}
