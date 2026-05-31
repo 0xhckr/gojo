@@ -13,13 +13,14 @@ import (
 
 // Client calls the OpenRouter chat completions API.
 type Client struct {
-	apiKey string
-	model  string
+	apiKey       string
+	model        string
+	customPrompt string
 }
 
 // NewClient creates a new OpenRouter client.
-func NewClient(apiKey, model string) *Client {
-	return &Client{apiKey: apiKey, model: model}
+func NewClient(apiKey, model, customPrompt string) *Client {
+	return &Client{apiKey: apiKey, model: model, customPrompt: customPrompt}
 }
 
 type chatRequest struct {
@@ -55,10 +56,15 @@ func (c *Client) GenerateCommitMessage(ctx context.Context, diff string) (string
 		diff = diff[:10000] + "\n... (truncated)"
 	}
 
+	prompt := commitPrompt
+	if c.customPrompt != "" {
+		prompt = c.customPrompt
+	}
+
 	reqBody := chatRequest{
 		Model: c.model,
 		Messages: []chatMessage{
-			{Role: "user", Content: commitPrompt + "\n\n<diff>\n" + diff + "\n</diff>"},
+			{Role: "user", Content: prompt + "\n\n<diff>\n" + diff + "\n</diff>"},
 		},
 	}
 

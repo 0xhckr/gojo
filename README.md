@@ -56,6 +56,9 @@ openrouter_api_key = "sk-or-..."
 
 # Model to use (default: google/gemini-2.0-flash-001)
 openrouter_model = "anthropic/claude-sonnet-4-20250514"
+
+# Custom prompt template for AI commit messages (optional)
+commit_prompt = "You are a software developer. Write a clear, concise commit message given the diff: "
 ```
 
 ## Keybindings

@@ -27,7 +27,7 @@ func main() {
 		if model == "" {
 			model = "google/gemini-2.0-flash-001"
 		}
-		aiClient = ai.NewClient(cfg.OpenRouterAPIKey, model)
+		aiClient = ai.NewClient(cfg.OpenRouterAPIKey, model, cfg.CommitPrompt)
 	}
 
 	model := ui.NewModel(runner, aiClient)

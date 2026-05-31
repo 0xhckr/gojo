@@ -16,6 +16,7 @@ type Config struct {
 	DebugFile        string `toml:"-"`
 	OpenRouterAPIKey string `toml:"openrouter_api_key"`
 	OpenRouterModel  string `toml:"openrouter_model"`
+	CommitPrompt     string `toml:"commit_prompt"`
 }
 
 // Load discovers the jj binary and repo root, then overlays the TOML config.
