@@ -49,7 +49,7 @@ The `jj log` command uses jj's own template language (NOT Go templates). Key syn
 - String concatenation: `++`
 - String literals: `"text"`
 - Newlines in output: `"\n"` (jj interprets this as a real newline)
-- Field access: `change_id.short()`, `commit_id.short()`, `author.name()`
+- Field access: `change_id.short(8)`, `commit_id.short(8)`, `author.name()`
 - Conditionals: `if(condition, "yes", "no")`
 - Joins: `bookmarks.join(",")`
 - Date formatting: `author.timestamp().local().format("%Y-%m-%d %H:%M")`
@@ -57,7 +57,7 @@ The `jj log` command uses jj's own template language (NOT Go templates). Key syn
 ### Current log template (pipe-delimited, one line per commit)
 
 ```
-change_id.short() ++ "|" ++ commit_id.short() ++ "|" ++ author.name() ++ "|" ++
+change_id.short(8) ++ "|" ++ commit_id.short(8) ++ "|" ++ author.name() ++ "|" ++
 author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++
 if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++
 bookmarks.join(",") ++ "|" ++ description.first_line() ++ "\n"

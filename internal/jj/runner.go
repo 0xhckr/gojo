@@ -56,7 +56,7 @@ type LogEntry struct {
 // Two-line template with \x01 marker to separate graph prefix from data.
 // Line 1: \x01 + pipe-delimited metadata
 // Line 2: \x01 + subject
-const logTemplate = `"\x01" ++ change_id.short() ++ "|" ++ change_id.shortest() ++ "|" ++ commit_id.short() ++ "|" ++ commit_id.shortest() ++ "|" ++ author.email() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"`
+const logTemplate = `"\x01" ++ change_id.short(8) ++ "|" ++ change_id.shortest() ++ "|" ++ commit_id.short(8) ++ "|" ++ commit_id.shortest() ++ "|" ++ author.email() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"`
 
 // Log returns the revlog parsed into entries with graph info.
 func (r *Runner) Log(ctx context.Context, revset string, limit int) ([]LogEntry, error) {
