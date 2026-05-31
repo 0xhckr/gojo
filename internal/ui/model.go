@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -122,6 +123,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err.Error()
 		m.message = ""
 		return m, nil
+
+	case editorDoneMsg:
+		m.message = "described " + msg.rev
+		m.err = ""
+		return m, m.loadLog()
+
+	case editorErrorMsg:
+		m.err = msg.err.Error()
+		m.message = ""
+		return m, nil
 	}
 
 	switch msg := msg.(type) {
@@ -165,7 +176,7 @@ func (m Model) View() string {
 		return "loading…"
 	}
 
-	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  e:edit  n:new  ?:help  r:refresh  q:quit ")
+	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  d:describe  e:edit  n:new  ?:help  r:refresh  q:quit ")
 
 	var statusBar string
 	if m.err != "" {
@@ -213,15 +224,21 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor < len(m.logEntries)-1 {
 			m.cursor++
 		}
-	case "enter", "d":
+	case "enter":
 		if len(m.logEntries) > 0 && m.cursor < len(m.logEntries) {
 			entry := m.logEntries[m.cursor]
-			m.diffRev = entry.CommitID
+			m.diffRev = entry.ChangeID
 			m.revStatusEntries = nil
 			m.diffOpen = true
 			m.diffLoading = true
 			m.message = ""
 			return m, tea.Batch(m.loadDiff(entry.CommitID), m.loadRevStatus(entry.CommitID))
+		}
+	case "d":
+		if len(m.logEntries) > 0 && m.cursor < len(m.logEntries) {
+			entry := m.logEntries[m.cursor]
+			m.message = "opening editor…"
+			return m, m.describeRev(entry.ChangeID)
 		}
 	case "e":
 		if len(m.logEntries) > 0 {
@@ -254,7 +271,7 @@ func (m Model) updateDiffPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.diffVP.GotoBottom()
 	case "g":
 		m.diffVP.GotoTop()
-	case "enter", "d":
+	case "enter":
 		m.diffOpen = false
 	}
 	return m, nil
@@ -431,7 +448,8 @@ func (m Model) viewHelp(contentHeight int) string {
 		{"Log View", ""},
 		{"  ↑/k, ↓/j", "navigate commits"},
 		{"  g / G", "first / last commit"},
-		{"  enter/d", "open diff panel"},
+		{"  enter", "open diff panel"},
+		{"  d", "jj describe ($EDITOR)"},
 		{"  e", "jj edit (checkout commit)"},
 		{"  n", "jj new (create change)"},
 		{"", ""},
@@ -439,7 +457,7 @@ func (m Model) viewHelp(contentHeight int) string {
 		{"  ↑/k, ↓/j", "scroll diff"},
 		{"  pgup/b, pgdn/f", "half-page scroll"},
 		{"  g / G", "top / bottom"},
-		{"  enter/d/q", "close diff"},
+		{"  enter/q", "close diff"},
 	}
 
 	var b strings.Builder
@@ -499,6 +517,22 @@ func (m Model) loadDiff(rev string) tea.Cmd {
 		}
 		return diffLoadedMsg{content}
 	}
+}
+
+type editorDoneMsg struct{ rev string }
+
+type editorErrorMsg struct{ err error }
+
+func (m Model) describeRev(rev string) tea.Cmd {
+	return tea.ExecProcess(
+		exec.Command("jj", "describe", "-r", rev),
+		func(err error) tea.Msg {
+			if err != nil {
+				return editorErrorMsg{err}
+			}
+			return editorDoneMsg{rev}
+		},
+	)
 }
 
 func (m Model) editRev(rev string) tea.Cmd {
