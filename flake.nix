@@ -16,7 +16,7 @@
           pname = "gojo";
           version = "0.1.0";
           src = ./.;
-          vendorHash = "sha256-i3+SFzqKYjIPJtyXigCYr2QqgdpxFqtCIVsd4VCevJk=";
+          vendorHash = "sha256-WwbVO3IAg7O9sHxqVnMtve/lHdvh3F0v9b3zdX58qIk=";
         };
       });
 

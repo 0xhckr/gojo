@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/hackr/gojo/internal/ai"
 	"github.com/hackr/gojo/internal/jj"
 )
 
@@ -31,10 +33,14 @@ func (v View) String() string {
 	}
 }
 
+// Spinner frames — braille dot rotation (muload-style).
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
 // Model is the top-level Bubble Tea model.
 type Model struct {
-	runner *jj.Runner
-	view   View
+	runner   *jj.Runner
+	aiClient *ai.Client
+	view     View
 
 	// Log view state.
 	logEntries []jj.LogEntry
@@ -54,6 +60,10 @@ type Model struct {
 	diffLoading      bool
 	revStatusEntries []jj.StatusEntry
 
+	// AI describe state.
+	aiSpinnerFrame int
+	aiLoading      map[string]bool // set of revs currently being AI-described
+
 	// Error/status message.
 	err     string
 	message string
@@ -66,10 +76,23 @@ type diffLoadedMsg struct{ content string }
 type revStatusLoadedMsg struct{ entries []jj.StatusEntry }
 type errMsg struct{ err error }
 
-func NewModel(runner *jj.Runner) Model {
+// AI describe messages.
+type aiDescribeTickMsg struct{}
+type aiDescribeDoneMsg struct {
+	rev     string
+	message string
+}
+type aiDescribeErrorMsg struct {
+	rev string
+	err error
+}
+
+func NewModel(runner *jj.Runner, aiClient *ai.Client) Model {
 	return Model{
-		runner: runner,
-		view:   ViewLog,
+		runner:   runner,
+		aiClient: aiClient,
+		view:     ViewLog,
+		aiLoading: make(map[string]bool),
 	}
 }
 
@@ -133,6 +156,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err.Error()
 		m.message = ""
 		return m, nil
+
+	// ── AI describe messages ──
+	case aiDescribeTickMsg:
+		if len(m.aiLoading) > 0 {
+			m.aiSpinnerFrame = (m.aiSpinnerFrame + 1) % len(spinnerFrames)
+			return m, m.aiSpinnerTick()
+		}
+		return m, nil
+
+	case aiDescribeDoneMsg:
+		delete(m.aiLoading, msg.rev)
+		m.message = fmt.Sprintf("AI described %s: %s", msg.rev, truncate(msg.message, 60))
+		m.err = ""
+		if len(m.aiLoading) == 0 {
+			return m, m.loadLog()
+		}
+		// Still in-flight — reload log to show completed descriptions.
+		return m, m.loadLog()
+
+	case aiDescribeErrorMsg:
+		delete(m.aiLoading, msg.rev)
+		m.err = msg.err.Error()
+		m.message = ""
+		return m, nil
 	}
 
 	switch msg := msg.(type) {
@@ -176,7 +223,7 @@ func (m Model) View() string {
 		return "loading…"
 	}
 
-	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  d:describe  e:edit  n:new  ?:help  r:refresh  q:quit ")
+	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  d:describe  D:AI msg  ↑↓+D:multi  e:edit  n:new  ?:help  r:refresh  q:quit ")
 
 	var statusBar string
 	if m.err != "" {
@@ -216,11 +263,11 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
-	case "up", "k":
+	case "up", "k", "shift+up":
 		if m.cursor > 0 {
 			m.cursor--
 		}
-	case "down", "j":
+	case "down", "j", "shift+down":
 		if m.cursor < len(m.logEntries)-1 {
 			m.cursor++
 		}
@@ -239,6 +286,28 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			entry := m.logEntries[m.cursor]
 			m.message = "opening editor…"
 			return m, m.describeRev(entry.ChangeID)
+		}
+	case "D":
+		if m.aiClient == nil {
+			m.err = "no OpenRouter API key — add openrouter_api_key to ~/.config/gojo/gojo.toml"
+			m.message = ""
+			return m, nil
+		}
+		if len(m.logEntries) > 0 && m.cursor < len(m.logEntries) {
+			entry := m.logEntries[m.cursor]
+			if m.aiLoading[entry.ChangeID] {
+				return m, nil // already generating for this rev
+			}
+			m.aiLoading[entry.ChangeID] = true
+			m.err = ""
+			m.message = ""
+			cmds := []tea.Cmd{m.aiDescribe(entry.ChangeID)}
+			// Start spinner if this is the only in-flight request.
+			if len(m.aiLoading) == 1 {
+				m.aiSpinnerFrame = 0
+				cmds = append(cmds, m.aiSpinnerTick())
+			}
+			return m, tea.Batch(cmds...)
 		}
 	case "e":
 		if len(m.logEntries) > 0 {
@@ -300,9 +369,11 @@ func (m Model) viewLog(contentHeight int) string {
 	}
 
 	// ── Commit list (full screen) ──
+	// Each entry is 2 lines: header (id/author/date) + subject.
+	linesPerEntry := 2
 	logHeight := contentHeight
 
-	visibleEntries := logHeight - 1 // -1 for top padding
+	visibleEntries := (logHeight - 1) / linesPerEntry // -1 for top padding
 	if visibleEntries < 1 {
 		visibleEntries = 1
 	}
@@ -328,13 +399,13 @@ func (m Model) viewLog(contentHeight int) string {
 		}
 
 		symbol := "○"
-		style := styleSubject
+		entryStyle := styleSubject
 		if e.IsWorkingCopy {
 			symbol = "@"
-			style = styleWorkingCopy
+			entryStyle = styleWorkingCopy
 		} else if e.IsImmutable {
 			symbol = "◆"
-			style = styleImmutable
+			entryStyle = styleImmutable
 		}
 
 		var bookmarkStr string
@@ -351,22 +422,40 @@ func (m Model) viewLog(contentHeight int) string {
 			subject = "(no description set)"
 		}
 
-		line := fmt.Sprintf("%s %s %s %s  %s %s %s%s",
+		// Line 1: symbol  change_id  author  date  commit_id  bookmarks
+		header := fmt.Sprintf("%s %s %s %s %s %s%s",
 			cursor,
-			style.Render(symbol),
+			entryStyle.Render(symbol),
 			styleChangeID.Render(e.ChangeID),
-			style.Render(subject),
 			styleAuthor.Render(e.Authors),
 			styleDate.Render(e.Date),
 			styleCommitID.Render(e.CommitID),
 			bookmarkStr,
 		)
 
-		if i == m.cursor {
-			line = highlightLine(line, colorDarkPurple, m.width)
+		// Graph edge: │ between commits, blank for last visible entry.
+		edge := styleGraph.Render("│")
+		if i == end-1 {
+			edge = " "
 		}
 
-		b.WriteString(line)
+		// Line 2: indented subject (or spinner if AI-loading)
+		var body string
+		if m.aiLoading[e.ChangeID] {
+			frame := spinnerFrames[m.aiSpinnerFrame]
+			body = fmt.Sprintf("  %s %s", edge, styleSpinner.Render(fmt.Sprintf("%s generating…", frame)))
+		} else {
+			body = fmt.Sprintf("  %s %s", edge, entryStyle.Render(subject))
+		}
+
+		if i == m.cursor {
+			header = highlightLine(header, colorDarkPurple, m.width)
+			body = highlightLine(body, colorDarkPurple, m.width)
+		}
+
+		b.WriteString(header)
+		b.WriteString("\n")
+		b.WriteString(body)
 		b.WriteString("\n")
 	}
 
@@ -450,6 +539,7 @@ func (m Model) viewHelp(contentHeight int) string {
 		{"  g / G", "first / last commit"},
 		{"  enter", "open diff panel"},
 		{"  d", "jj describe ($EDITOR)"},
+		{"  D", "AI generate commit msg (multi)",},
 		{"  e", "jj edit (checkout commit)"},
 		{"  n", "jj new (create change)"},
 		{"", ""},
@@ -565,6 +655,37 @@ func (m Model) refresh() tea.Cmd {
 	return tea.Batch(m.loadLog(), m.loadStatus())
 }
 
+// aiSpinnerTick returns a command that ticks the spinner every 100ms.
+func (m Model) aiSpinnerTick() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+		return aiDescribeTickMsg{}
+	})
+}
+
+// aiDescribe fetches the diff, sends it to OpenRouter, and applies the result.
+func (m Model) aiDescribe(rev string) tea.Cmd {
+	return func() tea.Msg {
+		// Get the diff for this revision.
+		diff, err := m.runner.Diff(context.Background(), rev)
+		if err != nil {
+			return aiDescribeErrorMsg{rev: rev, err: err}
+		}
+
+		// Ask the AI to generate a commit message.
+		msg, err := m.aiClient.GenerateCommitMessage(context.Background(), diff)
+		if err != nil {
+			return aiDescribeErrorMsg{rev: rev, err: err}
+		}
+
+		// Apply it via jj describe.
+		if err := m.runner.Describe(context.Background(), rev, msg); err != nil {
+			return aiDescribeErrorMsg{rev: rev, err: err}
+		}
+
+		return aiDescribeDoneMsg{rev: rev, message: msg}
+	}
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 func truncate(s string, maxLen int) string {
@@ -593,7 +714,7 @@ func highlightLine(line string, bg lipgloss.Color, width int) string {
 	replaced := strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+bgCode)
 	replaced = bgCode + replaced
 	visible := stripAnsi(replaced)
-	if pad := width - len(visible); pad > 0 {
+	if pad := width - lipgloss.Width(visible); pad > 0 {
 		replaced += strings.Repeat(" ", pad)
 	}
 	replaced += "\x1b[0m"

@@ -49,4 +49,6 @@ var (
 	styleDiffDel    = lipgloss.NewStyle().Foreground(colorRed)
 	styleError      = lipgloss.NewStyle().Foreground(colorRed).Background(colorDarkerGray).Bold(true)
 	styleMuted      = lipgloss.NewStyle().Foreground(colorGray).Background(colorDarkerGray)
+	styleSpinner    = lipgloss.NewStyle().Foreground(colorPurple).Bold(true)
+	styleGraph      = lipgloss.NewStyle().Foreground(colorDarkGray)
 )
