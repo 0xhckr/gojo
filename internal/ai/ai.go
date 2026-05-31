@@ -76,7 +76,7 @@ func (c *Client) GenerateCommitMessage(ctx context.Context, diff string) (string
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("HTTP-Referer", "https://github.com/hackr/gojo")
+	req.Header.Set("HTTP-Referer", "https://github.com/0xhckr/gojo")
 	req.Header.Set("X-Title", "gojo")
 
 	resp, err := http.DefaultClient.Do(req)

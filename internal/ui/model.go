@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/0xhckr/gojo/internal/ai"
+	"github.com/0xhckr/gojo/internal/jj"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/hackr/gojo/internal/ai"
-	"github.com/hackr/gojo/internal/jj"
 )
 
 // View represents a top-level view in the TUI.
@@ -104,9 +104,9 @@ type aiDescribeErrorMsg struct {
 
 func NewModel(runner *jj.Runner, aiClient *ai.Client) Model {
 	return Model{
-		runner:   runner,
-		aiClient: aiClient,
-		view:     ViewLog,
+		runner:    runner,
+		aiClient:  aiClient,
+		view:      ViewLog,
 		aiLoading: make(map[string]bool),
 	}
 }
@@ -852,7 +852,7 @@ func (m Model) viewHelp(contentHeight int) string {
 		{"  Home", "first commit"},
 		{"  enter", "open diff panel"},
 		{"  d", "jj describe ($EDITOR)"},
-		{"  D", "AI generate commit msg (multi)",},
+		{"  D", "AI generate commit msg (multi)"},
 		{"  e", "jj edit (checkout commit)"},
 		{"  n", "jj new (create change)"},
 		{"  a", "jj abandon (remove commit)"},

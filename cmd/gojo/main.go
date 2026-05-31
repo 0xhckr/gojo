@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/0xhckr/gojo/internal/ai"
+	"github.com/0xhckr/gojo/internal/config"
+	"github.com/0xhckr/gojo/internal/jj"
+	"github.com/0xhckr/gojo/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/hackr/gojo/internal/ai"
-	"github.com/hackr/gojo/internal/config"
-	"github.com/hackr/gojo/internal/jj"
-	"github.com/hackr/gojo/internal/ui"
 )
 
 func main() {

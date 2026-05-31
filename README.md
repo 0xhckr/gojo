@@ -7,7 +7,7 @@ A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), w
   <img src="https://img.shields.io/badge/jj-v0.41+-orange?style=flat" alt="jj v0.41+">
 </p>
 
-> ⚠️ **This project is entirely AI-generated.** A developer will review the source code and update things as they see fit. Expect rough edges.
+> ⚠️ **This project was developed using AI assistance.** It's been reviewed by a developer now and should be generally safe to use.
 
 ## Features
 
@@ -24,14 +24,14 @@ A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), w
 ### Nix (recommended)
 
 ```sh
-nix build github:hackr/gojo
+nix build github:0xhckr/gojo
 ./result/bin/gojo
 ```
 
 ### From source
 
 ```sh
-go install github.com/hackr/gojo/cmd/gojo@latest
+go install github.com/0xhckr/gojo/cmd/gojo@latest
 ```
 
 ### Nix dev shell

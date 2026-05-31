@@ -1,4 +1,4 @@
-module github.com/hackr/gojo
+module github.com/0xhckr/gojo
 
 go 1.26
 
