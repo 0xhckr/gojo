@@ -25,7 +25,7 @@ func main() {
 	if cfg.OpenRouterAPIKey != "" {
 		model := cfg.OpenRouterModel
 		if model == "" {
-			model = "google/gemini-2.0-flash-001"
+			model = "~anthropic/claude-haiku-latest"
 		}
 		aiClient = ai.NewClient(cfg.OpenRouterAPIKey, model, cfg.CommitPrompt)
 	}
