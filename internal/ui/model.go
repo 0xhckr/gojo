@@ -60,6 +60,11 @@ type Model struct {
 	diffLoading      bool
 	revStatusEntries []jj.StatusEntry
 
+	// Bookmark mode state.
+	bookmarkMode   bool   // true when in bookmark mode
+	bookmarkAction string // current subcommand key (c/d/f/m/r/s/t/T)
+	bookmarkInput  string // accumulated text input
+
 	// AI describe state.
 	aiSpinnerFrame int
 	aiLoading      map[string]bool // set of revs currently being AI-described
@@ -75,6 +80,11 @@ type statusLoadedMsg struct{ entries []jj.StatusEntry }
 type diffLoadedMsg struct{ content string }
 type revStatusLoadedMsg struct{ entries []jj.StatusEntry }
 type errMsg struct{ err error }
+type bookmarkDoneMsg struct {
+	action string
+	name   string
+}
+type bookmarkListMsg struct{ content string }
 
 // AI describe messages.
 type aiDescribeTickMsg struct{}
@@ -147,6 +157,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.message = ""
 		return m, nil
 
+	case bookmarkDoneMsg:
+		m.message = fmt.Sprintf("bookmark %s: %s", msg.action, msg.name)
+		m.err = ""
+		m.bookmarkMode = false
+		m.bookmarkAction = ""
+		m.bookmarkInput = ""
+		return m, m.refresh()
+
+	case bookmarkListMsg:
+		m.bookmarkMode = false
+		m.bookmarkAction = ""
+		m.bookmarkInput = ""
+		m.diffVP.SetContent(msg.content)
+		m.diffVP.GotoTop()
+		m.diffOpen = true
+		m.diffRev = "bookmark list"
+		m.diffLoading = false
+		m.message = ""
+		m.err = ""
+		return m, nil
+
 	case editorDoneMsg:
 		m.message = "described " + msg.rev
 		m.err = ""
@@ -188,6 +219,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
+		}
+
+		// Bookmark mode intercepts all keys except ctrl+c.
+		if m.bookmarkMode {
+			return m.updateBookmarkMode(msg)
+		}
+
+		switch msg.String() {
 		case "q":
 			if m.view == ViewHelp {
 				m.view = ViewLog
@@ -224,10 +263,16 @@ func (m Model) View() string {
 		return "loading…"
 	}
 
-	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  d:describe  D:AI msg  u:undo  e:edit  n:new  a:abandon  ?:help  r:refresh  q:quit ")
+	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  d:describe  D:AI msg  b:bookmark  u:undo  e:edit  n:new  a:abandon  ?:help  r:refresh  q:quit ")
 
 	var statusBar string
-	if m.err != "" {
+	if m.bookmarkMode {
+		if m.bookmarkAction != "" {
+			statusBar = styleBookmarkMode.Width(m.width).Render(" [bookmark] " + m.bookmarkPrompt() + m.bookmarkInput + "\u2588")
+		} else {
+			statusBar = styleBookmarkHint.Width(m.width).Render(" [bookmark mode] c:create d:delete f:forget l:list m:move r:rename s:set t:track T:untrack  esc:cancel ")
+		}
+	} else if m.err != "" {
 		statusBar = styleError.Width(m.width).Render(" ✖ " + truncate(m.err, m.width-4))
 	} else if m.message != "" {
 		statusBar = styleMuted.Width(m.width).Render(" " + m.message)
@@ -329,6 +374,13 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		m.message = "creating new change…"
 		return m, m.newRev()
+	case "b":
+		m.bookmarkMode = true
+		m.bookmarkAction = ""
+		m.bookmarkInput = ""
+		m.err = ""
+		m.message = ""
+		return m, nil
 	case "u":
 		m.message = "undoing…"
 		return m, m.undoOp()
@@ -356,6 +408,127 @@ func (m Model) updateDiffPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.diffVP.GotoTop()
 	case "enter":
 		m.diffOpen = false
+	}
+	return m, nil
+}
+
+// ── Bookmark Mode ───────────────────────────────────────────────────────────
+
+// updateBookmarkMode handles keys when bookmark mode is active.
+func (m Model) updateBookmarkMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// If collecting input for a bookmark action.
+	if m.bookmarkAction != "" {
+		switch msg.String() {
+		case "escape":
+			m.bookmarkAction = ""
+			m.bookmarkInput = ""
+			return m, nil
+		case "enter":
+			return m.executeBookmarkAction()
+		case "backspace":
+			if len(m.bookmarkInput) > 0 {
+				m.bookmarkInput = m.bookmarkInput[:len(m.bookmarkInput)-1]
+			}
+			return m, nil
+		default:
+			// Append printable characters.
+			ch := msg.String()
+			if len(ch) == 1 && ch[0] >= 32 && ch[0] < 127 {
+				m.bookmarkInput += ch
+			}
+			return m, nil
+		}
+	}
+
+	// Bookmark mode menu — waiting for subcommand key.
+	switch msg.String() {
+	case "escape", "q":
+		m.bookmarkMode = false
+		return m, nil
+	case "c", "d", "f", "m", "r", "s", "t":
+		m.bookmarkAction = msg.String()
+		m.bookmarkInput = ""
+		return m, nil
+	case "T":
+		m.bookmarkAction = "T"
+		m.bookmarkInput = ""
+		return m, nil
+	case "l":
+		return m, m.loadBookmarkList()
+	}
+	return m, nil
+}
+
+// bookmarkPrompt returns the status bar prompt for the current bookmark action.
+func (m Model) bookmarkPrompt() string {
+	switch m.bookmarkAction {
+	case "c":
+		return "create: "
+	case "d":
+		return "delete: "
+	case "f":
+		return "forget: "
+	case "m":
+		return "move to " + m.selectedRev() + ": "
+	case "r":
+		return "rename (old new): "
+	case "s":
+		return "set to " + m.selectedRev() + ": "
+	case "t":
+		return "track: "
+	case "T":
+		return "untrack: "
+	default:
+		return "bookmark: "
+	}
+}
+
+// selectedRev returns the change ID of the cursor-selected commit, or "".
+func (m Model) selectedRev() string {
+	if len(m.logEntries) > 0 && m.cursor < len(m.logEntries) {
+		return m.logEntries[m.cursor].ChangeID
+	}
+	return ""
+}
+
+// executeBookmarkAction runs the bookmark command after input is submitted.
+func (m Model) executeBookmarkAction() (tea.Model, tea.Cmd) {
+	action := m.bookmarkAction
+	input := m.bookmarkInput
+
+	m.bookmarkAction = ""
+	m.bookmarkInput = ""
+	m.bookmarkMode = false
+
+	if input == "" {
+		m.err = "bookmark name required"
+		return m, nil
+	}
+
+	rev := m.selectedRev()
+
+	switch action {
+	case "c":
+		return m, m.bookmarkCreateCmd(input, rev)
+	case "d":
+		return m, m.bookmarkDeleteCmd(input)
+	case "f":
+		return m, m.bookmarkForgetCmd(input)
+	case "m":
+		return m, m.bookmarkMoveCmd(input, rev)
+	case "r":
+		parts := strings.SplitN(input, " ", 2)
+		if len(parts) < 2 || parts[1] == "" {
+			m.err = "rename requires: <old> <new>"
+			return m, nil
+		}
+		return m, m.bookmarkRenameCmd(parts[0], parts[1])
+	case "s":
+		return m, m.bookmarkSetCmd(input, rev)
+	case "t":
+		return m, m.bookmarkTrackCmd(input)
+	case "T":
+		return m, m.bookmarkUntrackCmd(input)
 	}
 	return m, nil
 }
@@ -634,6 +807,7 @@ func (m Model) viewHelp(contentHeight int) string {
 		{"  e", "jj edit (checkout commit)"},
 		{"  n", "jj new (create change)"},
 		{"  a", "jj abandon (remove commit)"},
+		{"  b", "bookmark mode"},
 		{"  u", "jj undo"},
 		{"", ""},
 		{"Diff Panel", ""},
@@ -641,6 +815,18 @@ func (m Model) viewHelp(contentHeight int) string {
 		{"  pgup/b, pgdn/f", "half-page scroll"},
 		{"  g / G", "top / bottom"},
 		{"  enter/q", "close diff"},
+		{"", ""},
+		{"Bookmark Mode", ""},
+		{"  c", "create bookmark"},
+		{"  d", "delete bookmark"},
+		{"  f", "forget bookmark"},
+		{"  l", "list bookmarks"},
+		{"  m", "move bookmark"},
+		{"  r", "rename bookmark"},
+		{"  s", "set bookmark"},
+		{"  t", "track bookmark"},
+		{"  T", "untrack bookmark"},
+		{"  esc", "cancel / exit"},
 	}
 
 	var b strings.Builder
@@ -799,6 +985,90 @@ func (m Model) aiDescribe(rev string) tea.Cmd {
 		}
 
 		return aiDescribeDoneMsg{rev: rev, message: msg}
+	}
+}
+
+// ── Bookmark Commands ───────────────────────────────────────────────────────
+
+func (m Model) loadBookmarkList() tea.Cmd {
+	return func() tea.Msg {
+		out, err := m.runner.BookmarkList(context.Background())
+		if err != nil {
+			return errMsg{err}
+		}
+		return bookmarkListMsg{content: out}
+	}
+}
+
+func (m Model) bookmarkCreateCmd(name, rev string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runner.BookmarkCreate(context.Background(), name, rev); err != nil {
+			return errMsg{err}
+		}
+		return bookmarkDoneMsg{action: "created", name: name}
+	}
+}
+
+func (m Model) bookmarkDeleteCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runner.BookmarkDelete(context.Background(), name); err != nil {
+			return errMsg{err}
+		}
+		return bookmarkDoneMsg{action: "deleted", name: name}
+	}
+}
+
+func (m Model) bookmarkForgetCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runner.BookmarkForget(context.Background(), name); err != nil {
+			return errMsg{err}
+		}
+		return bookmarkDoneMsg{action: "forgot", name: name}
+	}
+}
+
+func (m Model) bookmarkMoveCmd(name, rev string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runner.BookmarkMove(context.Background(), name, rev); err != nil {
+			return errMsg{err}
+		}
+		return bookmarkDoneMsg{action: "moved", name: name}
+	}
+}
+
+func (m Model) bookmarkRenameCmd(oldName, newName string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runner.BookmarkRename(context.Background(), oldName, newName); err != nil {
+			return errMsg{err}
+		}
+		return bookmarkDoneMsg{action: "renamed", name: oldName + " → " + newName}
+	}
+}
+
+func (m Model) bookmarkSetCmd(name, rev string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runner.BookmarkSet(context.Background(), name, rev); err != nil {
+			return errMsg{err}
+		}
+		return bookmarkDoneMsg{action: "set", name: name}
+	}
+}
+
+func (m Model) bookmarkTrackCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runner.BookmarkTrack(context.Background(), name); err != nil {
+			return errMsg{err}
+		}
+		return bookmarkDoneMsg{action: "tracked", name: name}
+	}
+}
+
+func (m Model) bookmarkUntrackCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runner.BookmarkUntrack(context.Background(), name); err != nil {
+			return errMsg{err}
+		}
+		return bookmarkDoneMsg{action: "untracked", name: name}
 	}
 }
 

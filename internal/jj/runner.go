@@ -273,6 +273,16 @@ func (r *Runner) Squash(ctx context.Context, rev string) error {
 	return err
 }
 
+// BookmarkCreate creates a new bookmark at the given revision.
+func (r *Runner) BookmarkCreate(ctx context.Context, name, rev string) error {
+	args := []string{"bookmark", "create", name}
+	if rev != "" {
+		args = append(args, "-r", rev)
+	}
+	_, err := r.run(ctx, args...)
+	return err
+}
+
 // BookmarkSet creates or moves a bookmark.
 func (r *Runner) BookmarkSet(ctx context.Context, name, rev string) error {
 	args := []string{"bookmark", "set", name}
@@ -286,6 +296,45 @@ func (r *Runner) BookmarkSet(ctx context.Context, name, rev string) error {
 // BookmarkDelete deletes a bookmark.
 func (r *Runner) BookmarkDelete(ctx context.Context, name string) error {
 	_, err := r.run(ctx, "bookmark", "delete", name)
+	return err
+}
+
+// BookmarkForget forgets a bookmark without marking it for deletion.
+func (r *Runner) BookmarkForget(ctx context.Context, name string) error {
+	_, err := r.run(ctx, "bookmark", "forget", name)
+	return err
+}
+
+// BookmarkList lists all bookmarks.
+func (r *Runner) BookmarkList(ctx context.Context) (string, error) {
+	return r.run(ctx, "bookmark", "list")
+}
+
+// BookmarkMove moves a bookmark to a target revision.
+func (r *Runner) BookmarkMove(ctx context.Context, name, rev string) error {
+	args := []string{"bookmark", "move", name}
+	if rev != "" {
+		args = append(args, "--to", rev)
+	}
+	_, err := r.run(ctx, args...)
+	return err
+}
+
+// BookmarkRename renames a bookmark.
+func (r *Runner) BookmarkRename(ctx context.Context, oldName, newName string) error {
+	_, err := r.run(ctx, "bookmark", "rename", oldName, newName)
+	return err
+}
+
+// BookmarkTrack starts tracking a remote bookmark.
+func (r *Runner) BookmarkTrack(ctx context.Context, name string) error {
+	_, err := r.run(ctx, "bookmark", "track", name)
+	return err
+}
+
+// BookmarkUntrack stops tracking a remote bookmark.
+func (r *Runner) BookmarkUntrack(ctx context.Context, name string) error {
+	_, err := r.run(ctx, "bookmark", "untrack", name)
 	return err
 }
 
