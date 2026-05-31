@@ -16,8 +16,10 @@ var (
 	colorWhite      = lipgloss.Color("252")
 
 	// Commit list styles.
-	styleChangeID    = lipgloss.NewStyle().Foreground(colorPurple).Bold(true)
-	styleCommitID    = lipgloss.NewStyle().Foreground(colorGray)
+	styleChangeID       = lipgloss.NewStyle().Foreground(colorPurple).Bold(true)
+	styleChangeIDPrefix = lipgloss.NewStyle().Foreground(colorYellow).Bold(true)
+	styleCommitID       = lipgloss.NewStyle().Foreground(colorGray)
+	styleCommitIDPrefix = lipgloss.NewStyle().Foreground(colorPurple).Bold(true)
 	styleSubject     = lipgloss.NewStyle().Foreground(colorWhite)
 	styleAuthor      = lipgloss.NewStyle().Foreground(colorBlue)
 	styleDate        = lipgloss.NewStyle().Foreground(colorGray)

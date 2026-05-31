@@ -224,7 +224,7 @@ func (m Model) View() string {
 		return "loading…"
 	}
 
-	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  d:describe  D:AI msg  ↑↓+D:multi  e:edit  n:new  a:abandon  ?:help  r:refresh  q:quit ")
+	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  d:describe  D:AI msg  u:undo  e:edit  n:new  a:abandon  ?:help  r:refresh  q:quit ")
 
 	var statusBar string
 	if m.err != "" {
@@ -329,6 +329,9 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		m.message = "creating new change…"
 		return m, m.newRev()
+	case "u":
+		m.message = "undoing…"
+		return m, m.undoOp()
 	case "G":
 		m.cursor = len(m.logEntries) - 1
 	case "g":
@@ -428,9 +431,12 @@ func (m Model) viewLog(contentHeight int) string {
 		e := m.logEntries[i]
 
 		// Edge lines from graph branching (attached to this commit from parsing).
-		for _, edge := range e.EdgeLines {
-			b.WriteString(styleGraph.Render(edge))
-			b.WriteString("\n")
+		// Skip for the last visible commit — those are trailing edges rendered after.
+		if i < end-1 {
+			for _, edge := range e.EdgeLines {
+				b.WriteString(styleGraph.Render(edge))
+				b.WriteString("\n")
+			}
 		}
 
 		// Style the node character in the header graph prefix.
@@ -445,13 +451,19 @@ func (m Model) viewLog(contentHeight int) string {
 			bookmarkStr = " " + strings.Join(bms, " ")
 		}
 
+		// Render change ID with highlighted unique prefix.
+		changeIDStr := renderIDWithPrefix(e.ChangeID, e.ChangeIDPrefixLen, styleChangeIDPrefix, styleChangeID)
+
+		// Render commit ID with highlighted unique prefix.
+		commitIDStr := renderIDWithPrefix(e.CommitID, e.CommitIDPrefixLen, styleCommitIDPrefix, styleCommitID)
+
 		// Line 1: graph_prefix + change_id author date commit_id bookmarks
 		header := fmt.Sprintf("%s%s %s %s %s%s",
 			headerPrefix,
-			styleChangeID.Render(e.ChangeID),
+			changeIDStr,
 			styleAuthor.Render(e.Authors),
 			styleDate.Render(e.Date),
-			styleCommitID.Render(e.CommitID),
+			commitIDStr,
 			bookmarkStr,
 		)
 
@@ -484,6 +496,14 @@ func (m Model) viewLog(contentHeight int) string {
 		b.WriteString("\n")
 		b.WriteString(body)
 		b.WriteString("\n")
+
+		// Render trailing edge lines after the last visible commit.
+		if i == end-1 {
+			for _, edge := range e.EdgeLines {
+				b.WriteString(styleGraph.Render(edge))
+				b.WriteString("\n")
+			}
+		}
 	}
 
 	return b.String()
@@ -614,6 +634,7 @@ func (m Model) viewHelp(contentHeight int) string {
 		{"  e", "jj edit (checkout commit)"},
 		{"  n", "jj new (create change)"},
 		{"  a", "jj abandon (remove commit)"},
+		{"  u", "jj undo"},
 		{"", ""},
 		{"Diff Panel", ""},
 		{"  ↑/k, ↓/j", "scroll diff"},
@@ -736,6 +757,19 @@ func (m Model) newRev() tea.Cmd {
 	}
 }
 
+func (m Model) undoOp() tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runner.Undo(context.Background()); err != nil {
+			return errMsg{err}
+		}
+		entries, err := m.runner.Log(context.Background(), "", 50)
+		if err != nil {
+			return errMsg{err}
+		}
+		return logLoadedMsg{entries}
+	}
+}
+
 func (m Model) refresh() tea.Cmd {
 	return tea.Batch(m.loadLog(), m.loadStatus())
 }
@@ -778,6 +812,15 @@ func truncate(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "…"
+}
+
+// renderIDWithPrefix renders an ID string with the unique prefix portion
+// highlighted in a distinct style (for keyboard shortcut visibility).
+func renderIDWithPrefix(id string, prefixLen int, prefixStyle, restStyle lipgloss.Style) string {
+	if prefixLen <= 0 || prefixLen >= len(id) {
+		return restStyle.Render(id)
+	}
+	return prefixStyle.Render(id[:prefixLen]) + restStyle.Render(id[prefixLen:])
 }
 
 func padToHeight(s string, h int) string {

@@ -39,6 +39,10 @@ type LogEntry struct {
 	IsWorkingCopy bool
 	IsImmutable   bool
 
+	// Shortest unique prefix lengths for shortcut highlighting.
+	ChangeIDPrefixLen int
+	CommitIDPrefixLen int
+
 	// Graph rendering (from jj's graph output).
 	// HeaderPrefix is the graph prefix for the metadata line (e.g. "│ ○  ").
 	// The node character is always the last @ or ○ in this prefix.
@@ -52,7 +56,7 @@ type LogEntry struct {
 // Two-line template with \x01 marker to separate graph prefix from data.
 // Line 1: \x01 + pipe-delimited metadata
 // Line 2: \x01 + subject
-const logTemplate = `"\x01" ++ change_id.short() ++ "|" ++ commit_id.short() ++ "|" ++ author.name() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"`
+const logTemplate = `"\x01" ++ change_id.short() ++ "|" ++ change_id.shortest() ++ "|" ++ commit_id.short() ++ "|" ++ commit_id.shortest() ++ "|" ++ author.email() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"`
 
 // Log returns the revlog parsed into entries with graph info.
 func (r *Runner) Log(ctx context.Context, revset string, limit int) ([]LogEntry, error) {
@@ -115,9 +119,9 @@ func parseLog(raw string) []LogEntry {
 			continue
 		}
 
-		// Header line — parse pipe-delimited fields (7 fields, no subject).
-		fields := strings.SplitN(p.data, "|", 7)
-		if len(fields) < 7 {
+		// Header line — parse pipe-delimited fields (9 fields, no subject).
+		fields := strings.SplitN(p.data, "|", 9)
+		if len(fields) < 9 {
 			i++
 			continue
 		}
@@ -129,19 +133,25 @@ func parseLog(raw string) []LogEntry {
 		pendingEdges = nil
 
 		var bms []string
-		if fields[6] != "" {
-			bms = strings.Split(fields[6], ",")
+		if fields[8] != "" {
+			bms = strings.Split(fields[8], ",")
 		}
 
+		// shortest() returns the prefix string itself (e.g. "w"), not a number.
+		changeIDPrefixLen := len(fields[1])
+		commitIDPrefixLen := len(fields[3])
+
 		entry := LogEntry{
-			HeaderPrefix:  p.prefix,
-			ChangeID:      fields[0],
-			CommitID:      fields[1],
-			Authors:       fields[2],
-			Date:          fields[3],
-			IsWorkingCopy: fields[4] == "Y",
-			IsImmutable:   fields[5] == "Y",
-			Bookmarks:     bms,
+			HeaderPrefix:      p.prefix,
+			ChangeID:          fields[0],
+			ChangeIDPrefixLen: changeIDPrefixLen,
+			CommitID:          fields[2],
+			CommitIDPrefixLen: commitIDPrefixLen,
+			Authors:           fields[4],
+			Date:              fields[5],
+			IsWorkingCopy:     fields[6] == "Y",
+			IsImmutable:       fields[7] == "Y",
+			Bookmarks:         bms,
 		}
 
 		// Next line should be the body (subject).
@@ -276,5 +286,11 @@ func (r *Runner) BookmarkSet(ctx context.Context, name, rev string) error {
 // BookmarkDelete deletes a bookmark.
 func (r *Runner) BookmarkDelete(ctx context.Context, name string) error {
 	_, err := r.run(ctx, "bookmark", "delete", name)
+	return err
+}
+
+// Undo undoes the most recent operation.
+func (r *Runner) Undo(ctx context.Context) error {
+	_, err := r.run(ctx, "undo")
 	return err
 }
