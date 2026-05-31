@@ -220,7 +220,7 @@ func (m Model) View() string {
 		return "loading…"
 	}
 
-	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  d:describe  D:AI msg  ↑↓+D:multi  e:edit  n:new  ?:help  r:refresh  q:quit ")
+	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  d:describe  D:AI msg  ↑↓+D:multi  e:edit  n:new  a:abandon  ?:help  r:refresh  q:quit ")
 
 	var statusBar string
 	if m.err != "" {
@@ -311,6 +311,16 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			entry := m.logEntries[m.cursor]
 			m.message = "editing " + entry.ChangeID + "…"
 			return m, m.editRev(entry.ChangeID)
+		}
+	case "a":
+		if len(m.logEntries) > 0 && m.cursor < len(m.logEntries) {
+			entry := m.logEntries[m.cursor]
+			if entry.IsWorkingCopy {
+				m.err = "cannot abandon the working copy"
+				return m, nil
+			}
+			m.message = "abandoning " + entry.ChangeID + "…"
+			return m, m.abandonRev(entry.ChangeID)
 		}
 	case "n":
 		m.message = "creating new change…"
@@ -599,6 +609,7 @@ func (m Model) viewHelp(contentHeight int) string {
 		{"  D", "AI generate commit msg (multi)",},
 		{"  e", "jj edit (checkout commit)"},
 		{"  n", "jj new (create change)"},
+		{"  a", "jj abandon (remove commit)"},
 		{"", ""},
 		{"Diff Panel", ""},
 		{"  ↑/k, ↓/j", "scroll diff"},
@@ -685,6 +696,19 @@ func (m Model) describeRev(rev string) tea.Cmd {
 func (m Model) editRev(rev string) tea.Cmd {
 	return func() tea.Msg {
 		if err := m.runner.Edit(context.Background(), rev); err != nil {
+			return errMsg{err}
+		}
+		entries, err := m.runner.Log(context.Background(), "", 50)
+		if err != nil {
+			return errMsg{err}
+		}
+		return logLoadedMsg{entries}
+	}
+}
+
+func (m Model) abandonRev(rev string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runner.Abandon(context.Background(), rev); err != nil {
 			return errMsg{err}
 		}
 		entries, err := m.runner.Log(context.Background(), "", 50)
