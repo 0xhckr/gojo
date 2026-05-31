@@ -280,7 +280,7 @@ func (m Model) View() string {
 		return "loading…"
 	}
 
-	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  d:describe  D:AI msg  b:bookmark  g:git  u:undo  e:edit  n:new  a:abandon  ?:help  r:refresh  q:quit ")
+	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  d:describe  shift+d:generate desc  b:bookmark  g:git  u:undo  e:edit  n:new  a:abandon  ?:help  r:refresh  q:quit ")
 
 	var statusBar string
 	if m.bookmarkMode {
@@ -890,11 +890,17 @@ func (m Model) viewHelp(contentHeight int) string {
 
 	for _, h := range help {
 		if h.desc == "" && h.key != "" {
-			b.WriteString(styleChangeID.Render("\n " + h.key + "\n"))
+			b.WriteString("\n")
+			b.WriteString(" " + styleChangeID.Render(h.key) + "\n")
 		} else if h.key == "" {
 			b.WriteString("\n")
 		} else {
-			b.WriteString(fmt.Sprintf("  %-16s %s\n", styleCommitID.Render(h.key), h.desc))
+			styledKey := styleCommitID.Render(h.key)
+			pad := 16 - lipgloss.Width(styledKey)
+			if pad < 0 {
+				pad = 0
+			}
+			b.WriteString(fmt.Sprintf("  %s%s %s\n", styledKey, strings.Repeat(" ", pad), h.desc))
 		}
 	}
 
