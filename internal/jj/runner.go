@@ -220,13 +220,18 @@ func parseStatus(raw string) []StatusEntry {
 	return entries
 }
 
-// Diff returns the diff output for a given revision.
+// Diff returns the raw unified diff output for a given revision.
 func (r *Runner) Diff(ctx context.Context, rev string) (string, error) {
-	args := []string{"diff", "--color", "always"}
+	args := []string{"diff", "--color", "never"}
 	if rev != "" {
 		args = append(args, "-r", rev)
 	}
 	return r.run(ctx, args...)
+}
+
+// FileShow returns the contents of a file at a given revision.
+func (r *Runner) FileShow(ctx context.Context, rev, path string) (string, error) {
+	return r.run(ctx, "file", "show", "-r", rev, path)
 }
 
 // Describe updates the description of a revision.

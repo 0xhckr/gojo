@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/0xhckr/gojo/internal/ai"
+	"github.com/0xhckr/gojo/internal/diff"
 	"github.com/0xhckr/gojo/internal/jj"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -101,6 +102,7 @@ type aiDescribeErrorMsg struct {
 	rev string
 	err error
 }
+
 
 func NewModel(runner *jj.Runner, aiClient *ai.Client) Model {
 	return Model{
@@ -199,6 +201,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err.Error()
 		m.message = ""
 		return m, nil
+
 
 	case tea.FocusMsg:
 		m.message = "refreshing…"
@@ -941,11 +944,34 @@ func (m Model) loadRevStatus(rev string) tea.Cmd {
 
 func (m Model) loadDiff(rev string) tea.Cmd {
 	return func() tea.Msg {
-		content, err := m.runner.Diff(context.Background(), rev)
+		// Get the list of changed files.
+		entries, err := m.runner.DiffSummary(context.Background(), rev)
 		if err != nil {
 			return errMsg{err}
 		}
-		return diffLoadedMsg{content}
+		if len(entries) == 0 {
+			return diffLoadedMsg{content: ""}
+		}
+
+		// For each changed file, get before/after content and compute diff.
+		var files []diff.FileDiff
+		for _, e := range entries {
+			after, err := m.runner.FileShow(context.Background(), rev, e.Path)
+			if err != nil {
+				// File may not exist in this revision (deleted).
+				after = ""
+			}
+			// Get parent content.
+			before, err := m.runner.FileShow(context.Background(), rev+"-", e.Path)
+			if err != nil {
+				// File may not exist in parent (added).
+					before = ""
+				}
+			files = append(files, diff.ComputeFile(e.Path, before, after))
+		}
+
+		content := diff.RenderFiles(files, m.width)
+		return diffLoadedMsg{content: content}
 	}
 }
 
