@@ -343,3 +343,15 @@ func (r *Runner) Undo(ctx context.Context) error {
 	_, err := r.run(ctx, "undo")
 	return err
 }
+
+// GitFetch fetches from the default Git remote.
+func (r *Runner) GitFetch(ctx context.Context) error {
+	_, err := r.run(ctx, "git", "fetch")
+	return err
+}
+
+// GitPush pushes to the default Git remote.
+func (r *Runner) GitPush(ctx context.Context) error {
+	_, err := r.run(ctx, "git", "push")
+	return err
+}

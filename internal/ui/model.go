@@ -65,6 +65,10 @@ type Model struct {
 	bookmarkAction string // current subcommand key (c/d/f/m/r/s/t/T)
 	bookmarkInput  string // accumulated text input
 
+	// Git mode state.
+	gitMode   bool   // true when in git mode
+	gitAction string // current subcommand key (f/p)
+
 	// AI describe state.
 	aiSpinnerFrame int
 	aiLoading      map[string]bool // set of revs currently being AI-described
@@ -85,6 +89,7 @@ type bookmarkDoneMsg struct {
 	name   string
 }
 type bookmarkListMsg struct{ content string }
+type gitDoneMsg struct{ action string }
 
 // AI describe messages.
 type aiDescribeTickMsg struct{}
@@ -178,6 +183,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = ""
 		return m, nil
 
+	case gitDoneMsg:
+		m.message = fmt.Sprintf("git %s done", msg.action)
+		m.err = ""
+		m.gitMode = false
+		m.gitAction = ""
+		return m, m.refresh()
+
 	case editorDoneMsg:
 		m.message = "described " + msg.rev
 		m.err = ""
@@ -226,6 +238,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateBookmarkMode(msg)
 		}
 
+		// Git mode intercepts all keys except ctrl+c.
+		if m.gitMode {
+			return m.updateGitMode(msg)
+		}
+
 		switch msg.String() {
 		case "q":
 			if m.view == ViewHelp {
@@ -263,7 +280,7 @@ func (m Model) View() string {
 		return "loading…"
 	}
 
-	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  d:describe  D:AI msg  b:bookmark  u:undo  e:edit  n:new  a:abandon  ?:help  r:refresh  q:quit ")
+	helpBar := styleHelpBar.Width(m.width).Render(" enter:diff  d:describe  D:AI msg  b:bookmark  g:git  u:undo  e:edit  n:new  a:abandon  ?:help  r:refresh  q:quit ")
 
 	var statusBar string
 	if m.bookmarkMode {
@@ -272,6 +289,8 @@ func (m Model) View() string {
 		} else {
 			statusBar = styleBookmarkHint.Width(m.width).Render(" [bookmark mode] c:create d:delete f:forget l:list m:move r:rename s:set t:track T:untrack  esc:cancel ")
 		}
+	} else if m.gitMode {
+		statusBar = styleGitHint.Width(m.width).Render(" [git mode] f:fetch p:push  esc:cancel ")
 	} else if m.err != "" {
 		statusBar = styleError.Width(m.width).Render(" ✖ " + truncate(m.err, m.width-4))
 	} else if m.message != "" {
@@ -386,8 +405,14 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.undoOp()
 	case "G":
 		m.cursor = len(m.logEntries) - 1
-	case "g":
+	case "Home":
 		m.cursor = 0
+	case "g":
+		m.gitMode = true
+		m.gitAction = ""
+		m.err = ""
+		m.message = ""
+		return m, nil
 	}
 	return m, nil
 }
@@ -529,6 +554,29 @@ func (m Model) executeBookmarkAction() (tea.Model, tea.Cmd) {
 		return m, m.bookmarkTrackCmd(input)
 	case "T":
 		return m, m.bookmarkUntrackCmd(input)
+	}
+	return m, nil
+}
+
+// ── Git Mode ─────────────────────────────────────────────────────────────────
+
+// updateGitMode handles keys when git mode is active.
+func (m Model) updateGitMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "escape", "q":
+		m.gitMode = false
+		m.gitAction = ""
+		return m, nil
+	case "f":
+		m.gitMode = false
+		m.gitAction = ""
+		m.message = "fetching…"
+		return m, m.gitFetchCmd()
+	case "p":
+		m.gitMode = false
+		m.gitAction = ""
+		m.message = "pushing…"
+		return m, m.gitPushCmd()
 	}
 	return m, nil
 }
@@ -800,7 +848,8 @@ func (m Model) viewHelp(contentHeight int) string {
 		{"", ""},
 		{"Log View", ""},
 		{"  ↑/k, ↓/j", "navigate commits"},
-		{"  g / G", "first / last commit"},
+		{"  G", "last commit"},
+		{"  Home", "first commit"},
 		{"  enter", "open diff panel"},
 		{"  d", "jj describe ($EDITOR)"},
 		{"  D", "AI generate commit msg (multi)",},
@@ -808,6 +857,7 @@ func (m Model) viewHelp(contentHeight int) string {
 		{"  n", "jj new (create change)"},
 		{"  a", "jj abandon (remove commit)"},
 		{"  b", "bookmark mode"},
+		{"  g", "git mode"},
 		{"  u", "jj undo"},
 		{"", ""},
 		{"Diff Panel", ""},
@@ -826,6 +876,11 @@ func (m Model) viewHelp(contentHeight int) string {
 		{"  s", "set bookmark"},
 		{"  t", "track bookmark"},
 		{"  T", "untrack bookmark"},
+		{"  esc", "cancel / exit"},
+		{"", ""},
+		{"Git Mode", ""},
+		{"  f", "git fetch"},
+		{"  p", "git push"},
 		{"  esc", "cancel / exit"},
 	}
 
@@ -1069,6 +1124,26 @@ func (m Model) bookmarkUntrackCmd(name string) tea.Cmd {
 			return errMsg{err}
 		}
 		return bookmarkDoneMsg{action: "untracked", name: name}
+	}
+}
+
+// ── Git Commands ─────────────────────────────────────────────────────────────
+
+func (m Model) gitFetchCmd() tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runner.GitFetch(context.Background()); err != nil {
+			return errMsg{err}
+		}
+		return gitDoneMsg{action: "fetch"}
+	}
+}
+
+func (m Model) gitPushCmd() tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runner.GitPush(context.Background()); err != nil {
+			return errMsg{err}
+		}
+		return gitDoneMsg{action: "push"}
 	}
 }
 

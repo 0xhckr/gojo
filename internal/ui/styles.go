@@ -56,4 +56,10 @@ var (
 	styleGraph        = lipgloss.NewStyle().Foreground(colorDarkGray)
 	styleBookmarkMode = lipgloss.NewStyle().Foreground(colorWhite).Background(colorCyan).Bold(true)
 	styleBookmarkHint = lipgloss.NewStyle().Foreground(colorCyan).Background(colorDarkerGray)
+
+	colorOrange     = lipgloss.Color("215")
+	colorDarkOrange = lipgloss.Color("166")
+
+	styleGitMode = lipgloss.NewStyle().Foreground(colorWhite).Background(colorDarkOrange).Bold(true)
+	styleGitHint = lipgloss.NewStyle().Foreground(colorDarkOrange).Background(colorDarkerGray)
 )
