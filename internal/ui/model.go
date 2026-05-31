@@ -97,7 +97,7 @@ func NewModel(runner *jj.Runner, aiClient *ai.Client) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.loadLog(), m.loadStatus())
+	return tea.Batch(m.loadLog(), m.loadStatus(), tea.EnableReportFocus)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -156,6 +156,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err.Error()
 		m.message = ""
 		return m, nil
+
+	case tea.FocusMsg:
+		m.message = "refreshing…"
+		return m, m.refresh()
 
 	// ── AI describe messages ──
 	case aiDescribeTickMsg:
