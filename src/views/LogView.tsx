@@ -146,16 +146,16 @@ export function LogView({ width, height, entries, cursor, offset, onOffsetChange
 
 	// ── Render ─────────────────────────────────────────────────────────
 	return (
-		<box width={width} height={height} flexDirection="column" style={{ backgroundColor: colors.darkerGray }}>
+		<box width={width} height={height} flexDirection="column">
 			{/* Top padding */}
-			<box height={1} style={{ backgroundColor: colors.darkerGray }} />
+			<box height={1} />
 			{/* Lines */}
 			{lines.map((line, idx) => (
 				<box
 					key={idx}
 					height={1}
 					width={width}
-					style={line.highlighted ? { backgroundColor: colors.darkPurple } : { backgroundColor: colors.darkerGray }}
+					style={line.highlighted ? { backgroundColor: colors.darkPurple } : undefined}
 				>
 					<text content={makeStyledText(line.chunks)} />
 				</box>

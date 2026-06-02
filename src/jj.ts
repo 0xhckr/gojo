@@ -100,10 +100,15 @@ export interface StatusEntry {
 }
 
 export class JJRunner {
+	private config: Config
+
 	constructor(
 		private jjPath: string,
 		private repoDir: string,
-	) {}
+		config?: Config,
+	) {
+		this.config = config ?? { jjPath, repoRoot: repoDir }
+	}
 
 	private async run(...args: string[]): Promise<string> {
 		try {
@@ -210,6 +215,48 @@ export class JJRunner {
 
 	async gitPush(): Promise<void> {
 		await this.run("git", "push")
+	}
+
+	async aiDescribe(rev: string): Promise<string> {
+		if (!this.config.openRouterApiKey) {
+			throw new Error("No OpenRouter API key configured. Add openrouter_api_key to ~/.config/gojo/gojo.toml")
+		}
+
+		const diffText = await this.diff(rev)
+		if (!diffText.trim()) {
+			throw new Error("No diff available for this commit")
+		}
+
+		const model = this.config.openRouterModel || "anthropic/claude-sonnet-4"
+		const prompt = this.config.commitPrompt
+			?? "Write a clear, concise commit message (subject line only, no body) for this diff. Reply with ONLY the commit message text, nothing else:\n\n"
+
+		const body = {
+			model,
+			messages: [{ role: "user", content: prompt + diffText }],
+			max_tokens: 200,
+		}
+
+		const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${this.config.openRouterApiKey}`,
+			},
+			body: JSON.stringify(body),
+		})
+
+		if (!resp.ok) {
+			const text = await resp.text()
+			throw new Error(`OpenRouter API error (${resp.status}): ${text.slice(0, 200)}`)
+		}
+
+		const data = await resp.json() as any
+		const message = data?.choices?.[0]?.message?.content?.trim()
+		if (!message) {
+			throw new Error("Empty response from AI")
+		}
+		return message
 	}
 }
 

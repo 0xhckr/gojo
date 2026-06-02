@@ -1,6 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import { type KeyEvent } from "@opentui/core"
 import { useKeyboard, useTerminalDimensions, useRenderer } from "@opentui/react"
+import type { CliRenderer } from "@opentui/core"
+
+// Module-level quit function, set during App init
+let quitFn: (() => void) | null = null
+export function quit() { quitFn?.() }
 import { JJRunner, type LogEntry, type StatusEntry, loadConfig } from "./jj.js"
 import { colors, spinnerFrames } from "./styles.js"
 import { useSpinner } from "./hooks.js"
@@ -17,7 +22,13 @@ export type BookmarkSubcmd = "c" | "d" | "f" | "m" | "r" | "s" | "t" | "T" | "l"
 
 export function App() {
 	const { width, height } = useTerminalDimensions()
-	const renderer = useRenderer()
+	const renderer = useRenderer() as CliRenderer
+
+	// Register clean quit handler
+	useEffect(() => {
+		quitFn = () => { renderer.destroy(); process.exit(0) }
+		return () => { quitFn = null }
+	}, [renderer])
 
 	// Boot jj runner
 	const runnerRef = useRef<JJRunner | null>(null)
@@ -27,7 +38,7 @@ export function App() {
 	useEffect(() => {
 		loadConfig()
 			.then((cfg) => {
-				runnerRef.current = new JJRunner(cfg.jjPath, cfg.repoRoot)
+				runnerRef.current = new JJRunner(cfg.jjPath, cfg.repoRoot, cfg)
 				setReady(true)
 			})
 			.catch((err: unknown) => setBootError(err instanceof Error ? err.message : String(err)))
@@ -125,15 +136,53 @@ export function App() {
 	)
 
 	const doDescribe = useCallback(
+		(entry: LogEntry) => {
+			if (!runnerRef.current) return
+
+			// Suspend the renderer so the terminal is restored for $EDITOR
+			renderer.suspend()
+
+			const child = import("node:child_process").then(({ spawn }) => {
+				const p = spawn("jj", ["describe", "-r", entry.changeId], {
+					stdio: "inherit",
+				})
+				return new Promise<number | null>((resolve) => {
+					p.on("exit", resolve)
+				})
+			})
+
+			child.then((code) => {
+				// Give the terminal a moment to settle after editor exits
+				setTimeout(() => {
+					renderer.resume()
+					setMessage("described " + entry.changeId)
+					loadLog()
+				}, 50)
+			})
+		},
+		[loadLog, renderer],
+	)
+
+	const doAiDescribe = useCallback(
 		async (entry: LogEntry) => {
 			if (!runnerRef.current) return
-			setMessage("opening editor…")
-			const { spawn } = await import("node:child_process")
-			const child = spawn("jj", ["describe", "-r", entry.changeId], { stdio: "inherit" })
-			child.on("exit", () => {
-				setMessage("described " + entry.changeId)
-				loadLog()
-			})
+			setAiLoading(prev => new Set(prev).add(entry.changeId))
+			setError(null)
+			setMessage("AI generating message for " + entry.changeId + "…")
+			try {
+				const msg = await runnerRef.current.aiDescribe(entry.changeId)
+				await runnerRef.current.describe(entry.changeId, msg)
+				setMessage("AI described " + entry.changeId + ": " + msg)
+				await loadLog()
+			} catch (err: unknown) {
+				setError(err instanceof Error ? err.message : String(err))
+			} finally {
+				setAiLoading(prev => {
+					const next = new Set(prev)
+					next.delete(entry.changeId)
+					return next
+				})
+			}
 		},
 		[loadLog],
 	)
@@ -275,7 +324,8 @@ export function App() {
 
 		// Global: ctrl+c always quits
 		if (key.ctrl && k === "c") {
-			process.exit(0)
+			quit()
+			return
 		}
 
 		// Bookmark mode input
@@ -329,7 +379,8 @@ export function App() {
 		if (k === "q") {
 			if (view === "help") { setView("log"); return }
 			if (diffOpen) { setDiffOpen(false); return }
-			process.exit(0)
+			quit()
+			return
 		}
 		if (k === "question" || (key.shift && k === "/")) {
 			if (diffOpen) { setDiffOpen(false); return }
@@ -360,7 +411,8 @@ export function App() {
 				return
 			}
 			if (key.shift && k === "d") {
-				setError("AI describe not yet implemented in TypeScript version")
+				const entry = selectedEntry()
+				if (entry) doAiDescribe(entry)
 				return
 			}
 			if (k === "e") {
@@ -395,7 +447,7 @@ export function App() {
 	// ── Layout ─────────────────────────────────────────────────────────
 	if (bootError) {
 		return (
-			<box width={width} height={height} style={{ backgroundColor: colors.darkerGray }}>
+			<box width={width} height={height}>
 				<text fg={colors.red} content={` error: ${bootError} `} />
 			</box>
 		)
@@ -403,7 +455,7 @@ export function App() {
 
 	if (!ready || (logEntries.length === 0 && !error)) {
 		return (
-			<box width={width} height={height} style={{ backgroundColor: colors.darkerGray }}>
+			<box width={width} height={height}>
 				<text fg={colors.gray} content=" loading…" />
 			</box>
 		)
@@ -443,9 +495,9 @@ export function App() {
 	const helpBarText = " enter:diff  d:describe  shift+d:AI desc  b:bookmark  g:git  u:undo  e:edit  n:new  a:abandon  ?:help  r:refresh  q:quit "
 
 	return (
-		<box width={width} height={height} flexDirection="column" style={{ backgroundColor: colors.darkerGray }}>
+		<box width={width} height={height} flexDirection="column">
 			{/* Content area */}
-			<box flexGrow={1} flexDirection="column" style={{ backgroundColor: colors.darkerGray }}>
+			<box flexGrow={1} flexDirection="column">
 				{view === "help" ? (
 					<HelpView width={width} />
 				) : diffOpen ? (

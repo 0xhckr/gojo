@@ -35,7 +35,7 @@ export function DiffPanel({ width, rev, loading, diffContent, statusEntries }: D
 	const content = lines.join("\n")
 
 	return (
-		<scrollbox width={width} flexGrow={1} scrollY={true} focused={true} style={{ backgroundColor: colors.darkerGray }}>
+		<scrollbox width={width} flexGrow={1} scrollY={true} focused={true}>
 			<text content={content} fg={colors.white} />
 		</scrollbox>
 	)

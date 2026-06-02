@@ -61,7 +61,7 @@ export function HelpView({ width }: HelpViewProps) {
 	}
 
 	return (
-		<scrollbox width={width} flexGrow={1} scrollY={true} style={{ backgroundColor: colors.darkerGray }}>
+		<scrollbox width={width} flexGrow={1} scrollY={true}>
 			<text content={lines.join("\n")} fg={colors.white} />
 		</scrollbox>
 	)
