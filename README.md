@@ -9,6 +9,11 @@ A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), w
 
 > ⚠️ **This project was developed using AI assistance.** It's been reviewed by a developer now and should be generally safe to use.
 
+<img width="1935" height="1231" alt="image" src="https://github.com/user-attachments/assets/659f1efb-373b-4f0a-aa74-555dfc7affc9" />
+<img width="1935" height="1231" alt="image" src="https://github.com/user-attachments/assets/7631d356-fffa-45d7-9c8e-2f282d000fa1" />
+<img width="1935" height="1231" alt="image" src="https://github.com/user-attachments/assets/930ffc83-a286-41ae-9b07-3a50516e8143" />
+
+
 ## Features
 
 - **Log view** — scrollable commit graph with change IDs, authors, dates, bookmarks, and working copy highlighting
