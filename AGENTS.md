@@ -2,28 +2,34 @@
 
 ## What
 
-gojo is a fullscreen TUI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), written in Go using [Charm's Bubble Tea](https://github.com/charmbracelet/bubbletea), [Lipgloss](https://github.com/charmbracelet/lipgloss), and [Bubbles](https://github.com/charmbracelet/bubbles).
+gojo is a fullscreen TUI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), built with [OpenTUI](https://github.com/nicetsai/opentui) and React, running on [Bun](https://bun.sh).
 
 ## Project Structure
 
 ```
-cmd/gojo/main.go        — entry point: loads config, starts Bubble Tea program
-internal/
-  config/config.go      — discovers jj binary and .jj repo root
-  jj/runner.go          — runs jj CLI commands (log, status, diff, edit, new, etc.)
-  ui/
-    styles.go           — lipgloss color palette and style definitions
-    model.go            — Bubble Tea model with 4 views
-flake.nix               — nix flake: dev shell + package build
-.envrc                  — direnv: `use flake`
-.gitignore              — .direnv/, result, compiled binary
+src/
+  main.tsx            — entry point: creates OpenTUI renderer, mounts React root
+  App.tsx             — main React component: view routing, keyboard handling, state management
+  jj.ts               — JJRunner class: runs jj CLI commands, parses output, loads config
+  styles.ts           — color palette, spinner frames, status symbols
+  hooks.ts            — custom React hooks (useAsync, useSpinner)
+  views/
+    LogView.tsx       — commit list view with graph rendering, cursor navigation
+    DiffPanel.tsx     — diff panel: status summary + scrollable diff content
+    HelpView.tsx      — keybinding reference view
+package.json          — dependencies: @opentui/core, @opentui/react, react
+tsconfig.json         — TypeScript config with JSX -> @opentui/react
+flake.nix             — nix flake: dev shell with bun, pnpm, nodejs, jujutsu
+.envrc                — direnv: `use flake`
 ```
 
 ## Nix / Dev Environment
 
-- **Go 1.26**, gopls, gotools, jujutsu (jj v0.41)
+- **Bun** (runtime — required for OpenTUI's native FFI)
+- **Node.js 24**, **pnpm** (package management)
+- **TypeScript** (type checking)
+- **jj v0.41** (jujutsu VCS)
 - `nix develop` drops you into the shell; direnv auto-loads it
-- `nix build` produces the `gojo` binary
 
 ### Critical: the jj package name
 
@@ -32,147 +38,138 @@ nixpkgs has two packages named `jj`:
 - `nixpkgs#jj` = [tidwall/jj](https://github.com/tidwall/jj) — a JSON stream editor (NOT what we want)
 - `nixpkgs#jujutsu` = [jj-vcs/jj](https://github.com/jj-vcs/jj) — the VCS (what we want)
 
-The flake uses `jujutsu` in `packages`. The user's `~/.nix-profile/bin/jj` is the VCS one (symlink to the jujutsu derivation). Always use the full path `/home/hackr/.nix-profile/bin/jj` or ensure the correct `jj` is first in PATH.
+The flake uses `jujutsu` in `packages`. Always use the full path `/home/hackr/.nix-profile/bin/jj` or ensure the correct `jj` is first in PATH.
 
-### Vendor hash
+## Running
 
-`vendorHash` in flake.nix must be updated whenever `go.mod` changes. To get the correct hash:
+```bash
+pnpm install    # install deps
+bun run src/main.tsx   # or: pnpm dev
+```
 
-1. Set `vendorHash = pkgs.lib.fakeHash;`
-2. Run `nix build 2>&1 | grep "got:"`
-3. Copy the `got:` sha256 into `vendorHash`
+OpenTUI requires Bun's FFI for its native Zig core. Node.js won't work.
 
 ## JJ Template Syntax
 
-The `jj log` command uses jj's own template language (NOT Go templates). Key syntax:
+The `jj log` command uses jj's own template language. Key syntax:
 
 - String concatenation: `++`
 - String literals: `"text"`
-- Newlines in output: `"\n"` (jj interprets this as a real newline)
-- Field access: `change_id.short(8)`, `commit_id.short(8)`, `author.name()`
+- Newlines in output: `"\n"`
+- Field access: `change_id.short(8)`, `commit_id.short(8)`, `author.email()`
 - Conditionals: `if(condition, "yes", "no")`
 - Joins: `bookmarks.join(",")`
 - Date formatting: `author.timestamp().local().format("%Y-%m-%d %H:%M")`
 
-### Current log template (pipe-delimited, one line per commit)
+### Current log template
 
 ```
-change_id.short(8) ++ "|" ++ commit_id.short(8) ++ "|" ++ author.name() ++ "|" ++
+change_id.short(8) ++ "|" ++ change_id.shortest() ++ "|" ++ commit_id.short(8) ++ "|" ++ commit_id.shortest() ++ "|" ++ author.email() ++ "|" ++
 author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++
-if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++
-bookmarks.join(",") ++ "|" ++ description.first_line() ++ "\n"
+if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"
 ```
 
-Fields (8 total, split on `|` with SplitN to preserve `|` in subjects):
-0: change_id | 1: commit_id | 2: author | 3: date | 4: working_copy (Y/N) | 5: immutable (Y/N) | 6: bookmarks (comma-separated) | 7: subject
+Fields (9 total, split on `|`):
+0: change_id | 1: change_id.shortest() | 2: commit_id | 3: commit_id.shortest() | 4: author | 5: date | 6: working_copy (Y/N) | 7: immutable (Y/N) | 8: bookmarks (comma-separated)
 
-### JJ status output format
-
-```
-Working copy changes:
-A file1
-M file2
-D file3
-Working copy  (@) : <change_id> <commit_id> (<description>)
-Parent commit (@-): ...
-```
-
-Parser skips lines starting with "Working copy" or "Parent commit". First char is status (A/M/D/C), rest is the path.
+Graph prefixes are separated by `\x01` marker bytes. Edge lines between commits have no marker.
 
 ## Architecture
+
+### OpenTUI React Components Used
+
+| Component | Usage |
+|-----------|-------|
+| `<box>` | Layout containers, status/help bars |
+| `<text>` | All text rendering (commits, status, help) |
+| `<scrollbox>` | Log view list, diff panel scrolling |
+
+### Hooks Used
+
+| Hook | Usage |
+|------|-------|
+| `useKeyboard` | All keyboard input handling |
+| `useTerminalDimensions` | Width/height for layout |
+| `useRenderer` | Access to the OpenTUI renderer |
 
 ### Views
 
 | View | Key | Description |
 |------|-----|-------------|
-| Log | `1` | Commit list, one line per commit. Cursor navigation with ↑/k ↓/j. |
-| Status | `2` | Working copy file changes (A/M/D/C). |
-| Diff | `enter`/`d` | Scrollable diff for selected commit using `viewport.Model`. |
+| Log | default | Commit list, one line per commit. Cursor navigation with ↑/k ↓/j. |
+| Diff | `enter` | Scrollable diff for selected commit using `<scrollbox>`. |
 | Help | `?` | Keybinding reference. |
 
 ### Layout (top to bottom)
 
-1. Content area — fills all available space, padded with blank lines via `padToHeight()`
-2. Status bar — error messages, status text, or current view name (full width, dark gray bg)
-3. Help bar — keybinding hints (full width, dark gray bg)
+1. Content area — fills all available space (flexGrow=1)
+2. Status bar — error messages, status text, or current view name (1 line, dark bg)
+3. Help bar — keybinding hints (1 line, dark gray bg)
 
-Content height = `terminal height - help bar height - status bar height`.
+Content height = `terminal height - 2` (status bar + help bar).
 
 ### Log view specifics
 
-- Top padding: one blank line at the top so the first commit isn't hidden behind chrome
-- Each commit = one line: `▸ @ changeID subject  author date commitID bookmarks`
-- `visibleEntries = contentHeight - 1` (accounting for the top padding line)
-
-## Known Lipgloss Pitfalls
-
-### ESC[0m resets background
-
-**The problem:** lipgloss `Style.Render()` wraps each styled segment with `ESC[<codes>m<text>ESC[0m`. The `ESC[0m` is a full reset — it clears ALL attributes including any background color set by a parent style. So wrapping pre-styled text with `Background(color).Inline(true).Render()` does NOT preserve the background between styled segments.
-
-**The fix:** `highlightLine()` in `model.go`:
-1. Prepend the background escape code: `\x1b[48;5;<color>m`
-2. After every `\x1b[0m` in the line, re-inject the background code
-3. Pad to full width with spaces
-4. Append a final `\x1b[0m` reset
-
-This ensures the background color persists behind every styled segment.
-
-### Width() on pre-styled text
-
-`lipgloss.NewStyle().Width(w).Render(alreadyStyledText)` strips inner ANSI codes (even with `Inline(true)` the inner styles' `ESC[0m` kills the outer bg). Always compose styles before rendering, or use the `highlightLine` approach.
-
-### No TTY = no colors
-
-lipgloss detects the terminal at startup. When running outside a TTY (e.g. in tests, pipes), it strips all ANSI codes. To force color output:
-
-```go
-import "github.com/muesli/termenv"
-lipgloss.SetColorProfile(termenv.TrueColor)
-```
+- Top padding: one blank line
+- Each commit = 2 lines + optional edge lines from jj's graph
+- Graph styling uses OpenTUI's `StyledText` API (`fg()`, `bold()`, `dim()` functions)
+- Cursor highlighting via `backgroundColor` on `<box>` wrapper
 
 ## Keybindings
 
 ### Global
-- `1` — log view
-- `2` — status view
 - `?` — help
 - `r` — refresh current view
 - `q` / `ctrl+c` — quit (or go back from diff/help)
 
 ### Log View
 - `↑`/`k`, `↓`/`j` — navigate commits
-- `g` — jump to first
-- `G` — jump to last
-- `enter`/`d` — show diff for selected commit
+- `Home` — jump to first
+- `G` (shift+g) — jump to last
+- `enter` — show diff for selected commit
+- `d` — `jj describe` (opens $EDITOR)
+- `D` (shift+d) — AI generate commit message (placeholder)
 - `e` — `jj edit` (set working copy to selected commit)
 - `n` — `jj new` (create new change)
+- `a` — `jj abandon` (remove commit)
+- `b` — bookmark mode
+- `g` — git mode
+- `u` — `jj undo`
 
-### Diff View
+### Diff Panel
 - `↑`/`k`, `↓`/`j` — scroll
-- `pgup`/`b`, `pgdn`/`f` — half-page scroll
-- `g`/`G` — scroll to top/bottom
-- `q` — back to log
+- `enter`/`q` — close
 
-## JJ Runner (internal/jj)
+### Bookmark Mode
+- `c` — create, `d` — delete, `f` — forget, `l` — list, `m` — move, `r` — rename, `s` — set, `t` — track, `T` — untrack
+- `esc` — cancel
 
-All jj operations go through `Runner.run(ctx, args...)` which executes `jj` with the given args in the repo directory using `exec.CommandContext`. Output is captured via `CombinedOutput`. Errors include the full jj stderr.
+### Git Mode
+- `f` — fetch, `p` — push
+- `esc` — cancel
 
-Available operations: Log, Status, Diff, Describe, New, Edit, Abandon, Squash, BookmarkSet, BookmarkDelete.
+## JJ Runner (src/jj.ts)
+
+All jj operations go through `JJRunner.run(args)` which executes `jj` with the given args in the repo directory using `child_process.execFile`. Output is captured via stdout. Errors include the full jj stderr.
+
+Available operations: log, status, diff, diffSummary, fileShow, describe, new, edit, abandon, undo, bookmarkCreate, bookmarkDelete, bookmarkForget, bookmarkList, bookmarkMove, bookmarkRename, bookmarkSet, bookmarkTrack, bookmarkUntrack, gitFetch, gitPush.
 
 ## Color Palette
 
-Defined in `internal/ui/styles.go`:
+Defined in `src/styles.ts`:
 
-| Name | 256-color | Usage |
-|------|-----------|-------|
-| colorPurple | 135 | Change IDs, titles |
-| colorDarkPurple | 91 | Selection background |
-| colorBlue | 69 | Author names, diff headers |
-| colorGreen | 78 | Bookmarks, "added" status |
-| colorRed | 167 | Errors, "removed" status |
-| colorYellow | 179 | Working copy, cursor |
-| colorGray | 245 | Dates, commit IDs, help text |
-| colorDarkGray | 238 | Help/status bar background |
-| colorDarkerGray | 235 | Status bar background |
-| colorWhite | 252 | Subjects, paths |
+| Name | Hex | Usage |
+|------|-----|-------|
+| purple | #af87ff | Change IDs |
+| darkPurple | #875faf | Selection background |
+| blue | #5f87af | Author names |
+| green | #5faf87 | Bookmarks |
+| red | #d75f5f | Errors |
+| yellow | #d7af5f | Working copy, cursor |
+| cyan | #5fafaf | Bookmark mode |
+| gray | #8a8a8a | Dates, commit IDs, help text |
+| darkGray | #444444 | Graph edges |
+| darkerGray | #262626 | Status bar background |
+| white | #d0d0d0 | Subjects |
+| orange | #ffaf5f | Git mode |
+| darkOrange | #d75f00 | Git mode hint |

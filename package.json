@@ -1,0 +1,22 @@
+{
+  "name": "gojo",
+  "version": "0.2.0",
+  "description": "A fullscreen TUI for jj (Jujutsu VCS)",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/main.tsx",
+    "build": "tsc",
+    "start": "bun run dist/main.js"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.3.1",
+    "@opentui/react": "^0.3.1",
+    "react": ">=19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  }
+}

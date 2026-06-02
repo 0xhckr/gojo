@@ -11,26 +11,18 @@
       forAllSystems = fn: nixpkgs.lib.genAttrs systems (system: fn nixpkgs.legacyPackages.${system});
     in
     {
-      packages = forAllSystems (pkgs: {
-        default = pkgs.buildGoModule {
-          pname = "gojo";
-          version = "0.1.0";
-          src = ./.;
-          vendorHash = "sha256-uQpo1nNFyWE/8NYq1goLN2DrAxalRmBD1b9KHAOCcUk=";
-        };
-      });
-
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = with pkgs; [
-            go
-            gopls
-            gotools
+            bun
+            nodejs_24
+            pnpm
+            typescript
             jujutsu
           ];
 
           shellHook = ''
-            echo "gojo dev shell – go $(go version | awk '{print $3}')"
+            echo "gojo dev shell – bun $(bun --version)"
           '';
         };
       });
