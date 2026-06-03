@@ -106,7 +106,7 @@ export function App() {
 		const seen = new Set<string>()
 		for (const entry of logEntries) {
 			for (const bm of entry.bookmarks) {
-				if (bm) seen.add(bm)
+				if (bm && !bm.includes("@")) seen.add(bm)
 			}
 			seen.add(entry.changeId)
 			seen.add(entry.commitId)

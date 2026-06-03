@@ -328,7 +328,7 @@ function parseLog(raw: string): LogEntry[] {
 		}
 		pendingEdges = []
 
-		const bookmarks = fields[8] ? fields[8].split(",") : []
+		const bookmarks = fields[8] ? fields[8].split(",").map(b => b.replace(/\*$/, "")) : []
 		const changeIdPrefixLen = fields[1].length
 		const commitIdPrefixLen = fields[3].length
 
