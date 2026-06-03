@@ -23,7 +23,6 @@ const SECTIONS: Section[] = [
 		color: colors.white,
 		bindings: [
 			{ key: "?", desc: "this help" },
-			{ key: "r", desc: "refresh" },
 			{ key: "q", desc: "quit / close panel" },
 			{ key: "ctrl+c", desc: "force quit" },
 		],
@@ -44,6 +43,7 @@ const SECTIONS: Section[] = [
 			{ key: "b", desc: "bookmark mode" },
 			{ key: "g", desc: "git mode" },
 			{ key: "u", desc: "jj undo" },
+			{ key: "r", desc: "jj redo" },
 		],
 	},
 	{

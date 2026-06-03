@@ -314,6 +314,18 @@ export function App() {
 		}
 	}, [refresh])
 
+	const doRedo = useCallback(async () => {
+		if (!runnerRef.current) return
+		setMessage("redoing…")
+		try {
+			await runnerRef.current.redo()
+			setMessage("redone")
+			await refresh()
+		} catch (err: unknown) {
+			setError(err instanceof Error ? err.message : String(err))
+		}
+	}, [refresh])
+
 	const doGitFetch = useCallback(async () => {
 		if (!runnerRef.current) return
 		setMessage("fetching…")
@@ -586,7 +598,6 @@ export function App() {
 			setView((v: View) => v === "help" ? "log" : "help")
 			return
 		}
-		if (k === "r" && !diffOpen) { refresh(); return }
 
 		// View-specific keys
 		if (view === "help") {
@@ -657,6 +668,7 @@ export function App() {
 				return
 			}
 			if (k === "u") { doUndo(); return }
+			if (k === "r") { doRedo(); return }
 		}
 	})
 
@@ -756,8 +768,8 @@ export function App() {
 		...hlNodes([
 			["⏎diff", "⏎"], ["describe", "d"],
 			["AI Desc", "D"], ["bookmark", "b"], ["git", "g"],
-			["undo", "u"], ["edit", "e"], ["new", "n"],
-			["abandon", "a"], ["?help", "?"], ["refresh", "r"], ["quit", "q"],
+			["undo", "u"], ["redo", "r"], ["edit", "e"], ["new", "n"],
+			["abandon", "a"], ["?help", "?"], ["quit", "q"],
 		], colors.gray, colors.purple, "  "),
 	]
 

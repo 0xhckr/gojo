@@ -119,7 +119,6 @@ Content height = `terminal height - 2` (status bar + help bar).
 
 ### Global
 - `?` — help
-- `r` — refresh current view
 - `q` / `ctrl+c` — quit (or go back from diff/help)
 
 ### Log View
@@ -135,6 +134,7 @@ Content height = `terminal height - 2` (status bar + help bar).
 - `b` — bookmark mode
 - `g` — git mode
 - `u` — `jj undo`
+- `r` — `jj redo`
 
 ### Diff Panel
 - `↑`/`k`, `↓`/`j` — scroll
@@ -152,7 +152,7 @@ Content height = `terminal height - 2` (status bar + help bar).
 
 All jj operations go through `JJRunner.run(args)` which executes `jj` with the given args in the repo directory using `child_process.execFile`. Output is captured via stdout. Errors include the full jj stderr.
 
-Available operations: log, status, diff, diffSummary, fileShow, describe, new, edit, abandon, undo, bookmarkCreate, bookmarkDelete, bookmarkForget, bookmarkList, bookmarkMove, bookmarkRename, bookmarkSet, bookmarkTrack, bookmarkUntrack, gitFetch, gitPush.
+Available operations: log, status, diff, diffSummary, fileShow, describe, new, edit, abandon, undo, redo, bookmarkCreate, bookmarkDelete, bookmarkForget, bookmarkList, bookmarkMove, bookmarkRename, bookmarkSet, bookmarkTrack, bookmarkUntrack, gitFetch, gitPush.
 
 ## Color Palette
 

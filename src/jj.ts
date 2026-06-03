@@ -193,6 +193,10 @@ export class JJRunner {
 		await this.run("undo")
 	}
 
+	async redo(): Promise<void> {
+		await this.run("redo")
+	}
+
 	async bookmarkCreate(name: string, rev?: string): Promise<void> {
 		const args = ["bookmark", "create", name]
 		if (rev) args.push("-r", rev)
