@@ -16,34 +16,58 @@ export interface Config {
 	commitPrompt?: string
 }
 
+function applyTomlConfig(cfg: Config, raw: string, section?: string): void {
+	let inSection = !section // If no section filter, parse all lines
+
+	for (const line of raw.split("\n")) {
+		const trimmed = line.trim()
+		if (!trimmed || trimmed.startsWith("#")) continue
+
+		// Section header like [tools.gojo]
+		const sectionMatch = trimmed.match(/^\[([^\]]+)\]$/)
+		if (sectionMatch) {
+			inSection = sectionMatch[1] === section
+			continue
+		}
+
+		if (!inSection) continue
+
+		const eqIdx = trimmed.indexOf("=")
+		if (eqIdx < 0) continue
+		const key = trimmed.slice(0, eqIdx).trim()
+		let val = trimmed.slice(eqIdx + 1).trim()
+		// Strip quotes
+		if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+			val = val.slice(1, -1)
+		}
+		if (key === "openrouter_api_key") cfg.openRouterApiKey = val
+		else if (key === "openrouter_model") cfg.openRouterModel = val
+		else if (key === "commit_prompt") cfg.commitPrompt = val
+	}
+}
+
 export async function loadConfig(): Promise<Config> {
 	const jjPath = await findBinary("jj")
 	const repoRoot = await findRepoRoot()
 
 	const cfg: Config = { jjPath, repoRoot }
 
-	// Overlay TOML config (optional)
-	const configPath = join(homedir(), ".config", "gojo", "gojo.toml")
+	// 1. Load from jj's user config [tools.gojo] section (lower priority)
+	const jjConfigPath = join(homedir(), ".config", "jj", "config.toml")
 	try {
-		const raw = await readFile(configPath, "utf-8")
-		// Minimal TOML parser for flat key=value pairs
-		for (const line of raw.split("\n")) {
-			const trimmed = line.trim()
-			if (!trimmed || trimmed.startsWith("#")) continue
-			const eqIdx = trimmed.indexOf("=")
-			if (eqIdx < 0) continue
-			const key = trimmed.slice(0, eqIdx).trim()
-			let val = trimmed.slice(eqIdx + 1).trim()
-			// Strip quotes
-			if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-				val = val.slice(1, -1)
-			}
-			if (key === "openrouter_api_key") cfg.openRouterApiKey = val
-			else if (key === "openrouter_model") cfg.openRouterModel = val
-			else if (key === "commit_prompt") cfg.commitPrompt = val
-		}
+		const raw = await readFile(jjConfigPath, "utf-8")
+		applyTomlConfig(cfg, raw, "tools.gojo")
 	} catch {
-		// No config file — that's fine
+		// No jj config file — that's fine
+	}
+
+	// 2. Overlay standalone gojo config (higher priority, overrides jj config)
+	const gojoConfigPath = join(homedir(), ".config", "gojo", "gojo.toml")
+	try {
+		const raw = await readFile(gojoConfigPath, "utf-8")
+		applyTomlConfig(cfg, raw)
+	} catch {
+		// No gojo config file — that's fine
 	}
 
 	return cfg
