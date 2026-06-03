@@ -1,6 +1,6 @@
 {
   "name": "gojo",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "description": "A fullscreen TUI for jj (Jujutsu VCS)",
   "type": "module",
   "scripts": {
