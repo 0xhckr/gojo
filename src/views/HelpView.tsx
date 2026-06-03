@@ -47,6 +47,15 @@ export function HelpView({ width }: HelpViewProps) {
 		{ title: "Git Mode", bindings: [
 			["f", "git fetch"],
 			["p", "git push"],
+			["r", "remote mode"],
+			["esc", "cancel / exit"],
+		]},
+		{ title: "Remote Mode", bindings: [
+			["a", "add remote (name url)"],
+			["l", "list remotes"],
+			["r", "remove remote (name)"],
+			["m", "rename remote (old new)"],
+			["s", "set-url (name url)"],
 			["esc", "cancel / exit"],
 		]},
 	]

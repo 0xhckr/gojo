@@ -217,6 +217,26 @@ export class JJRunner {
 		await this.run("git", "push")
 	}
 
+	async remoteAdd(name: string, url: string): Promise<void> {
+		await this.run("git", "remote", "add", name, url)
+	}
+
+	async remoteList(): Promise<string> {
+		return this.run("git", "remote", "list")
+	}
+
+	async remoteRemove(name: string): Promise<void> {
+		await this.run("git", "remote", "remove", name)
+	}
+
+	async remoteRename(oldName: string, newName: string): Promise<void> {
+		await this.run("git", "remote", "rename", oldName, newName)
+	}
+
+	async remoteSetUrl(name: string, url: string): Promise<void> {
+		await this.run("git", "remote", "set-url", name, url)
+	}
+
 	async aiDescribe(rev: string): Promise<string> {
 		if (!this.config.openRouterApiKey) {
 			throw new Error("No OpenRouter API key configured. Add openrouter_api_key to ~/.config/gojo/gojo.toml")

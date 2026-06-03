@@ -17,6 +17,7 @@ import { HelpView } from "./views/HelpView.js"
 
 export type View = "log" | "help"
 export type BookmarkSubcmd = "c" | "d" | "f" | "m" | "r" | "s" | "t" | "T" | "l" | ""
+export type RemoteSubcmd = "a" | "l" | "r" | "m" | "s" | ""
 
 // ── App ───────────────────────────────────────────────────────────────────
 
@@ -72,6 +73,11 @@ export function App() {
 
 	// Git mode
 	const [gitMode, setGitMode] = useState(false)
+
+	// Remote mode
+	const [remoteMode, setRemoteMode] = useState(false)
+	const [remoteAction, setRemoteAction] = useState<RemoteSubcmd>("")
+	const [remoteInput, setRemoteInput] = useState("")
 
 	// Autocomplete candidates (bookmark names + change/commit IDs)
 	const allCandidates = useMemo(() => {
@@ -307,6 +313,60 @@ export function App() {
 		}
 	}, [refresh])
 
+	// ── Remote action execution ────────────────────────────────────────
+	const executeRemote = useCallback(
+		async (action: RemoteSubcmd, input: string) => {
+			if (!runnerRef.current) return
+
+			try {
+				switch (action) {
+					case "a": {
+						const parts = input.split(/\s+/)
+						if (parts.length < 2) throw new Error("add requires: <name> <url>")
+						await runnerRef.current.remoteAdd(parts[0], parts.slice(1).join(" "))
+						break
+					}
+					case "l": {
+						const out = await runnerRef.current.remoteList()
+						setDiffContent(out)
+						setDiffRev("remote list")
+						setDiffOpen(true)
+						setDiffLoading(false)
+						setRevStatusEntries([])
+						break
+					}
+					case "r": {
+						await runnerRef.current.remoteRemove(input)
+						break
+					}
+					case "m": {
+						const parts = input.split(/\s+/)
+						if (parts.length < 2) throw new Error("rename requires: <old> <new>")
+						await runnerRef.current.remoteRename(parts[0], parts[1])
+						break
+					}
+					case "s": {
+						const parts = input.split(/\s+/)
+						if (parts.length < 2) throw new Error("set-url requires: <name> <url>")
+						await runnerRef.current.remoteSetUrl(parts[0], parts.slice(1).join(" "))
+						break
+					}
+				}
+				if (action !== "l") {
+					setMessage(`remote ${action}: ${input}`)
+					await refresh()
+				}
+			} catch (err: unknown) {
+				setError(err instanceof Error ? err.message : String(err))
+			}
+
+			setRemoteMode(false)
+			setRemoteAction("")
+			setRemoteInput("")
+		},
+		[refresh],
+	)
+
 	// ── Bookmark action execution ──────────────────────────────────────
 	const executeBookmark = useCallback(
 		async (action: BookmarkSubcmd, input: string) => {
@@ -443,9 +503,48 @@ export function App() {
 
 		// Git mode
 		if (gitMode) {
+			// Remote sub-mode input
+			if (remoteMode) {
+				if (remoteAction) {
+					if (k === "escape") {
+						setRemoteAction("")
+						setRemoteInput("")
+						return
+					}
+					if (k === "return") {
+						executeRemote(remoteAction, remoteInput)
+						return
+					}
+					if (k === "backspace" || k === "delete") {
+						setRemoteInput((prev: string) => prev.slice(0, -1))
+						return
+					}
+					const seq = key.sequence
+					if (seq && seq.length === 1 && seq.charCodeAt(0) >= 32 && seq.charCodeAt(0) < 127) {
+						setRemoteInput((prev: string) => prev + seq)
+					}
+					return
+				}
+				// Remote mode menu
+				if (k === "escape" || k === "q") { setRemoteMode(false); return }
+				if (["a", "l", "r", "m", "s"].includes(k)) {
+					if (k === "l") { executeRemote("l", ""); return }
+					setRemoteAction(k as RemoteSubcmd)
+					setRemoteInput("")
+					return
+				}
+				return
+			}
+
 			if (k === "escape" || k === "q") { setGitMode(false); return }
 			if (k === "f") { setGitMode(false); doGitFetch(); return }
 			if (k === "p") { setGitMode(false); doGitPush(); return }
+			if (k === "r") {
+				setRemoteMode(true)
+				setRemoteAction("")
+				setRemoteInput("")
+				return
+			}
 			return
 		}
 
@@ -557,8 +656,23 @@ export function App() {
 			statusBar = " [bookmark mode] c:create d:delete f:forget l:list m:move r:rename s:set t:track T:untrack  esc:cancel "
 		}
 	} else if (gitMode) {
-		statusFg = colors.darkOrange
-		statusBar = " [git mode] f:fetch p:push  esc:cancel "
+		if (remoteMode) {
+			statusFg = colors.pink
+			if (remoteAction) {
+				const prompts: Record<string, string> = {
+					a: "add (name url): ",
+					r: "remove (name): ",
+					m: "rename (old new): ",
+					s: "set-url (name url): ",
+				}
+				statusBar = ` [git > remote] ${(prompts[remoteAction] || "") + remoteInput}█`
+			} else {
+				statusBar = " [git > remote] a:add l:list r:remove m:rename s:set-url  esc:cancel "
+			}
+		} else {
+			statusFg = colors.darkOrange
+			statusBar = " [git mode] f:fetch p:push r:remote  esc:cancel "
+		}
 	} else if (error) {
 		statusFg = colors.red
 		statusBar = ` ✖ ${error.slice(0, width - 4)}`

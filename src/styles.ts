@@ -14,6 +14,8 @@ export const colors = {
 	white: "#ECEBF0",      // Sash — subject lines, body text
 	orange: "#FF985A",     // Tang — git mode
 	darkOrange: "#BF976F", // Cumin — git mode hint
+	pink: "#FF7EB6",       // Flamingo — remote mode
+	darkPink: "#BF7FA0",   // Rose — remote mode hint
 	mutedGray: "#605F6B",  // Oyster — node chars, immutable
 }
 
