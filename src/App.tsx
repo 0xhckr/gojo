@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { type KeyEvent } from "@opentui/core"
-import { useKeyboard, useTerminalDimensions, useRenderer } from "@opentui/react"
+import { useKeyboard, useTerminalDimensions, useRenderer, useFocus } from "@opentui/react"
 import type { CliRenderer } from "@opentui/core"
 
 // Module-level quit function, set during App init
@@ -136,6 +136,11 @@ export function App() {
 	useEffect(() => {
 		if (ready) refresh()
 	}, [ready, refresh])
+
+	// Auto-refresh when terminal window regains focus
+	useFocus(() => {
+		if (ready) refresh()
+	})
 
 	// ── Helpers ────────────────────────────────────────────────────────
 	const selectedEntry = useCallback((): LogEntry | null => {
