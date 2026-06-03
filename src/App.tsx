@@ -786,10 +786,12 @@ export function App() {
 
 			{/* Status bar */}
 			<box width={width} height={1} style={{ backgroundColor: colors.darkerGray }}>
-				{statusText !== null
-					? <text content={statusText} fg={statusFg} />
-					: <text>{...statusNodes!}</text>
-				}
+				<text>
+					{statusText !== null
+						? <span fg={statusFg}>{statusText}</span>
+						: statusNodes!
+					}
+				</text>
 			</box>
 
 			{/* Help bar */}
