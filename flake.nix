@@ -10,9 +10,8 @@
       version = "0.1.0";
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = fn: nixpkgs.lib.genAttrs systems (system: fn nixpkgs.legacyPackages.${system});
-    in
-    {
-      packages = forAllSystems (pkgs:
+
+      gojoPackage = pkgs:
         let
           # Fixed-output derivation: fetches bun deps with network access.
           # Hash is verified, so this is safe. Update when bun.lock changes.
@@ -27,45 +26,52 @@
 
             installPhase = ''
               export HOME=$TMPDIR
-              bun install --frozen-lockfile --no-save
+              bun install --frozen-lockfile --no-save --ignore-scripts
               cp -r node_modules $out
             '';
 
             outputHashAlgo = "sha256";
             outputHashMode = "recursive";
-            outputHash = "sha256-xbBgYVWdM12f3I7FQPB+6mGvRm5FGoNStPC2iYp4kOA=";
+            outputHash = "sha256-40QDCyEcBA8rZBohxlq/CF5VWaVSIIBMS+NwElzqPmY=";
           };
         in
-        {
-          default = pkgs.stdenv.mkDerivation {
-            pname = "gojo";
-            inherit version;
+        pkgs.stdenv.mkDerivation {
+          pname = "gojo";
+          inherit version;
 
-            src = self;
+          src = self;
 
-            nativeBuildInputs = [ pkgs.bun ];
+          nativeBuildInputs = [ pkgs.bun ];
 
-            configurePhase = ''
-              # Copy pre-fetched node_modules so bun build can resolve deps
-              cp -r ${bunDeps} node_modules
-              chmod -R u+w node_modules
-            '';
+          configurePhase = ''
+            # Copy pre-fetched node_modules so bun build can resolve deps
+            cp -r ${bunDeps} node_modules
+            chmod -R u+w node_modules
+          '';
 
-            buildPhase = ''
-              export HOME=$TMPDIR
-              bun build --compile src/main.tsx --outfile gojo
-            '';
+          buildPhase = ''
+            export HOME=$TMPDIR
+            bun build --compile src/main.tsx --outfile gojo
+          '';
 
-            dontStrip = true;
+          dontStrip = true;
 
-            installPhase = ''
-              mkdir -p $out/bin
-              install -m755 gojo $out/bin/gojo
-              ln -s gojo $out/bin/gj
-            '';
-          };
-        }
-      );
+          installPhase = ''
+            mkdir -p $out/bin
+            install -m755 gojo $out/bin/gojo
+            ln -s gojo $out/bin/gj
+          '';
+        };
+    in
+    {
+      overlays.default = final: prev: {
+        gojo = gojoPackage final;
+      };
+
+      packages = forAllSystems (pkgs: {
+        default = gojoPackage pkgs;
+        gojo = gojoPackage pkgs;
+      });
 
       apps = forAllSystems (pkgs: {
         default = {
