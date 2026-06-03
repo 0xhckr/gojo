@@ -81,15 +81,6 @@ export function LogView({ width, height, entries, cursor, offset, onOffsetChange
 		// Graph prefix before node
 		headerChunks.push(fg(colors.darkGray)(e.headerPrefix))
 
-		// Node character
-		if (e.isWorkingCopy) {
-			headerChunks.push(bold(fg(colors.yellow)("@")))
-		} else if (e.isImmutable) {
-			headerChunks.push(fg(colors.mutedGray)("◆"))
-		} else {
-			headerChunks.push(fg(colors.mutedGray)("○"))
-		}
-
 		headerChunks.push(" ")
 
 		// Change ID with highlighted prefix

@@ -59,6 +59,7 @@ export function App() {
 	const [diffContent, setDiffContent] = useState("")
 	const [diffLoading, setDiffLoading] = useState(false)
 	const [revStatusEntries, setRevStatusEntries] = useState<StatusEntry[]>([])
+	const [diffScrollY, setDiffScrollY] = useState(0)
 
 	// Bookmark mode
 	const [bookmarkMode, setBookmarkMode] = useState(false)
@@ -119,6 +120,7 @@ export function App() {
 			setDiffRev(entry.changeId)
 			setDiffLoading(true)
 			setDiffOpen(true)
+			setDiffScrollY(0)
 			try {
 				const [entries, diffOut] = await Promise.all([
 					runnerRef.current.diffSummary(entry.commitId),
@@ -392,7 +394,9 @@ export function App() {
 		// View-specific keys
 		if (view === "log") {
 			if (diffOpen) {
-				if (k === "return" || k === "q") setDiffOpen(false)
+				if (k === "return" || k === "q" || k === "escape") { setDiffOpen(false); return }
+				if (k === "up" || k === "k") { setDiffScrollY(y => Math.max(0, y - 1)); return }
+				if (k === "down" || k === "j") { setDiffScrollY(y => y + 1); return }
 				return
 			}
 
@@ -507,6 +511,7 @@ export function App() {
 						loading={diffLoading}
 						diffContent={diffContent}
 						statusEntries={revStatusEntries}
+						scrollY={diffScrollY}
 					/>
 				) : (
 					<LogView
