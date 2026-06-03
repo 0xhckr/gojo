@@ -7,6 +7,7 @@ import type { CliRenderer } from "@opentui/core"
 let quitFn: (() => void) | null = null
 export function quit() { quitFn?.() }
 import { JJRunner, type LogEntry, type StatusEntry, loadConfig } from "./jj.js"
+import { relative } from "node:path"
 import { colors, spinnerFrames } from "./styles.js"
 import { useSpinner } from "./hooks.js"
 import { LogView } from "./views/LogView.js"
@@ -54,11 +55,13 @@ export function App() {
 	const runnerRef = useRef<JJRunner | null>(null)
 	const [ready, setReady] = useState(false)
 	const [bootError, setBootError] = useState<string | null>(null)
+	const [repoRoot, setRepoRoot] = useState("")
 
 	useEffect(() => {
 		loadConfig()
 			.then((cfg) => {
 				runnerRef.current = new JJRunner(cfg.jjPath, cfg.repoRoot, cfg)
+				setRepoRoot(cfg.repoRoot)
 				setReady(true)
 			})
 			.catch((err: unknown) => setBootError(err instanceof Error ? err.message : String(err)))
@@ -587,7 +590,7 @@ export function App() {
 
 		// View-specific keys
 		if (view === "help") {
-			const helpContentH = height - 2 - 1 // minus status bar, help bar, and title bar
+			const helpContentH = height - 4 - 1 // minus top bar(2), status bar, help bar
 			const maxS = helpMaxScroll(helpContentH)
 			const halfPage = Math.max(1, Math.floor(helpContentH / 2))
 			if (k === "up" || k === "k") { setHelpScrollY(y => Math.max(0, y - 1)); return }
@@ -758,12 +761,30 @@ export function App() {
 		], colors.gray, colors.purple, "  "),
 	]
 
+	// Top bar: "gojo" left, repo path right
+	const cwd = process.cwd()
+	const home = process.env.HOME || ""
+	const displayPath = cwd.startsWith(home)
+		? "~" + cwd.slice(home.length)
+		: cwd
+	// left="  ◉ gojo" (7) + " " + "─"×n + " " + path + " " = width
+	// → n = width - 7 - 2 - (len+1) = width - len - 10
+	const titleBarPad = Math.max(0, width - 10 - displayPath.length)
+
 	return (
 		<box width={width} height={height} flexDirection="column">
+			{/* Top bar */}
+			<box width={width} height={2} style={{ backgroundColor: colors.darkPurple }} flexDirection="column">
+				<text>
+					<span fg={colors.purple}>{" ◉ gojo"}</span><span fg={colors.darkGray}>{" " + "─".repeat(titleBarPad) + " "}</span><span fg={colors.white}>{displayPath + " "}</span>
+				</text>
+				<text content=" " />
+			</box>
+
 			{/* Content area */}
 			<box flexGrow={1} flexDirection="column">
 				{view === "help" ? (
-					<HelpView width={width} height={height - 2} scrollY={helpScrollY} />
+					<HelpView width={width} height={height - 4} scrollY={helpScrollY} />
 				) : diffOpen ? (
 					<DiffPanel
 						width={width}
@@ -776,7 +797,7 @@ export function App() {
 				) : (
 					<LogView
 						width={width}
-						height={height - 2 - (suggestionsVisible ? 1 : 0)}
+						height={height - 4 - (suggestionsVisible ? 1 : 0)}
 						entries={logEntries}
 						cursor={cursor}
 						offset={offset}
