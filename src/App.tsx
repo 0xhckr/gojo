@@ -11,7 +11,7 @@ import { colors, spinnerFrames } from "./styles.js"
 import { useSpinner } from "./hooks.js"
 import { LogView } from "./views/LogView.js"
 import { DiffPanel } from "./views/DiffPanel.js"
-import { HelpView } from "./views/HelpView.js"
+import { HelpView, helpMaxScroll } from "./views/HelpView.js"
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -80,6 +80,9 @@ export function App() {
 	const [diffLoading, setDiffLoading] = useState(false)
 	const [revStatusEntries, setRevStatusEntries] = useState<StatusEntry[]>([])
 	const [diffScrollY, setDiffScrollY] = useState(0)
+
+	// Help view scroll
+	const [helpScrollY, setHelpScrollY] = useState(0)
 
 	// Bookmark mode
 	const [bookmarkMode, setBookmarkMode] = useState(false)
@@ -574,14 +577,28 @@ export function App() {
 			quit()
 			return
 		}
-		if (k === "question" || (key.shift && k === "/")) {
+		if (k === "?" || key.sequence === "?") {
 			if (diffOpen) { setDiffOpen(false); return }
+			if (view !== "help") { setHelpScrollY(0) }
 			setView((v: View) => v === "help" ? "log" : "help")
 			return
 		}
 		if (k === "r" && !diffOpen) { refresh(); return }
 
 		// View-specific keys
+		if (view === "help") {
+			const helpContentH = height - 2 - 1 // minus status bar, help bar, and title bar
+			const maxS = helpMaxScroll(helpContentH)
+			const halfPage = Math.max(1, Math.floor(helpContentH / 2))
+			if (k === "up" || k === "k") { setHelpScrollY(y => Math.max(0, y - 1)); return }
+			if (k === "down" || k === "j") { setHelpScrollY(y => Math.min(maxS, y + 1)); return }
+			if (k === "home" || (k === "g" && !key.shift)) { setHelpScrollY(0); return }
+			if (k === "end" || (key.shift && k === "G")) { setHelpScrollY(maxS); return }
+			if (k === "pageup" || k === "b") { setHelpScrollY(y => Math.max(0, y - halfPage)); return }
+			if (k === "pagedown" || k === "f") { setHelpScrollY(y => Math.min(maxS, y + halfPage)); return }
+			return
+		}
+
 		if (view === "log") {
 			if (diffOpen) {
 				if (k === "return" || k === "q" || k === "escape") { setDiffOpen(false); return }
@@ -746,7 +763,7 @@ export function App() {
 			{/* Content area */}
 			<box flexGrow={1} flexDirection="column">
 				{view === "help" ? (
-					<HelpView width={width} />
+					<HelpView width={width} height={height - 2} scrollY={helpScrollY} />
 				) : diffOpen ? (
 					<DiffPanel
 						width={width}
