@@ -41,7 +41,8 @@ export function HelpView({ width }: HelpViewProps) {
 			["s", "set bookmark"],
 			["t", "track bookmark"],
 			["T", "untrack bookmark"],
-			["esc", "cancel / exit"],
+			["tab", "autocomplete (cycle suggestions)"],
+			["esc", "dismiss suggestions / cancel / exit"],
 		]},
 		{ title: "Git Mode", bindings: [
 			["f", "git fetch"],

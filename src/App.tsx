@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react"
+import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { type KeyEvent } from "@opentui/core"
 import { useKeyboard, useTerminalDimensions, useRenderer } from "@opentui/react"
 import type { CliRenderer } from "@opentui/core"
@@ -66,8 +66,38 @@ export function App() {
 	const [bookmarkAction, setBookmarkAction] = useState<BookmarkSubcmd>("")
 	const [bookmarkInput, setBookmarkInput] = useState("")
 
+	// Autocomplete state
+	const [acOriginal, setAcOriginal] = useState<string | null>(null)
+	const [acIdx, setAcIdx] = useState(0)
+
 	// Git mode
 	const [gitMode, setGitMode] = useState(false)
+
+	// Autocomplete candidates (bookmark names + change/commit IDs)
+	const allCandidates = useMemo(() => {
+		const seen = new Set<string>()
+		for (const entry of logEntries) {
+			for (const bm of entry.bookmarks) {
+				if (bm) seen.add(bm)
+			}
+			seen.add(entry.changeId)
+			seen.add(entry.commitId)
+		}
+		return [...seen]
+	}, [logEntries])
+
+	// Display suggestions (filtered, limited)
+	const displaySuggestions = useMemo(() => {
+		if (!bookmarkAction) return []
+		if (bookmarkAction === "r" && bookmarkInput.includes(" ")) return []
+		const prefix = acOriginal ?? bookmarkInput
+		const filtered = prefix
+			? allCandidates.filter(c => c.startsWith(prefix))
+			: allCandidates
+		return filtered.slice(0, 10)
+	}, [bookmarkAction, bookmarkInput, acOriginal, allCandidates])
+
+	const suggestionsVisible = bookmarkAction && displaySuggestions.length > 0
 
 	// AI describe
 	const [aiLoading, setAiLoading] = useState<Set<string>>(new Set())
@@ -335,35 +365,71 @@ export function App() {
 		if (bookmarkMode) {
 			if (bookmarkAction) {
 				if (k === "escape") {
+					if (acOriginal !== null) {
+						setBookmarkInput(acOriginal)
+						setAcOriginal(null)
+						setAcIdx(0)
+						return
+					}
 					setBookmarkAction("")
 					setBookmarkInput("")
+					setAcOriginal(null)
+					setAcIdx(0)
 					return
 				}
 				if (k === "return") {
+					setAcOriginal(null)
+					setAcIdx(0)
 					executeBookmark(bookmarkAction, bookmarkInput)
+					return
+				}
+				if (k === "tab") {
+					const prefix = acOriginal ?? bookmarkInput
+					const filtered = prefix
+						? allCandidates.filter(c => c.startsWith(prefix))
+						: allCandidates
+					if (filtered.length > 0) {
+						if (acOriginal === null) {
+							setAcOriginal(bookmarkInput)
+							setAcIdx(0)
+							setBookmarkInput(filtered[0])
+						} else {
+							const next = (acIdx + 1) % filtered.length
+							setAcIdx(next)
+							setBookmarkInput(filtered[next])
+						}
+					}
 					return
 				}
 				if (k === "backspace" || k === "delete") {
 					setBookmarkInput((prev: string) => prev.slice(0, -1))
+					setAcOriginal(null)
+					setAcIdx(0)
 					return
 				}
 				// Printable characters via sequence
 				const seq = key.sequence
 				if (seq && seq.length === 1 && seq.charCodeAt(0) >= 32 && seq.charCodeAt(0) < 127) {
 					setBookmarkInput((prev: string) => prev + seq)
+					setAcOriginal(null)
+					setAcIdx(0)
 				}
 				return
 			}
 			// Bookmark mode menu
-			if (k === "escape" || k === "q") { setBookmarkMode(false); return }
+			if (k === "escape" || k === "q") { setBookmarkMode(false); setAcOriginal(null); setAcIdx(0); return }
 			if (["c", "d", "f", "m", "r", "s", "t"].includes(k)) {
 				setBookmarkAction(k as BookmarkSubcmd)
 				setBookmarkInput("")
+				setAcOriginal(null)
+				setAcIdx(0)
 				return
 			}
 			if (key.shift && k === "t") {
 				setBookmarkAction("T")
 				setBookmarkInput("")
+				setAcOriginal(null)
+				setAcIdx(0)
 				return
 			}
 			if (k === "l") { executeBookmark("l", ""); return }
@@ -435,6 +501,8 @@ export function App() {
 				setBookmarkMode(true)
 				setBookmarkAction("")
 				setBookmarkInput("")
+				setAcOriginal(null)
+				setAcIdx(0)
 				setError(null)
 				setMessage("")
 				return
@@ -517,7 +585,7 @@ export function App() {
 				) : (
 					<LogView
 						width={width}
-						height={height - 2}
+						height={height - 2 - (suggestionsVisible ? 1 : 0)}
 						entries={logEntries}
 						cursor={cursor}
 						offset={offset}
@@ -527,6 +595,20 @@ export function App() {
 					/>
 				)}
 			</box>
+
+			{/* Autocomplete suggestions */}
+			{suggestionsVisible && (
+				<box width={width} height={1} style={{ backgroundColor: colors.darkerGray }}>
+					<text>
+						<span fg={colors.darkGray}>{" tab:"}</span>
+						{displaySuggestions.map((s, i) => (
+							<span key={i} fg={i === (acOriginal !== null ? acIdx : -1) ? colors.yellow : colors.cyan}>
+								{i > 0 ? " · " : " "}{s}
+							</span>
+						))}
+					</text>
+				</box>
+			)}
 
 			{/* Status bar */}
 			<box width={width} height={1} style={{ backgroundColor: colors.darkerGray }}>
