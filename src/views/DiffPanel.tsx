@@ -87,23 +87,28 @@ export function DiffPanel({ width, rev, loading, diffContent, statusEntries, scr
 	// Title bar
 	const titleLine = ` ${rev}${loading ? "  loading…" : ""}  (enter/q to close) `
 
-	// Status summary lines
-	const statusLines: string[] = []
-	statusLines.push(" status")
-	if (statusEntries.length === 0) {
-		statusLines.push("  (no changes)")
-	} else {
-		for (const e of statusEntries) {
-			const sym = e.status === "Added" ? "A" : e.status === "Modified" ? "M" : e.status === "Removed" ? "D" : "C"
-			statusLines.push(`  ${sym} ${e.path}`)
-		}
+	// Status color map
+	const STATUS_COLORS: Record<string, string> = {
+		Added: colors.green,
+		Modified: colors.yellow,
+		Removed: colors.red,
+		Conflicted: colors.magenta,
+	}
+
+	// Build typed status entries for rendering
+	type StatusItem = { sym: string; path: string; color: string }
+	const statusItems: StatusItem[] = []
+	for (const e of statusEntries) {
+		const sym = e.status === "Added" ? "A" : e.status === "Modified" ? "M" : e.status === "Removed" ? "D" : "C"
+		statusItems.push({ sym, path: e.path, color: STATUS_COLORS[e.status] ?? colors.gray })
 	}
 
 	// Whether we have parsed results ready
 	const hasParsed = allRows.length > 0 || !diffContent
 
 	// Fixed header: title + status + separator = N lines
-	const headerLines = 1 + statusLines.length + 1 // title + status + separator
+	const statusLineCount = 1 + Math.max(statusItems.length, 1) // header + items or "(no changes)"
+	const headerLines = 1 + statusLineCount + 1 // title + status + separator
 
 	// Available height for diff content (we don't know terminal height here,
 	// so render all rows and let the parent box clip)
@@ -117,9 +122,19 @@ export function DiffPanel({ width, rev, loading, diffContent, statusEntries, scr
 			</box>
 
 			{/* Status summary */}
-			{statusLines.map((line, i) => (
-				<text key={`status:${i}`} fg={colors.gray} content={line} />
-			))}
+			{/* Status header */}
+			<text fg={colors.gray} content={" status"} />
+
+			{statusItems.length === 0 ? (
+				<text fg={colors.gray} content="  (no changes)" />
+			) : (
+				statusItems.map((item, i) => (
+					<text key={`status:${i}`}>
+						<span fg={item.color}>{`  ${item.sym} `}</span>
+						<span fg={item.color}>{item.path}</span>
+					</text>
+				))
+			)}
 
 			{/* Separator */}
 			<text fg={DIFF_COLORS.border} content={"─".repeat(width)} />
