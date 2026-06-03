@@ -61,6 +61,7 @@
             installPhase = ''
               mkdir -p $out/bin
               install -m755 gojo $out/bin/gojo
+              ln -s gojo $out/bin/gj
             '';
           };
         }
