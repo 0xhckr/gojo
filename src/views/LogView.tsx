@@ -85,16 +85,16 @@ export function LogView({ width, height, entries, cursor, offset, onOffsetChange
 		if (e.isWorkingCopy) {
 			headerChunks.push(bold(fg(colors.yellow)("@")))
 		} else if (e.isImmutable) {
-			headerChunks.push(fg(colors.darkGray)("◆"))
+			headerChunks.push(fg(colors.mutedGray)("◆"))
 		} else {
-			headerChunks.push(fg(colors.darkGray)("○"))
+			headerChunks.push(fg(colors.mutedGray)("○"))
 		}
 
 		headerChunks.push(" ")
 
 		// Change ID with highlighted prefix
 		if (e.changeIdPrefixLen > 0 && e.changeIdPrefixLen < e.changeId.length) {
-			headerChunks.push(bold(fg(colors.yellow)(e.changeId.slice(0, e.changeIdPrefixLen))))
+			headerChunks.push(bold(fg(colors.magenta)(e.changeId.slice(0, e.changeIdPrefixLen))))
 			headerChunks.push(bold(fg(colors.purple)(e.changeId.slice(e.changeIdPrefixLen))))
 		} else {
 			headerChunks.push(bold(fg(colors.purple)(e.changeId)))
@@ -122,7 +122,7 @@ export function LogView({ width, height, entries, cursor, offset, onOffsetChange
 
 		if (aiLoading.has(e.changeId)) {
 			const frame = spinnerFrames[aiSpinnerFrame % spinnerFrames.length]
-			bodyChunks.push(bold(fg(colors.purple)(`${frame} generating…`)))
+			bodyChunks.push(bold(fg(colors.magenta)(`${frame} generating…`)))
 		} else {
 			const subject = e.subject || "(no description set)"
 			if (e.isWorkingCopy) {
