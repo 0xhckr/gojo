@@ -208,13 +208,14 @@ export function App() {
 		if (!runnerRef.current) return
 		setMessage("creating new change…")
 		try {
-			await runnerRef.current.new()
+			const entry = selectedEntry()
+			await runnerRef.current.new(entry?.changeId)
 			setMessage("created new change")
 			await loadLog()
 		} catch (err: unknown) {
 			setError(err instanceof Error ? err.message : String(err))
 		}
-	}, [loadLog])
+	}, [loadLog, selectedEntry])
 
 	const doAbandon = useCallback(
 		async (entry: LogEntry) => {
