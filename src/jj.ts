@@ -157,7 +157,7 @@ export class JJRunner {
 	}
 
 	async diff(rev?: string): Promise<string> {
-		const args = ["diff", "--color", "never"]
+		const args = ["diff", "--git", "--color", "never"]
 		if (rev) args.push("-r", rev)
 		return this.run(...args)
 	}
