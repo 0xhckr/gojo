@@ -19,6 +19,25 @@ export type View = "log" | "help"
 export type BookmarkSubcmd = "c" | "d" | "f" | "m" | "r" | "s" | "t" | "T" | "l" | ""
 export type RemoteSubcmd = "a" | "l" | "r" | "m" | "s" | ""
 
+// Helper to build styled keybind label spans: each [text, match] becomes
+// a word with the first occurrence of `match` underlined + purple.
+function hlNodes(items: Array<[string, string]>, color: string, hlColor = colors.purple, sep = " ") {
+	const nodes: any[] = []
+	for (let i = 0; i < items.length; i++) {
+		const [text, match] = items[i]
+		const idx = text.indexOf(match)
+		if (idx < 0) {
+			nodes.push(<span fg={color}>{text}</span>)
+		} else {
+			if (idx > 0) nodes.push(<span fg={color}>{text.slice(0, idx)}</span>)
+			nodes.push(<u fg={hlColor}>{match}</u>)
+			if (idx + match.length < text.length) nodes.push(<span fg={color}>{text.slice(idx + match.length)}</span>)
+		}
+		if (i < items.length - 1) nodes.push(<span fg={color}>{sep}</span>)
+	}
+	return nodes
+}
+
 // ── App ───────────────────────────────────────────────────────────────────
 
 export function App() {
@@ -638,9 +657,11 @@ export function App() {
 		)
 	}
 
-	// Status bar text
-	let statusBar = ""
+	// Status bar
+	let statusText: string | null = null
+	let statusNodes: any[] | null = null
 	let statusFg = colors.gray
+
 	if (bookmarkMode) {
 		statusFg = colors.cyan
 		if (bookmarkAction) {
@@ -651,9 +672,19 @@ export function App() {
 				s: `set to ${selectedEntry()?.changeId || ""}: `,
 				t: "track: ", T: "untrack: ",
 			}
-			statusBar = ` [bookmark] ${(prompts[bookmarkAction] || "") + bookmarkInput}█`
+			statusText = ` [bookmark] ${(prompts[bookmarkAction] || "") + bookmarkInput}\u2588`
 		} else {
-			statusBar = " [bookmark mode] c:create d:delete f:forget l:list m:move r:rename s:set t:track T:untrack  esc:cancel "
+			statusNodes = [
+				<span fg={statusFg}>{" [bookmark mode] "}</span>,
+				...hlNodes([
+					["create", "c"], ["delete", "d"], ["forget", "f"],
+					["list", "l"], ["move", "m"], ["rename", "r"],
+					["set", "s"], ["track", "t"], ["untrack", "T"],
+				], statusFg),
+				<span fg={statusFg}>{"  "}</span>,
+				...hlNodes([["cancel", "esc"]], statusFg),
+				<span fg={statusFg}>{" "}</span>,
+			]
 		}
 	} else if (gitMode) {
 		if (remoteMode) {
@@ -665,26 +696,50 @@ export function App() {
 					m: "rename (old new): ",
 					s: "set-url (name url): ",
 				}
-				statusBar = ` [git > remote] ${(prompts[remoteAction] || "") + remoteInput}█`
+				statusText = ` [git > remote] ${(prompts[remoteAction] || "") + remoteInput}\u2588`
 			} else {
-				statusBar = " [git > remote] a:add l:list r:remove m:rename s:set-url  esc:cancel "
+				statusNodes = [
+					<span fg={statusFg}>{" [git > remote] "}</span>,
+					...hlNodes([
+						["add", "a"], ["list", "l"], ["remove", "r"],
+						["rename", "m"], ["set-url", "s"],
+					], statusFg),
+					<span fg={statusFg}>{"  "}</span>,
+					...hlNodes([["cancel", "esc"]], statusFg),
+					<span fg={statusFg}>{" "}</span>,
+				]
 			}
 		} else {
 			statusFg = colors.darkOrange
-			statusBar = " [git mode] f:fetch p:push r:remote  esc:cancel "
+			statusNodes = [
+				<span fg={statusFg}>{" [git mode] "}</span>,
+				...hlNodes([
+					["fetch", "f"], ["push", "p"], ["remote", "r"],
+				], statusFg),
+				<span fg={statusFg}>{"  "}</span>,
+				...hlNodes([["cancel", "esc"]], statusFg),
+				<span fg={statusFg}>{" "}</span>,
+			]
 		}
 	} else if (error) {
 		statusFg = colors.red
-		statusBar = ` ✖ ${error.slice(0, width - 4)}`
+		statusText = ` \u2716 ${error.slice(0, width - 4)}`
 	} else if (message) {
-		statusBar = ` ${message}`
+		statusText = ` ${message}`
 	} else if (statusEntries.length > 0) {
-		statusBar = ` ${statusEntries.length} changed file(s)`
+		statusText = ` ${statusEntries.length} changed file(s)`
 	} else {
-		statusBar = " clean working copy ✓"
+		statusText = " clean working copy \u2713"
 	}
 
-	const helpBarText = " enter:diff  d:describe  shift+d:AI desc  b:bookmark  g:git  u:undo  e:edit  n:new  a:abandon  ?:help  r:refresh  q:quit "
+	const helpBarNodes = [
+		...hlNodes([
+			["⏎diff", "⏎"], ["describe", "d"],
+			["AI Desc", "D"], ["bookmark", "b"], ["git", "g"],
+			["undo", "u"], ["edit", "e"], ["new", "n"],
+			["abandon", "a"], ["?help", "?"], ["refresh", "r"], ["quit", "q"],
+		], colors.gray, colors.purple, "  "),
+	]
 
 	return (
 		<box width={width} height={height} flexDirection="column">
@@ -731,12 +786,18 @@ export function App() {
 
 			{/* Status bar */}
 			<box width={width} height={1} style={{ backgroundColor: colors.darkerGray }}>
-				<text content={statusBar} fg={statusFg} />
+				{statusText !== null
+					? <text content={statusText} fg={statusFg} />
+					: <text>{...statusNodes!}</text>
+				}
 			</box>
 
 			{/* Help bar */}
 			<box width={width} height={1} style={{ backgroundColor: colors.darkerGray }}>
-				<text content={helpBarText} fg={colors.gray} />
+				<text>
+					{" "}
+					{...helpBarNodes}
+				</text>
 			</box>
 		</box>
 	)
