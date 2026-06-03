@@ -26,13 +26,13 @@
 
             installPhase = ''
               export HOME=$TMPDIR
-              bun install --frozen-lockfile --no-save
+              bun install --frozen-lockfile --no-save --ignore-scripts
               cp -r node_modules $out
             '';
 
             outputHashAlgo = "sha256";
             outputHashMode = "recursive";
-            outputHash = "sha256-xbBgYVWdM12f3I7FQPB+6mGvRm5FGoNStPC2iYp4kOA=";
+            outputHash = "sha256-40QDCyEcBA8rZBohxlq/CF5VWaVSIIBMS+NwElzqPmY=";
           };
         in
         pkgs.stdenv.mkDerivation {
