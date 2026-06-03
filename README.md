@@ -1,53 +1,44 @@
 # gojo
 
-A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), written in Go with [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Lipgloss](https://github.com/charmbracelet/lipgloss), and [Bubbles](https://github.com/charmbracelet/bubbles).
+A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), built with [OpenTUI](https://github.com/nicetsai/opentui) and React, running on [Bun](https://bun.sh).
 
 <p align="center">
-  <img src="https://img.shields.io/badge/go-1.26-00ADD8?style=flat&logo=go" alt="Go 1.26">
+  <img src="https://img.shields.io/badge/bun-1.3-000?style=flat&logo=bun" alt="Bun">
+  <img src="https://img.shields.io/badge/typescript-5.9-3178C6?style=flat&logo=typescript" alt="TypeScript">
   <img src="https://img.shields.io/badge/jj-v0.41+-orange?style=flat" alt="jj v0.41+">
 </p>
 
 > ⚠️ **This project was developed using AI assistance.** It's been reviewed by a developer now and should be generally safe to use.
 
-<img width="1935" height="1231" alt="image" src="https://github.com/user-attachments/assets/659f1efb-373b-4f0a-aa74-555dfc7affc9" />
-<img width="1935" height="1231" alt="image" src="https://github.com/user-attachments/assets/7631d356-fffa-45d7-9c8e-2f282d000fa1" />
-<img width="1935" height="1231" alt="image" src="https://github.com/user-attachments/assets/930ffc83-a286-41ae-9b07-3a50516e8143" />
-
-
 ## Features
 
 - **Log view** — scrollable commit graph with change IDs, authors, dates, bookmarks, and working copy highlighting
-- **Diff panel** — file status summary + syntax-highlighted diff for any commit
+- **Diff panel** — file status summary + diff for any commit
 - **Bookmark management** — create, delete, move, rename, set, track, untrack, and list bookmarks
 - **Git integration** — fetch and push from within the TUI
-- **AI commit messages** — generate descriptions via OpenRouter (any model)
 - **Undo** — one-key `jj undo`
 - **Graph rendering** — native jj graph output with styled nodes (@/○/◆) and edges
 
 ## Installation
 
-### Nix (recommended)
+### Nix dev shell (recommended)
 
 ```sh
-nix build github:0xhckr/gojo
-./result/bin/gojo
+nix develop
+pnpm install
+bun run src/main.tsx
 ```
 
 ### From source
 
 ```sh
-go install github.com/0xhckr/gojo/cmd/gojo@latest
-```
-
-### Nix dev shell
-
-```sh
-nix develop
-go build ./cmd/gojo
+pnpm install
+bun run src/main.tsx
 ```
 
 ## Requirements
 
+- [Bun](https://bun.sh) runtime (required for OpenTUI's native FFI)
 - [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS) v0.41+ in `$PATH`
 - A jj repository (run `gojo` inside any `.jj` directory)
 
@@ -59,7 +50,7 @@ Gojo reads an optional TOML config file at `~/.config/gojo/gojo.toml`:
 # OpenRouter API key for AI-generated commit messages (optional)
 openrouter_api_key = "sk-or-..."
 
-# Model to use (default: google/gemini-2.0-flash-001)
+# Model to use
 openrouter_model = "anthropic/claude-sonnet-4-20250514"
 
 # Custom prompt template for AI commit messages (optional)
@@ -98,8 +89,6 @@ commit_prompt = "You are a software developer. Write a clear, concise commit mes
 | Key | Action |
 |-----|--------|
 | `↑`/`k`, `↓`/`j` | Scroll |
-| `pgup`/`b`, `pgdn`/`f` | Half-page scroll |
-| `g` / `G` | Jump to top / bottom |
 | `enter` / `q` | Close panel |
 
 ### Bookmark mode
@@ -132,15 +121,19 @@ Press `g` to enter, then:
 ## Project structure
 
 ```
-cmd/gojo/main.go         Entry point
-internal/
-  ai/ai.go               OpenRouter client for AI commit messages
-  config/config.go       Config loading, jj binary & repo discovery
-  jj/runner.go           jj CLI wrapper (log, diff, status, bookmarks, …)
-  ui/
-    model.go             Bubble Tea model, views, key handling
-    styles.go            Lipgloss color palette and styles
-flake.nix                Nix flake (dev shell + package build)
+src/
+  main.tsx              Entry point — creates renderer, mounts React
+  App.tsx               Main component — views, keyboard, state
+  jj.ts                 jj CLI wrapper, parser, config loader
+  styles.ts             Color palette and constants
+  hooks.ts              Custom React hooks
+  views/
+    LogView.tsx         Commit list with graph
+    DiffPanel.tsx       Diff viewer
+    HelpView.tsx        Keybinding reference
+package.json            Dependencies
+tsconfig.json           TypeScript + JSX config
+flake.nix               Nix dev shell
 ```
 
 ## License

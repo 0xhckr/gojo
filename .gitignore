@@ -1,5 +1,5 @@
 .direnv/
 result
-gojo
+node_modules/
 *.exe
-vendor/
+dist/
