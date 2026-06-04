@@ -2,7 +2,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { readFile, stat } from "node:fs/promises"
+import { readFile, stat, mkdir, writeFile } from "node:fs/promises"
 
 const execFileAsync = promisify(execFile)
 
@@ -73,6 +73,40 @@ export async function loadConfig(): Promise<Config> {
 	return cfg
 }
 
+// ── Config persistence ──────────────────────────────────────────────────
+
+const gojoConfigDir = join(homedir(), ".config", "gojo")
+const gojoConfigPath = join(gojoConfigDir, "gojo.toml")
+
+export async function saveApiKey(key: string): Promise<void> {
+	await mkdir(gojoConfigDir, { recursive: true })
+
+	let lines: string[] = []
+	try {
+		const raw = await readFile(gojoConfigPath, "utf-8")
+		lines = raw.split("\n")
+	} catch {
+		// File doesn't exist yet — start fresh
+	}
+
+	const keyLine = `openrouter_api_key = "${key}"`
+	let found = false
+	for (let i = 0; i < lines.length; i++) {
+		if (lines[i].match(/^\s*openrouter_api_key\s*=/)) {
+			lines[i] = keyLine
+			found = true
+			break
+		}
+	}
+	if (!found) {
+		// Ensure trailing newline before appending
+		if (lines.length > 0 && lines[lines.length - 1] !== "") lines.push("")
+		lines.push(keyLine)
+	}
+
+	await writeFile(gojoConfigPath, lines.join("\n") + "\n", "utf-8")
+}
+
 async function findBinary(name: string): Promise<string> {
 	try {
 		const { stdout } = await execFileAsync("which", [name])
@@ -132,6 +166,15 @@ export class JJRunner {
 		config?: Config,
 	) {
 		this.config = config ?? { jjPath, repoRoot: repoDir }
+	}
+
+	hasApiKey(): boolean {
+		return !!this.config.openRouterApiKey
+	}
+
+	/** Update the in-memory config with a new API key. */
+	setApiKey(key: string): void {
+		this.config.openRouterApiKey = key
 	}
 
 	private async run(...args: string[]): Promise<string> {

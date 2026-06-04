@@ -1,12 +1,12 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { type KeyEvent } from "@opentui/core"
-import { useKeyboard, useTerminalDimensions, useRenderer, useFocus } from "@opentui/react"
+import { useKeyboard, useTerminalDimensions, useRenderer, useFocus, usePaste } from "@opentui/react"
 import type { CliRenderer } from "@opentui/core"
 
 // Module-level quit function, set during App init
 let quitFn: (() => void) | null = null
 export function quit() { quitFn?.() }
-import { JJRunner, type LogEntry, type StatusEntry, loadConfig } from "./jj.js"
+import { JJRunner, type LogEntry, type StatusEntry, loadConfig, saveApiKey } from "./jj.js"
 import { relative } from "node:path"
 import { colors, spinnerFrames } from "./styles.js"
 import { useSpinner } from "./hooks.js"
@@ -134,6 +134,25 @@ export function App() {
 	const [aiLoading, setAiLoading] = useState<Set<string>>(new Set())
 	const aiSpinnerFrame = useSpinner(aiLoading.size > 0)
 
+	// API key prompt
+	const [apiKeyPrompt, setApiKeyPrompt] = useState(false)
+	const [apiKeyInput, setApiKeyInput] = useState("")
+	const [pendingAiDescribe, setPendingAiDescribe] = useState<LogEntry | null>(null)
+
+	// Handle paste events (bracketed paste) for API key input
+	usePaste((event: any) => {
+		if (!apiKeyPrompt) return
+		const text = typeof event.text === "string"
+			? event.text
+			: new TextDecoder().decode(event.bytes)
+		// Filter to printable ASCII
+		const printable = text.split("").filter((c: string) => {
+			const code = c.charCodeAt(0)
+			return code >= 32 && code < 127
+		}).join("")
+		if (printable) setApiKeyInput(prev => prev + printable)
+	})
+
 	// ── Data loading ───────────────────────────────────────────────────
 	const loadLog = useCallback(async () => {
 		if (!runnerRef.current) return
@@ -232,8 +251,17 @@ export function App() {
 	)
 
 	const doAiDescribe = useCallback(
-		async (entry: LogEntry) => {
+		async (entry: LogEntry, skipKeyCheck = false) => {
 			if (!runnerRef.current) return
+
+			// Check for API key — prompt if missing
+			if (!skipKeyCheck && !runnerRef.current.hasApiKey()) {
+				setPendingAiDescribe(entry)
+				setApiKeyPrompt(true)
+				setApiKeyInput("")
+				return
+			}
+
 			setAiLoading(prev => new Set(prev).add(entry.changeId))
 			setError(null)
 			setMessage("AI generating message for " + entry.changeId + "…")
@@ -460,6 +488,51 @@ export function App() {
 		// Global: ctrl+c always quits
 		if (key.ctrl && k === "c") {
 			quit()
+			return
+		}
+
+		// API key prompt
+		if (apiKeyPrompt) {
+			if (k === "escape") {
+				setApiKeyPrompt(false)
+				setApiKeyInput("")
+				setPendingAiDescribe(null)
+				return
+			}
+			if (k === "return") {
+				const key = apiKeyInput.trim()
+				if (!key) return
+				setApiKeyPrompt(false)
+				setApiKeyInput("")
+				// Save to disk
+				saveApiKey(key).then(() => {
+					// Update in-memory config
+					runnerRef.current?.setApiKey(key)
+					// Retry the pending AI describe
+					if (pendingAiDescribe) {
+						const entry = pendingAiDescribe
+						setPendingAiDescribe(null)
+						doAiDescribe(entry, true)
+					}
+				}).catch((err: unknown) => {
+					setError(err instanceof Error ? err.message : String(err))
+					setPendingAiDescribe(null)
+				})
+				return
+			}
+			if (k === "backspace" || k === "delete") {
+				setApiKeyInput((prev: string) => prev.slice(0, -1))
+				return
+			}
+			const seq = key.sequence
+			if (seq && seq.length >= 1) {
+				// Accept multi-char sequences (paste) — filter to printable ASCII
+				const printable = seq.split("").filter(c => {
+					const code = c.charCodeAt(0)
+					return code >= 32 && code < 127
+				}).join("")
+				if (printable) setApiKeyInput((prev: string) => prev + printable)
+			}
 			return
 		}
 
@@ -694,7 +767,11 @@ export function App() {
 	let statusNodes: any[] | null = null
 	let statusFg = colors.gray
 
-	if (bookmarkMode) {
+	if (apiKeyPrompt) {
+		statusFg = colors.yellow
+		const masked = apiKeyInput.length > 0 ? "•".repeat(apiKeyInput.length) : ""
+		statusText = ` API key (OpenRouter): ${masked}\u2588  press Enter to save, Esc to cancel`
+	} else if (bookmarkMode) {
 		statusFg = colors.cyan
 		if (bookmarkAction) {
 			const prompts: Record<string, string> = {

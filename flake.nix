@@ -32,7 +32,7 @@
 
             outputHashAlgo = "sha256";
             outputHashMode = "recursive";
-            outputHash = "sha256-40QDCyEcBA8rZBohxlq/CF5VWaVSIIBMS+NwElzqPmY=";
+            outputHash = "sha256-xbBgYVWdM12f3I7FQPB+6mGvRm5FGoNStPC2iYp4kOA=";
           };
         in
         pkgs.stdenv.mkDerivation {
