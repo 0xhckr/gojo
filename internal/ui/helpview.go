@@ -37,7 +37,17 @@ var helpSections = []helpSection{
 		{"b", "bookmark mode"},
 		{"g", "git mode"},
 		{"u", "jj undo"},
-		{"r", "jj redo"},
+		{"R", "jj redo"},
+		{"r", "rebase mode"},
+	}},
+	{title: "Rebase Mode", color: colYellow, bindings: []helpBinding{
+		{"r", "pick up selected commit"},
+		{"↑/k, ↓/j", "move destination"},
+		{"Home / G", "destination to top / bottom"},
+		{"s", "toggle scope  (-r single ⇄ -s subtree)"},
+		{"tab", "cycle placement  (onto / after / before)"},
+		{"enter", "confirm rebase"},
+		{"esc / q", "cancel"},
 	}},
 	{title: "Diff Panel", color: colGreen, bindings: []helpBinding{
 		{"↑/k, ↓/j", "scroll diff"},

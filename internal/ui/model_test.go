@@ -141,6 +141,51 @@ func TestBookmarkModeRendering(t *testing.T) {
 	}
 }
 
+func TestRebaseModeFlow(t *testing.T) {
+	m := bootedModel(t)
+	if len(m.entries) < 2 {
+		t.Skip("need at least two revisions")
+	}
+
+	// Pick up the selected commit as the rebase source.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if !m.rebaseMode {
+		t.Fatal("r did not enter rebase mode")
+	}
+	if m.rebaseSource != 0 {
+		t.Errorf("rebaseSource = %d, want 0", m.rebaseSource)
+	}
+	if m.rebaseDest == m.rebaseSource {
+		t.Error("destination should not start equal to source")
+	}
+	plain := stripView(m)
+	if !strings.Contains(plain, "[rebase]") {
+		t.Error("status bar missing rebase menu")
+	}
+	if !strings.Contains(plain, "● moving") || !strings.Contains(plain, "◀ onto") {
+		t.Error("log missing source/destination markers")
+	}
+
+	// Toggle scope (-r → -s) and cycle placement (onto → after).
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if !m.rebaseSubtree {
+		t.Error("s did not toggle subtree scope")
+	}
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	if m.rebasePlace != 1 {
+		t.Errorf("rebasePlace = %d, want 1 (after)", m.rebasePlace)
+	}
+	if !strings.Contains(stripView(m), "◀ after") {
+		t.Error("destination marker did not update to 'after'")
+	}
+
+	// Escape cancels without leaving rebase mode active.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.rebaseMode {
+		t.Error("esc did not exit rebase mode")
+	}
+}
+
 func TestGitModeRendering(t *testing.T) {
 	m := bootedModel(t)
 	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})

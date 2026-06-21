@@ -160,6 +160,16 @@ func (r *Runner) Redo() error {
 	return err
 }
 
+// Rebase moves a revision to a new location in the graph.
+//
+// srcFlag selects what moves: "-r" (the single revision) or "-s" (the revision
+// and all of its descendants). placeFlag selects where it lands relative to
+// dest: "--onto" (onto dest, as a child), "--insert-after", or "--insert-before".
+func (r *Runner) Rebase(srcFlag, src, placeFlag, dest string) error {
+	_, err := r.run("rebase", srcFlag, src, placeFlag, dest)
+	return err
+}
+
 // BookmarkCreate creates a bookmark, optionally at rev.
 func (r *Runner) BookmarkCreate(name, rev string) error {
 	args := []string{"bookmark", "create", name}

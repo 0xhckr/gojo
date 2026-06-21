@@ -8,6 +8,16 @@ import (
 
 func commitLines(e jj.LogEntry) int { return 2 + len(e.EdgeLines) }
 
+// rebaseView carries the live rebase-mode selection into log rendering so the
+// source (picked-up) and destination (drop target) commits can be marked.
+type rebaseView struct {
+	active  bool
+	source  int // index into entries of the picked-up commit
+	dest    int // index into entries of the drop target
+	subtree bool
+	place   int // index into rebasePlaceLabels
+}
+
 // logWindow computes the visible [off, end) range of commits for the given
 // cursor, prior offset, and available line budget (variable-height commits).
 func logWindow(entries []jj.LogEntry, cursor, offset, availableLines int) (int, int) {
@@ -44,20 +54,27 @@ func logWindow(entries []jj.LogEntry, cursor, offset, availableLines int) (int, 
 }
 
 // renderLog produces up to height lines for the commit log.
-func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiLoading map[string]bool, spinnerFrame int) []string {
+func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView) []string {
 	if len(entries) == 0 {
 		return padLines([]string{plainRow(width, seg{text: "  no revisions found", fg: colGray})}, height)
 	}
 
+	// In rebase mode the destination indicator is the focused row that drives
+	// scrolling and carries the cursor highlight.
+	focus := cursor
+	if rb.active {
+		focus = rb.dest
+	}
+
 	availableLines := height - 1 // top padding
-	off, end := logWindow(entries, cursor, offset, availableLines)
+	off, end := logWindow(entries, focus, offset, availableLines)
 
 	var lines []string
 	lines = append(lines, "") // top padding
 
 	for i := off; i < end; i++ {
 		e := entries[i]
-		highlighted := i == cursor
+		highlighted := i == focus
 		var bg lipgloss.TerminalColor
 		if highlighted {
 			bg = colDarkPurple
@@ -89,6 +106,18 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 		for _, bm := range e.Bookmarks {
 			hs = append(hs, seg{text: " "})
 			hs = append(hs, seg{text: bm, fg: colGreen, bold: true})
+		}
+		// Rebase-mode markers: source (the picked-up commit) and destination
+		// (where it will land, labelled with the current placement).
+		if rb.active && i == rb.source {
+			tag := "  ● moving"
+			if rb.subtree {
+				tag = "  ● moving +descendants"
+			}
+			hs = append(hs, seg{text: tag, fg: colMagenta, bold: true})
+		}
+		if rb.active && i == rb.dest {
+			hs = append(hs, seg{text: "  ◀ " + rebasePlaceLabels[rb.place], fg: colYellow, bold: true})
 		}
 		lines = append(lines, renderRow(width, bg, hs))
 

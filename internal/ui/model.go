@@ -22,6 +22,12 @@ const (
 	viewHelp
 )
 
+// Rebase placement options, indexed by Model.rebasePlace.
+var (
+	rebasePlaceFlags  = []string{"--onto", "--insert-after", "--insert-before"}
+	rebasePlaceLabels = []string{"onto", "after", "before"}
+)
+
 // Model is the root Bubble Tea model.
 type Model struct {
 	width, height int
@@ -67,6 +73,14 @@ type Model struct {
 	remoteMode   bool
 	remoteAction string // "" | a l r m s
 	remoteInput  string
+
+	// Rebase mode. Pick up the selected commit, then move a destination
+	// indicator through the log to choose where it lands.
+	rebaseMode    bool
+	rebaseSource  int  // index into entries of the picked-up commit
+	rebaseDest    int  // index into entries of the drop target (moves with j/k)
+	rebaseSubtree bool // false → -r (single), true → -s (commit + descendants)
+	rebasePlace   int  // index into rebasePlaceFlags: 0 onto, 1 after, 2 before
 
 	// AI describe.
 	aiLoading      map[string]bool
@@ -333,8 +347,14 @@ func (m *Model) recomputeOffset() {
 	if m.cursor < 0 {
 		m.cursor = 0
 	}
+	// In rebase mode the destination indicator drives scrolling, so it stays
+	// on screen as the user moves it.
+	cur := m.cursor
+	if m.rebaseMode {
+		cur = min(max(0, m.rebaseDest), len(m.entries)-1)
+	}
 	avail := m.contentHeight() - 1
-	m.offset, _ = logWindow(m.entries, m.cursor, m.offset, avail)
+	m.offset, _ = logWindow(m.entries, cur, m.offset, avail)
 }
 
 func (m Model) contentHeight() int {
@@ -386,6 +406,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.gitMode {
 		return m.handleGitKey(msg, k)
+	}
+
+	if m.rebaseMode {
+		return m.handleRebaseKey(k)
 	}
 
 	// Global keys.
@@ -553,11 +577,97 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 	case "u":
 		r := m.runner
 		return m, m.simpleCmd(func() error { return r.Undo() }, "undone")
-	case "r":
+	case "R":
 		r := m.runner
 		return m, m.simpleCmd(func() error { return r.Redo() }, "redone")
+	case "r":
+		if len(m.entries) < 2 {
+			m.errMsg = "need at least two revisions to rebase"
+			return m, nil
+		}
+		if e := m.selectedEntry(); e != nil {
+			m.rebaseMode = true
+			m.rebaseSource = m.cursor
+			m.rebaseSubtree = false
+			m.rebasePlace = 0
+			// Start the destination on a neighbouring commit so it is never
+			// equal to the source on entry.
+			m.rebaseDest = m.cursor + 1
+			if m.rebaseDest >= len(m.entries) {
+				m.rebaseDest = m.cursor - 1
+			}
+			m.errMsg = ""
+			m.message = ""
+			m.recomputeOffset()
+		}
+		return m, nil
 	}
 	return m, nil
+}
+
+func (m Model) handleRebaseKey(k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "esc", "q":
+		m.rebaseMode = false
+		m.message = "rebase cancelled"
+		m.recomputeOffset()
+		return m, nil
+	case "up", "k":
+		if m.rebaseDest > 0 {
+			m.rebaseDest--
+		}
+		m.recomputeOffset()
+		return m, nil
+	case "down", "j":
+		if m.rebaseDest < len(m.entries)-1 {
+			m.rebaseDest++
+		}
+		m.recomputeOffset()
+		return m, nil
+	case "home":
+		m.rebaseDest = 0
+		m.recomputeOffset()
+		return m, nil
+	case "end", "G":
+		m.rebaseDest = len(m.entries) - 1
+		m.recomputeOffset()
+		return m, nil
+	case "s":
+		m.rebaseSubtree = !m.rebaseSubtree
+		return m, nil
+	case "tab":
+		m.rebasePlace = (m.rebasePlace + 1) % len(rebasePlaceFlags)
+		return m, nil
+	case "enter":
+		return m.execRebase()
+	}
+	return m, nil
+}
+
+func (m Model) execRebase() (tea.Model, tea.Cmd) {
+	if m.rebaseSource < 0 || m.rebaseSource >= len(m.entries) ||
+		m.rebaseDest < 0 || m.rebaseDest >= len(m.entries) {
+		m.rebaseMode = false
+		return m, nil
+	}
+	if m.rebaseSource == m.rebaseDest {
+		m.errMsg = "rebase destination is the source"
+		return m, nil
+	}
+	srcFlag := "-r"
+	if m.rebaseSubtree {
+		srcFlag = "-s"
+	}
+	src := m.entries[m.rebaseSource].ChangeID
+	dest := m.entries[m.rebaseDest].ChangeID
+	placeFlag := rebasePlaceFlags[m.rebasePlace]
+	label := rebasePlaceLabels[m.rebasePlace]
+	m.rebaseMode = false
+	r := m.runner
+	return m, m.simpleCmd(
+		func() error { return r.Rebase(srcFlag, src, placeFlag, dest) },
+		"rebased "+src+" "+label+" "+dest,
+	)
 }
 
 func (m Model) handleBookmarkKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
@@ -897,7 +1007,14 @@ func (m Model) View() string {
 	case m.diffOpen:
 		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffLoading, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY)...)
 	default:
-		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.aiLoading, m.spinnerFrame)...)
+		rb := rebaseView{
+			active:  m.rebaseMode,
+			source:  m.rebaseSource,
+			dest:    m.rebaseDest,
+			subtree: m.rebaseSubtree,
+			place:   m.rebasePlace,
+		}
+		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.aiLoading, m.spinnerFrame, rb)...)
 	}
 
 	// Autocomplete suggestions.
@@ -989,6 +1106,26 @@ func (m Model) renderStatusBar() string {
 		segs = append(segs, seg{text: " ", fg: colDarkOrange})
 		return bgRow(m.width, colDarkerGray, segs...)
 
+	case m.rebaseMode:
+		scope := "-r"
+		if m.rebaseSubtree {
+			scope = "-s (+descendants)"
+		}
+		src, dest := "?", "?"
+		if m.rebaseSource >= 0 && m.rebaseSource < len(m.entries) {
+			src = m.entries[m.rebaseSource].ChangeID
+		}
+		if m.rebaseDest >= 0 && m.rebaseDest < len(m.entries) {
+			dest = m.entries[m.rebaseDest].ChangeID
+		}
+		segs := []seg{{text: " [rebase] ", fg: colYellow, bold: true}}
+		segs = append(segs, seg{text: scope + " ", fg: colMagenta})
+		segs = append(segs, seg{text: src, fg: colMagenta, bold: true})
+		segs = append(segs, seg{text: " " + rebasePlaceLabels[m.rebasePlace] + " ", fg: colYellow})
+		segs = append(segs, seg{text: dest, fg: colMagenta, bold: true})
+		segs = append(segs, seg{text: "   j/k move · s scope · tab place · ⏎ confirm · esc cancel", fg: colGray})
+		return bgRow(m.width, colDarkerGray, segs...)
+
 	case m.errMsg != "":
 		msg := m.errMsg
 		limit := m.width - 4
@@ -1020,7 +1157,7 @@ func (m Model) renderHelpBar() string {
 	segs = append(segs, hlSegs([][2]string{
 		{"⏎diff", "⏎"}, {"describe", "d"},
 		{"AI Desc", "D"}, {"bookmark", "b"}, {"git", "g"},
-		{"undo", "u"}, {"redo", "r"}, {"edit", "e"}, {"new", "n"},
+		{"undo", "u"}, {"rebase", "r"}, {"edit", "e"}, {"new", "n"},
 		{"abandon", "a"}, {"?help", "?"}, {"quit", "q"},
 	}, colGray, colPurple, "  ")...)
 	return bgRow(m.width, colDarkerGray, segs...)
