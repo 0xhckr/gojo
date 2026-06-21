@@ -348,13 +348,17 @@ func (m Model) contentHeight() int {
 	return h
 }
 
-// diffMaxScroll is the furthest scroll offset that still shows content.
+// diffMaxScroll is the furthest scroll offset that still keeps the last
+// screenful of the (status + diff) body in view.
 func (m Model) diffMaxScroll() int {
-	total := len(m.diffRows)
-	if total == 0 && m.diffRaw != "" {
-		total = strings.Count(m.diffRaw, "\n") + 1
+	statusCount := len(m.diffStatus)
+	if statusCount == 0 {
+		statusCount = 1
 	}
-	return max(0, total-1)
+	headLen := statusCount + 2 // status header + items + separator
+	bodyTotal := headLen + diffBodyLen(m.diffRows, m.diffRaw)
+	bodyH := m.contentHeight() - 1 // minus the sticky title bar
+	return max(0, bodyTotal-bodyH)
 }
 
 func (m Model) selectedEntry() *jj.LogEntry {

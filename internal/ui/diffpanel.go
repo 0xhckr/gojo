@@ -67,63 +67,80 @@ func statusSym(k jj.StatusKind) string {
 // renderDiffPanel produces exactly height lines for the diff panel. Only the
 // visible window of rows is styled, so scroll cost is independent of diff size.
 func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int) []string {
-	var out []string
-
-	// Title bar.
+	// Title bar — the only sticky chrome; status + separator + diff all scroll
+	// together below it as one body.
 	titleLine := " " + rev
 	if loading {
 		titleLine += "  loading…"
 	}
 	titleLine += "  (enter/q to close) "
-	out = append(out, bgRow(width, colDarkPurple, seg{text: titleLine, fg: colWhite}))
-
-	// Status header.
-	out = append(out, plainRow(width, seg{text: " status", fg: colGray}))
-
-	if len(status) == 0 {
-		out = append(out, plainRow(width, seg{text: "  (no changes)", fg: colGray}))
-	} else {
-		for _, e := range status {
-			color := statusColors[e.Status]
-			if color == nil {
-				color = colGray
-			}
-			out = append(out, plainRow(width,
-				seg{text: "  " + statusSym(e.Status) + " ", fg: color},
-				seg{text: e.Path, fg: color},
-			))
-		}
-	}
-
-	// Separator.
-	out = append(out, plainRow(width, seg{text: strings.Repeat("─", width), fg: diffBorder}))
+	out := []string{bgRow(width, colDarkPurple, seg{text: titleLine, fg: colWhite})}
 
 	contentH := height - len(out)
 	if contentH < 0 {
 		contentH = 0
 	}
 
-	// Render only the visible window so scroll cost stays constant regardless
-	// of how large the diff is.
-	var content []string
+	// The scrollable body is: status header + status items + separator + diff.
+	// The status block is small and built in full; diff rows (potentially huge)
+	// are styled only for the visible window, so scroll cost stays constant.
+	head := buildStatusHead(width, status)
+	bodyTotal := len(head) + diffBodyLen(rows, rawContent)
+
+	start, end := visibleRange(scrollY, contentH, bodyTotal)
+	gutterWidth := digits*2 + 4
+	var rawLines []string
 	if len(rows) == 0 && rawContent != "" {
-		// Raw fallback (bookmark/remote list output).
-		lines := strings.Split(rawContent, "\n")
-		start, end := visibleRange(scrollY, contentH, len(lines))
-		for _, l := range lines[start:end] {
-			content = append(content, plainRow(width, seg{text: l, fg: colWhite}))
+		rawLines = strings.Split(rawContent, "\n")
+	}
+
+	var content []string
+	for i := start; i < end; i++ {
+		if i < len(head) {
+			content = append(content, head[i])
+			continue
 		}
-	} else {
-		gutterWidth := digits*2 + 4
-		start, end := visibleRange(scrollY, contentH, len(rows))
-		for i := start; i < end; i++ {
-			content = append(content, renderDiffRow(width, gutterWidth, digits, rows[i]))
+		idx := i - len(head)
+		if rawLines != nil {
+			content = append(content, plainRow(width, seg{text: rawLines[idx], fg: colWhite}))
+		} else {
+			content = append(content, renderDiffRow(width, gutterWidth, digits, rows[idx]))
 		}
 	}
 
 	content = padLines(content, contentH)
 	out = append(out, content...)
 	return padLines(out, height)
+}
+
+// buildStatusHead renders the status header, items, and separator — the small
+// fixed-size top of the scrollable body.
+func buildStatusHead(width int, status []jj.StatusEntry) []string {
+	head := []string{plainRow(width, seg{text: " status", fg: colGray})}
+	if len(status) == 0 {
+		head = append(head, plainRow(width, seg{text: "  (no changes)", fg: colGray}))
+	} else {
+		for _, e := range status {
+			color := statusColors[e.Status]
+			if color == nil {
+				color = colGray
+			}
+			head = append(head, plainRow(width,
+				seg{text: "  " + statusSym(e.Status) + " ", fg: color},
+				seg{text: e.Path, fg: color},
+			))
+		}
+	}
+	head = append(head, plainRow(width, seg{text: strings.Repeat("─", width), fg: diffBorder}))
+	return head
+}
+
+// diffBodyLen is the number of diff (or raw) lines below the status head.
+func diffBodyLen(rows []diffRow, rawContent string) int {
+	if len(rows) == 0 && rawContent != "" {
+		return strings.Count(rawContent, "\n") + 1
+	}
+	return len(rows)
 }
 
 // visibleRange clamps a scroll offset to a [start, end) window of at most
