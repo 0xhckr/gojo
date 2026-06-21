@@ -1,5 +1,5 @@
 {
-  description = "gojo – a TUI for jj (Jujutsu VCS)";
+  description = "gojo – a TUI for jj (Jujutsu VCS), in Go";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -13,56 +13,36 @@
     in
     {
       packages = forAllSystems (pkgs:
-        let
-          # Fixed-output derivation: fetches bun deps with network access.
-          # Hash is verified, so this is safe. Update when bun.lock changes.
-          bunDeps = pkgs.stdenv.mkDerivation {
-            name = "gojo-${version}-bun-deps";
-            src = self;
-
-            nativeBuildInputs = [ pkgs.bun ];
-
-            dontBuild = true;
-            dontFixup = true;
-
-            installPhase = ''
-              export HOME=$TMPDIR
-              bun install --frozen-lockfile --no-save
-              cp -r node_modules $out
-            '';
-
-            outputHashAlgo = "sha256";
-            outputHashMode = "recursive";
-            outputHash = "sha256-xbBgYVWdM12f3I7FQPB+6mGvRm5FGoNStPC2iYp4kOA=";
-          };
-        in
         {
-          default = pkgs.stdenv.mkDerivation {
+          default = pkgs.buildGoModule {
             pname = "gojo";
             inherit version;
 
             src = self;
 
-            nativeBuildInputs = [ pkgs.bun ];
+            # proxyVendor uses `go mod download` (full module zips) instead of
+            # `go mod vendor`. Vendoring prunes to the build platform's
+            # imports, so its hash differs across GOOS/GOARCH; proxyVendor
+            # yields one vendorHash that's stable across all `systems` above.
+            proxyVendor = true;
 
-            configurePhase = ''
-              # Copy pre-fetched node_modules so bun build can resolve deps
-              cp -r ${bunDeps} node_modules
-              chmod -R u+w node_modules
-            '';
+            # Hash of the downloaded Go modules. When go.sum changes, run
+            # `nix build` once and replace this with the "got:" value.
+            # Stable across systems thanks to proxyVendor above.
+            vendorHash = "sha256-Ln1ztajyLuXmMJet53FOAfFIMi0t1Qmp/9oAK2TAo+0=";
 
-            buildPhase = ''
-              export HOME=$TMPDIR
-              bun build --compile src/main.tsx --outfile gojo
-            '';
-
-            dontStrip = true;
-
-            installPhase = ''
-              mkdir -p $out/bin
-              install -m755 gojo $out/bin/gojo
+            # gojo shells out to `jj` at runtime; keep it on PATH.
+            nativeBuildInputs = [ pkgs.makeWrapper ];
+            postInstall = ''
+              wrapProgram $out/bin/gojo --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.jujutsu ]}
               ln -s gojo $out/bin/gj
             '';
+
+            meta = with pkgs.lib; {
+              description = "Fullscreen terminal UI for jj (Jujutsu VCS)";
+              mainProgram = "gojo";
+              license = licenses.mit;
+            };
           };
         }
       );
@@ -77,15 +57,14 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = with pkgs; [
-            bun
-            nodejs_24
-            pnpm
-            typescript
+            go
+            gopls
+            go-tools
             jujutsu
           ];
 
           shellHook = ''
-            echo "gojo dev shell – bun $(bun --version)"
+            echo "gojo dev shell – $(go version)"
           '';
         };
       });

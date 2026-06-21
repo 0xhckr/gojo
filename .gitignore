@@ -1,5 +1,10 @@
 .direnv/
 result
-node_modules/
+
+# Go build output
+/gojo
+/gj
 *.exe
-dist/
+
+# Vendored deps — resolved from go.mod/go.sum via the module proxy
+/vendor/

@@ -1,10 +1,10 @@
 # gojo
 
-A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), built with [OpenTUI](https://github.com/nicetsai/opentui) and React, running on [Bun](https://bun.sh).
+A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), built in [Go](https://go.dev) with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lip Gloss](https://github.com/charmbracelet/lipgloss).
 
 <p align="center">
-  <img src="https://img.shields.io/badge/bun-1.3-000?style=flat&logo=bun" alt="Bun">
-  <img src="https://img.shields.io/badge/typescript-5.9-3178C6?style=flat&logo=typescript" alt="TypeScript">
+  <img src="https://img.shields.io/badge/go-1.24+-00ADD8?style=flat&logo=go" alt="Go">
+  <img src="https://img.shields.io/badge/bubbletea-charm-FF75B7?style=flat" alt="Bubble Tea">
   <img src="https://img.shields.io/badge/jj-v0.41+-orange?style=flat" alt="jj v0.41+">
 </p>
 
@@ -16,45 +16,51 @@ A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), b
 ## Features
 
 - **Log view** — scrollable commit graph with change IDs, authors, dates, bookmarks, and working copy highlighting
-- **Diff panel** — file status summary + diff for any commit
+- **Diff panel** — file status summary + syntax-highlighted diff for any commit
 - **Bookmark management** — create, delete, move, rename, set, track, untrack, and list bookmarks
-- **Git integration** — fetch and push from within the TUI
-- **Undo** — one-key `jj undo`
+- **Git integration** — fetch, push, and remote management from within the TUI
+- **AI commit messages** — generate a description from a commit's diff via OpenRouter
+- **Undo / redo** — one-key `jj undo` / `jj redo`
 - **Graph rendering** — native jj graph output with styled nodes (@/○/◆) and edges
 
 ## Installation
 
-### Nix dev shell (recommended)
+### Nix (recommended)
 
 ```sh
-nix develop
-pnpm install
-bun run src/main.tsx
+nix run github:0xhckr/gojo      # run directly
+# or, for development:
+nix develop                     # drops you into a shell with go + jujutsu
+go run .
 ```
 
 ### From source
 
+Requires Go 1.24+ and `jj` in `$PATH`.
+
 ```sh
-pnpm install
-bun run src/main.tsx
+go build -o gojo .
+./gojo
 ```
 
 ## Requirements
 
-- [Bun](https://bun.sh) runtime (required for OpenTUI's native FFI)
+- [Go](https://go.dev) 1.24+ (to build)
 - [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS) v0.41+ in `$PATH`
 - A jj repository (run `gojo` inside any `.jj` directory)
 
 ## Configuration
 
-Gojo reads an optional TOML config file at `~/.config/gojo/gojo.toml`:
+Gojo reads an optional TOML config file at `~/.config/gojo/gojo.toml`. Values
+may also be placed under a `[tools.gojo]` section in `~/.config/jj/config.toml`
+(the standalone gojo file takes precedence).
 
 ```toml
 # OpenRouter API key for AI-generated commit messages (optional)
 openrouter_api_key = "sk-or-..."
 
 # Model to use
-openrouter_model = "anthropic/claude-sonnet-4-20250514"
+openrouter_model = "anthropic/claude-sonnet-4"
 
 # Custom prompt template for AI commit messages (optional)
 commit_prompt = "You are a software developer. Write a clear, concise commit message given the diff: "
@@ -67,8 +73,8 @@ commit_prompt = "You are a software developer. Write a clear, concise commit mes
 | Key | Action |
 |-----|--------|
 | `?` | Help |
-| `r` | Refresh |
 | `q` | Quit / close panel |
+| `ctrl+c` | Force quit |
 
 ### Log view
 
@@ -86,6 +92,7 @@ commit_prompt = "You are a software developer. Write a clear, concise commit mes
 | `b` | Bookmark mode |
 | `g` | Git mode |
 | `u` | `jj undo` |
+| `r` | `jj redo` |
 
 ### Diff panel
 
@@ -109,6 +116,7 @@ Press `b` to enter, then:
 | `s <name>` | Set bookmark to selected commit |
 | `t <name>` | Track remote bookmark |
 | `T <name>` | Untrack remote bookmark |
+| `tab` | Autocomplete (cycle suggestions) |
 | `esc` | Cancel |
 
 ### Git mode
@@ -119,25 +127,53 @@ Press `g` to enter, then:
 |-----|--------|
 | `f` | `jj git fetch` |
 | `p` | `jj git push` |
+| `r` | Remote mode |
+| `esc` | Cancel |
+
+### Remote mode
+
+Press `r` in git mode, then:
+
+| Key | Action |
+|-----|--------|
+| `a <name> <url>` | Add remote |
+| `l` | List remotes |
+| `r <name>` | Remove remote |
+| `m <old> <new>` | Rename remote |
+| `s <name> <url>` | Set remote URL |
 | `esc` | Cancel |
 
 ## Project structure
 
 ```
-src/
-  main.tsx              Entry point — creates renderer, mounts React
-  App.tsx               Main component — views, keyboard, state
-  jj.ts                 jj CLI wrapper, parser, config loader
-  styles.ts             Color palette and constants
-  hooks.ts              Custom React hooks
-  views/
-    LogView.tsx         Commit list with graph
-    DiffPanel.tsx       Diff viewer
-    HelpView.tsx        Keybinding reference
-package.json            Dependencies
-tsconfig.json           TypeScript + JSX config
-flake.nix               Nix dev shell
+main.go                 Entry point — starts the Bubble Tea program
+internal/
+  jj/
+    jj.go               jj CLI wrapper + log/status parsers
+    config.go           config + TOML loader
+    ai.go               OpenRouter commit-message generation
+  ui/
+    model.go            Bubble Tea model: state, update, view, keybindings
+    render.go           styled-line rendering helpers (Lip Gloss)
+    styles.go           color palette and constants
+    logview.go          commit list with graph
+    diff.go             git-diff parser + chroma syntax highlighting
+    diffpanel.go        diff viewer
+    helpview.go         keybinding reference
+go.mod                  Go module + dependencies
+flake.nix              Nix dev shell + package
 ```
+
+## Dependencies
+
+Everything is pure Go — no native FFI, no Node runtime:
+
+- [bubbletea](https://github.com/charmbracelet/bubbletea) — TUI framework
+- [lipgloss](https://github.com/charmbracelet/lipgloss) — styling/layout
+- [chroma](https://github.com/alecthomas/chroma) — diff syntax highlighting
+
+The TOML config parser, unified-diff parser, and OpenRouter client are
+implemented in-tree with the standard library.
 
 ## License
 
