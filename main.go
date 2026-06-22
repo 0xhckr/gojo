@@ -20,6 +20,7 @@ func main() {
 	p := tea.NewProgram(
 		ui.NewModel(),
 		tea.WithAltScreen(),
+		tea.WithReportFocus(),
 	)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "fatal:", err)

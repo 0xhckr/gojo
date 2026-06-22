@@ -50,9 +50,10 @@ type Model struct {
 	errMsg        string
 
 	// Diff panel.
-	diffOpen    bool
-	diffRev     string
-	diffLoading bool
+	diffOpen       bool
+	diffRev        string
+	diffIsRevision bool // true: showing a revision diff (reloadable); false: a list view
+	diffLoading    bool
 	diffStatus  []jj.StatusEntry
 	diffRows    []diffRow
 	diffDigits  int // gutter width, computed once when the diff loads
@@ -297,6 +298,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.diffOpen = true
 		m.diffRev = msg.title
+		m.diffIsRevision = false
 		m.diffRaw = msg.content
 		m.diffRows = nil
 		m.diffStatus = nil
@@ -328,6 +330,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.spinnerRunning = false
 		return m, nil
+
+	case tea.FocusMsg:
+		// Terminal regained focus: the working copy may have changed underneath
+		// us (edits in another window, builds, etc.). Refresh the log + status,
+		// and reload the diff panel if it's showing a revision so its contents
+		// reflect the current working copy.
+		if !m.ready {
+			return m, nil
+		}
+		cmds := []tea.Cmd{m.refreshCmd()}
+		if m.diffOpen && m.diffIsRevision {
+			// diffRev is the change ID, a stable revset across working-copy edits.
+			cmds = append(cmds, m.openDiffCmd(m.diffRev, m.diffRev))
+		}
+		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -509,6 +526,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		if e := m.selectedEntry(); e != nil {
 			m.diffOpen = true
 			m.diffRev = e.ChangeID
+			m.diffIsRevision = true
 			m.diffLoading = true
 			m.diffScrollY = 0
 			m.diffRaw = ""
