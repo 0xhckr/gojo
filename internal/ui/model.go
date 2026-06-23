@@ -87,15 +87,24 @@ type Model struct {
 	aiLoading      map[string]bool
 	spinnerFrame   int
 	spinnerRunning bool
+
+	// Auto-refresh poll. Runs only while the terminal is focused so an idle or
+	// backgrounded gojo isn't firing jj subprocesses every couple seconds.
+	focused bool
+	polling bool
 }
 
 // NewModel builds the initial model.
 func NewModel() Model {
 	cwd, _ := os.Getwd()
 	return Model{
-		view:      viewLog,
-		cwd:       cwd,
-		home:      os.Getenv("HOME"),
+		view: viewLog,
+		cwd:  cwd,
+		home: os.Getenv("HOME"),
+		// Terminal is focused at launch and the OS may not emit an initial
+		// FocusMsg, so the poll loop (started in Init) runs from the start.
+		focused:   true,
+		polling:   true,
 		aiLoading: map[string]bool{},
 	}
 }
@@ -146,11 +155,13 @@ type listLoadedMsg struct {
 
 type spinnerTickMsg struct{}
 
+type pollMsg struct{}
+
 // ── Init ────────────────────────────────────────────────────────────────────
 
-// Init kicks off configuration loading.
+// Init kicks off configuration loading and the auto-refresh poll loop.
 func (m Model) Init() tea.Cmd {
-	return boot
+	return tea.Batch(boot, pollTick())
 }
 
 func boot() tea.Msg {
@@ -223,6 +234,23 @@ func spinnerTick() tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
 		return spinnerTickMsg{}
 	})
+}
+
+func pollTick() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return pollMsg{}
+	})
+}
+
+// refreshFocusedCmds builds the refresh work shared by focus and poll: reload
+// the log + status, plus the open diff when it's a revision view.
+func (m Model) refreshFocusedCmds() []tea.Cmd {
+	cmds := []tea.Cmd{m.refreshCmd()}
+	if m.diffOpen && m.diffIsRevision {
+		// diffRev is the change ID, a stable revset across working-copy edits.
+		cmds = append(cmds, m.openDiffCmd(m.diffRev, m.diffRev))
+	}
+	return cmds
 }
 
 // ── Update ──────────────────────────────────────────────────────────────────
@@ -333,18 +361,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.FocusMsg:
 		// Terminal regained focus: the working copy may have changed underneath
-		// us (edits in another window, builds, etc.). Refresh the log + status,
-		// and reload the diff panel if it's showing a revision so its contents
-		// reflect the current working copy.
+		// us (edits in another window, builds, etc.). Refresh immediately and
+		// (re)start the poll loop if it isn't already running.
 		if !m.ready {
 			return m, nil
 		}
-		cmds := []tea.Cmd{m.refreshCmd()}
-		if m.diffOpen && m.diffIsRevision {
-			// diffRev is the change ID, a stable revset across working-copy edits.
-			cmds = append(cmds, m.openDiffCmd(m.diffRev, m.diffRev))
+		m.focused = true
+		cmds := m.refreshFocusedCmds()
+		if !m.polling {
+			m.polling = true
+			cmds = append(cmds, pollTick())
 		}
 		return m, tea.Batch(cmds...)
+
+	case tea.BlurMsg:
+		// Terminal lost focus: stop refreshing. The poll loop self-terminates on
+		// its next tick when it sees !focused.
+		m.focused = false
+		return m, nil
+
+	case pollMsg:
+		// Drop the loop when unfocused or not ready; FocusMsg restarts it.
+		if !m.ready || !m.focused {
+			m.polling = false
+			return m, nil
+		}
+		return m, tea.Batch(append(m.refreshFocusedCmds(), pollTick())...)
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
