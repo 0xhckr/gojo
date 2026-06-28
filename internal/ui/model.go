@@ -195,9 +195,9 @@ func (m Model) refreshCmd() tea.Cmd {
 			logErr  error
 		)
 		if m.showAllRev {
-			// "all()" reaches the root commit; use a generous limit so the
-			// entire history is shown rather than truncated at 50.
-			entries, logErr = r.LogRevset("all()", 10000)
+			// No -n cap: stream every revision down to the root. Rendering is
+			// windowed (logview.go), so only visible rows are styled.
+			entries, logErr = r.LogRevset("all()", 0)
 		} else {
 			entries, logErr = r.Log(50)
 		}

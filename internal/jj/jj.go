@@ -76,18 +76,29 @@ func (r *Runner) run(args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-// Log returns up to limit commits, newest first, with graph data.
+// Log returns commits for jj's default revset, newest first, with graph
+// data. A non-positive limit defaults to 50.
 func (r *Runner) Log(limit int) ([]LogEntry, error) {
-	return r.LogRevset("", limit)
-}
-
-// LogRevset returns up to limit commits for the given revset (empty = default),
-// newest first, with graph data.
-func (r *Runner) LogRevset(revset string, limit int) ([]LogEntry, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	args := []string{"log", "--color", "never", "-T", logTemplate, "-n", fmt.Sprint(limit)}
+	return r.LogRevset("", limit)
+}
+
+// LogRevset returns commits for the given revset (empty = jj's default
+// revsets.log revset), newest first, with graph data.
+//
+// If limit > 0, a "-n <limit>" cap is sent. If limit <= 0, no cap is sent and
+// jj streams every matching revision down to the root — use this only for
+// bounded views (e.g. "all()" in modest repos), since the result set is held
+// in memory. (jj 0.41 has no --skip flag and revsets have no offset operator,
+// so true server-side pagination isn't available; rendering is windowed by the
+// caller, so only visible rows are styled.)
+func (r *Runner) LogRevset(revset string, limit int) ([]LogEntry, error) {
+	args := []string{"log", "--color", "never", "-T", logTemplate}
+	if limit > 0 {
+		args = append(args, "-n", fmt.Sprint(limit))
+	}
 	if revset != "" {
 		args = append(args, "-r", revset)
 	}
