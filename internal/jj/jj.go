@@ -78,10 +78,20 @@ func (r *Runner) run(args ...string) (string, error) {
 
 // Log returns up to limit commits, newest first, with graph data.
 func (r *Runner) Log(limit int) ([]LogEntry, error) {
+	return r.LogRevset("", limit)
+}
+
+// LogRevset returns up to limit commits for the given revset (empty = default),
+// newest first, with graph data.
+func (r *Runner) LogRevset(revset string, limit int) ([]LogEntry, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	out, err := r.run("log", "--color", "never", "-T", logTemplate, "-n", fmt.Sprint(limit))
+	args := []string{"log", "--color", "never", "-T", logTemplate, "-n", fmt.Sprint(limit)}
+	if revset != "" {
+		args = append(args, "-r", revset)
+	}
+	out, err := r.run(args...)
 	if err != nil {
 		return nil, err
 	}
