@@ -465,7 +465,7 @@ func (m *Model) recomputeOffset() {
 }
 
 func (m Model) contentHeight() int {
-	h := m.height - 4
+	h := m.height - 3 - m.helpBarHeight()
 	if m.suggestionsVisible() {
 		h--
 	}
@@ -574,7 +574,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleHelpKey(k string) Model {
-	contentH := m.height - 5
+	contentH := m.contentHeight() - 1
 	maxS := helpMaxScroll(contentH)
 	half := max(1, contentH/2)
 	switch k {
@@ -1219,7 +1219,7 @@ func (m Model) View() string {
 
 	// Status bar + help bar.
 	lines = append(lines, m.renderStatusBar())
-	lines = append(lines, m.renderHelpBar())
+	lines = append(lines, m.renderHelpBar()...)
 
 	return strings.Join(padLines(lines, m.height), "\n")
 }
@@ -1371,15 +1371,67 @@ func (m Model) selChangeID() string {
 	return ""
 }
 
-func (m Model) renderHelpBar() string {
-	segs := []seg{{text: " ", fg: colGray}}
-	segs = append(segs, hlSegs([][2]string{
-		{"⏎diff", "⏎"}, {"describe", "d"},
-		{"AI Desc", "D"}, {"bookmark", "b"}, {"git", "g"},
-		{"undo", "u"}, {"rebase", "r"}, {"squash", "s"}, {"edit", "e"}, {"new", "n"},
-		{"abandon", "a"}, {"?help", "?"}, {"quit", "q"},
-	}, colGray, colPurple, "  ")...)
-	return bgRow(m.width, colDarkerGray, segs...)
+// helpBarItems is the ordered list of shortcut hints shown in the bottom bar.
+var helpBarItems = [][2]string{
+	{"⏎diff", "⏎"}, {"describe", "d"},
+	{"AI Desc", "D"}, {"bookmark", "b"}, {"git", "g"},
+	{"undo", "u"}, {"rebase", "r"}, {"squash", "s"}, {"edit", "e"}, {"new", "n"},
+	{"abandon", "a"}, {"?help", "?"}, {"quit", "q"},
+}
+
+const helpBarSep = "  "
+
+// helpBarHeight returns the number of terminal rows the wrapped help bar needs
+// at the current width. It mirrors the packing logic in renderHelpBar.
+func (m Model) helpBarHeight() int {
+	return len(packHelpBarRows(m.width))
+}
+
+// packHelpBarRows greedily packs helpBarItems into rows no wider than width,
+// returning the segment slices per row. Each row begins with a leading space
+// and items are separated by helpBarSep (two spaces).
+func packHelpBarRows(width int) [][]seg {
+	if width <= 1 {
+		return [][]seg{{}}
+	}
+	var rows [][]seg
+	cur := []seg{{text: " ", fg: colGray}}
+	curW := 1
+	for _, it := range helpBarItems {
+		itemW := lipgloss.Width(it[0])
+		addW := itemW
+		if len(cur) > 1 { // row already has an item beyond the leading space
+			addW += len(helpBarSep)
+		}
+		// If this item won't fit, flush the current row and start a new one —
+		// unless the current row only holds the leading space (lone item wider
+		// than the terminal), in which case we let it overflow and clip.
+		if curW+addW > width && len(cur) > 1 {
+			rows = append(rows, cur)
+			cur = []seg{{text: " ", fg: colGray}}
+			curW = 1
+			addW = itemW
+		}
+		if len(cur) > 1 {
+			cur = append(cur, seg{text: helpBarSep, fg: colGray})
+			curW += len(helpBarSep)
+		}
+		cur = append(cur, hlSegs([][2]string{it}, colGray, colPurple, "")...)
+		curW += itemW
+	}
+	rows = append(rows, cur)
+	return rows
+}
+
+// renderHelpBar renders the shortcut hints, wrapping onto extra rows when the
+// terminal is too narrow to fit them all on one line.
+func (m Model) renderHelpBar() []string {
+	packed := packHelpBarRows(m.width)
+	out := make([]string, len(packed))
+	for i, row := range packed {
+		out[i] = bgRow(m.width, colDarkerGray, row...)
+	}
+	return out
 }
 
 func hlSegs(items [][2]string, base, hlc lipgloss.TerminalColor, sep string) []seg {
