@@ -39,6 +39,7 @@ var helpSections = []helpSection{
 		{"u", "jj undo"},
 		{"R", "jj redo"},
 		{"r", "rebase mode"},
+		{"s", "squash mode"},
 	}},
 	{title: "Rebase Mode", color: colYellow, bindings: []helpBinding{
 		{"r", "pick up selected commit"},
@@ -47,6 +48,13 @@ var helpSections = []helpSection{
 		{"s", "toggle scope  (-r single ⇄ -s subtree)"},
 		{"tab", "cycle placement  (onto / after / before)"},
 		{"enter", "confirm rebase"},
+		{"esc / q", "cancel"},
+	}},
+	{title: "Squash Mode", color: colYellow, bindings: []helpBinding{
+		{"s", "pick selected commit to squash"},
+		{"↑/k, ↓/j", "move destination"},
+		{"Home / G", "destination to top / bottom"},
+		{"enter", "confirm  (fold changes into destination)"},
 		{"esc / q", "cancel"},
 	}},
 	{title: "Diff Panel", color: colGreen, bindings: []helpBinding{

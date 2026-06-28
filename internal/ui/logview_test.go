@@ -34,7 +34,7 @@ func TestRenderLogElidedPlacement(t *testing.T) {
 			EdgeLines: []string{"~"}},
 	}
 
-	lines := renderLog(80, 20, entries, 0, 0, nil, 0, rebaseView{})
+	lines := renderLog(80, 20, entries, 0, 0, nil, 0, rebaseView{}, squashView{})
 
 	dBody := lineIndex(lines, "D")
 	elided := lineIndex(lines, "(elided revisions)")

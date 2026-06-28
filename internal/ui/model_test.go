@@ -186,6 +186,46 @@ func TestRebaseModeFlow(t *testing.T) {
 	}
 }
 
+func TestSquashModeFlow(t *testing.T) {
+	m := bootedModel(t)
+	if len(m.entries) < 2 {
+		t.Skip("need at least two revisions")
+	}
+
+	// Pick up the selected commit as the squash source.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if !m.squashMode {
+		t.Fatal("s did not enter squash mode")
+	}
+	if m.squashSource != 0 {
+		t.Errorf("squashSource = %d, want 0", m.squashSource)
+	}
+	if m.squashDest == m.squashSource {
+		t.Error("destination should not start equal to source")
+	}
+	plain := stripView(m)
+	if !strings.Contains(plain, "[squash]") {
+		t.Error("status bar missing squash menu")
+	}
+	if !strings.Contains(plain, "● squashing") || !strings.Contains(plain, "◀ into") {
+		t.Error("log missing source/destination markers")
+	}
+
+	// Destination moves within bounds.
+	dest := m.squashDest
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if m.squashDest < 0 || m.squashDest >= len(m.entries) {
+		t.Errorf("squashDest out of bounds: %d", m.squashDest)
+	}
+	_ = dest
+
+	// Escape cancels without leaving squash mode active.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.squashMode {
+		t.Error("esc did not exit squash mode")
+	}
+}
+
 func TestGitModeRendering(t *testing.T) {
 	m := bootedModel(t)
 	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})

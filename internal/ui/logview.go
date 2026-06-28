@@ -18,6 +18,15 @@ type rebaseView struct {
 	place   int // index into rebasePlaceLabels
 }
 
+// squashView carries the live squash-mode selection into log rendering so the
+// source (the commit being squashed) and destination (the target it folds into)
+// can be marked.
+type squashView struct {
+	active bool
+	source int // index into entries of the commit being squashed
+	dest   int // index into entries of the squash target
+}
+
 // logWindow computes the visible [off, end) range of commits for the given
 // cursor, prior offset, and available line budget (variable-height commits).
 func logWindow(entries []jj.LogEntry, cursor, offset, availableLines int) (int, int) {
@@ -54,16 +63,19 @@ func logWindow(entries []jj.LogEntry, cursor, offset, availableLines int) (int, 
 }
 
 // renderLog produces up to height lines for the commit log.
-func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView) []string {
+func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView, sq squashView) []string {
 	if len(entries) == 0 {
 		return padLines([]string{plainRow(width, seg{text: "  no revisions found", fg: colGray})}, height)
 	}
 
-	// In rebase mode the destination indicator is the focused row that drives
-	// scrolling and carries the cursor highlight.
+	// In rebase / squash mode the destination indicator is the focused row that
+	// drives scrolling and carries the cursor highlight.
 	focus := cursor
 	if rb.active {
 		focus = rb.dest
+	}
+	if sq.active {
+		focus = sq.dest
 	}
 
 	availableLines := height - 1 // top padding
@@ -111,6 +123,14 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 		}
 		if rb.active && i == rb.dest {
 			hs = append(hs, seg{text: "  ◀ " + rebasePlaceLabels[rb.place], fg: colYellow, bold: true})
+		}
+		// Squash-mode markers: source (the commit being folded in) and
+		// destination (the commit it gets squashed into).
+		if sq.active && i == sq.source {
+			hs = append(hs, seg{text: "  ● squashing", fg: colMagenta, bold: true})
+		}
+		if sq.active && i == sq.dest {
+			hs = append(hs, seg{text: "  ◀ into", fg: colYellow, bold: true})
 		}
 		lines = append(lines, renderRow(width, bg, hs))
 

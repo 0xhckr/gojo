@@ -83,6 +83,12 @@ type Model struct {
 	rebaseSubtree bool // false → -r (single), true → -s (commit + descendants)
 	rebasePlace   int  // index into rebasePlaceFlags: 0 onto, 1 after, 2 before
 
+	// Squash mode. Pick the selected commit, then move a destination indicator
+	// through the log to choose which commit to fold its changes into.
+	squashMode   bool
+	squashSource int // index into entries of the commit being squashed
+	squashDest   int // index into entries of the target (moves with j/k)
+
 	// AI describe.
 	aiLoading      map[string]bool
 	spinnerFrame   int
@@ -145,6 +151,12 @@ type aiDoneMsg struct {
 type describeFinishedMsg struct {
 	changeID string
 	err      error
+}
+
+type squashFinishedMsg struct {
+	from string
+	into string
+	err  error
 }
 
 type listLoadedMsg struct {
@@ -220,6 +232,17 @@ func (m Model) describeCmd(changeID string) tea.Cmd {
 	c.Dir = m.cfg.RepoRoot
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return describeFinishedMsg{changeID: changeID, err: err}
+	})
+}
+
+// squashCmd folds the changes of `from` into `into`. Run via ExecProcess (not a
+// captured subprocess) because jj opens $EDITOR to combine descriptions when
+// both revisions have one — a captured run with no TTY would fail that case.
+func (m Model) squashCmd(from, into string) tea.Cmd {
+	c := exec.Command(m.cfg.JJPath, "squash", "--from", from, "--into", into)
+	c.Dir = m.cfg.RepoRoot
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return squashFinishedMsg{from: from, into: into, err: err}
 	})
 }
 
@@ -351,6 +374,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.refreshCmd()
 
+	case squashFinishedMsg:
+		if msg.err != nil {
+			m.errMsg = msg.err.Error()
+		} else {
+			m.message = "squashed " + msg.from + " into " + msg.into
+		}
+		return m, m.refreshCmd()
+
 	case spinnerTickMsg:
 		m.spinnerFrame++
 		if len(m.aiLoading) > 0 {
@@ -412,6 +443,9 @@ func (m *Model) recomputeOffset() {
 	if m.rebaseMode {
 		cur = min(max(0, m.rebaseDest), len(m.entries)-1)
 	}
+	if m.squashMode {
+		cur = min(max(0, m.squashDest), len(m.entries)-1)
+	}
 	avail := m.contentHeight() - 1
 	m.offset, _ = logWindow(m.entries, cur, m.offset, avail)
 }
@@ -469,6 +503,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.rebaseMode {
 		return m.handleRebaseKey(k)
+	}
+
+	if m.squashMode {
+		return m.handleSquashKey(k)
 	}
 
 	// Global keys.
@@ -661,8 +699,76 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			m.recomputeOffset()
 		}
 		return m, nil
+	case "s":
+		if len(m.entries) < 2 {
+			m.errMsg = "need at least two revisions to squash"
+			return m, nil
+		}
+		if e := m.selectedEntry(); e != nil {
+			m.squashMode = true
+			m.squashSource = m.cursor
+			// Start the destination on a neighbouring commit so it is never
+			// equal to the source on entry.
+			m.squashDest = m.cursor + 1
+			if m.squashDest >= len(m.entries) {
+				m.squashDest = m.cursor - 1
+			}
+			m.errMsg = ""
+			m.message = ""
+			m.recomputeOffset()
+		}
+		return m, nil
 	}
 	return m, nil
+}
+
+func (m Model) handleSquashKey(k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "esc", "q":
+		m.squashMode = false
+		m.message = "squash cancelled"
+		m.recomputeOffset()
+		return m, nil
+	case "up", "k":
+		if m.squashDest > 0 {
+			m.squashDest--
+		}
+		m.recomputeOffset()
+		return m, nil
+	case "down", "j":
+		if m.squashDest < len(m.entries)-1 {
+			m.squashDest++
+		}
+		m.recomputeOffset()
+		return m, nil
+	case "home":
+		m.squashDest = 0
+		m.recomputeOffset()
+		return m, nil
+	case "end", "G":
+		m.squashDest = len(m.entries) - 1
+		m.recomputeOffset()
+		return m, nil
+	case "enter":
+		return m.execSquash()
+	}
+	return m, nil
+}
+
+func (m Model) execSquash() (tea.Model, tea.Cmd) {
+	if m.squashSource < 0 || m.squashSource >= len(m.entries) ||
+		m.squashDest < 0 || m.squashDest >= len(m.entries) {
+		m.squashMode = false
+		return m, nil
+	}
+	if m.squashSource == m.squashDest {
+		m.errMsg = "squash source and destination are the same"
+		return m, nil
+	}
+	from := m.entries[m.squashSource].ChangeID
+	into := m.entries[m.squashDest].ChangeID
+	m.squashMode = false
+	return m, m.squashCmd(from, into)
 }
 
 func (m Model) handleRebaseKey(k string) (tea.Model, tea.Cmd) {
@@ -1074,7 +1180,12 @@ func (m Model) View() string {
 			subtree: m.rebaseSubtree,
 			place:   m.rebasePlace,
 		}
-		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.aiLoading, m.spinnerFrame, rb)...)
+		sq := squashView{
+			active: m.squashMode,
+			source: m.squashSource,
+			dest:   m.squashDest,
+		}
+		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.aiLoading, m.spinnerFrame, rb, sq)...)
 	}
 
 	// Autocomplete suggestions.
@@ -1186,6 +1297,21 @@ func (m Model) renderStatusBar() string {
 		segs = append(segs, seg{text: "   j/k move · s scope · tab place · ⏎ confirm · esc cancel", fg: colGray})
 		return bgRow(m.width, colDarkerGray, segs...)
 
+	case m.squashMode:
+		src, dest := "?", "?"
+		if m.squashSource >= 0 && m.squashSource < len(m.entries) {
+			src = m.entries[m.squashSource].ChangeID
+		}
+		if m.squashDest >= 0 && m.squashDest < len(m.entries) {
+			dest = m.entries[m.squashDest].ChangeID
+		}
+		segs := []seg{{text: " [squash] ", fg: colYellow, bold: true}}
+		segs = append(segs, seg{text: src, fg: colMagenta, bold: true})
+		segs = append(segs, seg{text: " into ", fg: colYellow})
+		segs = append(segs, seg{text: dest, fg: colMagenta, bold: true})
+		segs = append(segs, seg{text: "   j/k move · ⏎ confirm · esc cancel", fg: colGray})
+		return bgRow(m.width, colDarkerGray, segs...)
+
 	case m.errMsg != "":
 		msg := m.errMsg
 		limit := m.width - 4
@@ -1217,7 +1343,7 @@ func (m Model) renderHelpBar() string {
 	segs = append(segs, hlSegs([][2]string{
 		{"⏎diff", "⏎"}, {"describe", "d"},
 		{"AI Desc", "D"}, {"bookmark", "b"}, {"git", "g"},
-		{"undo", "u"}, {"rebase", "r"}, {"edit", "e"}, {"new", "n"},
+		{"undo", "u"}, {"rebase", "r"}, {"squash", "s"}, {"edit", "e"}, {"new", "n"},
 		{"abandon", "a"}, {"?help", "?"}, {"quit", "q"},
 	}, colGray, colPurple, "  ")...)
 	return bgRow(m.width, colDarkerGray, segs...)
