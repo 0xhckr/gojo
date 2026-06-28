@@ -80,13 +80,6 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 			bg = colDarkPurple
 		}
 
-		// Edge lines (skip for last visible commit — rendered after instead).
-		if i < end-1 {
-			for _, edge := range e.EdgeLines {
-				lines = append(lines, plainRow(width, seg{text: edge, fg: colDarkGray}))
-			}
-		}
-
 		// Header line.
 		var hs []seg
 		hs = append(hs, seg{text: e.HeaderPrefix, fg: colDarkGray})
@@ -144,11 +137,10 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 		}
 		lines = append(lines, renderRow(width, bg, bs))
 
-		// Trailing edge lines for last visible commit.
-		if i == end-1 {
-			for _, edge := range e.EdgeLines {
-				lines = append(lines, plainRow(width, seg{text: edge, fg: colDarkGray}))
-			}
+		// Graph-only edge lines (merge connectors, elided "~" rows) trail the
+		// commit they belong to — jj always draws them below a node's text.
+		for _, edge := range e.EdgeLines {
+			lines = append(lines, plainRow(width, seg{text: edge, fg: colDarkGray}))
 		}
 	}
 
