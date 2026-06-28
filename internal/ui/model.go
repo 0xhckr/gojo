@@ -49,6 +49,10 @@ type Model struct {
 	message       string
 	errMsg        string
 
+	// showAllRev widens the log revset to "all()" instead of jj's default
+	// (visible heads, minus remote-bookmark-only commits).
+	showAllRev bool
+
 	// Diff panel.
 	diffOpen       bool
 	diffRev        string
@@ -186,7 +190,17 @@ func boot() tea.Msg {
 func (m Model) refreshCmd() tea.Cmd {
 	r := m.runner
 	return func() tea.Msg {
-		entries, logErr := r.Log(50)
+		var (
+			entries []jj.LogEntry
+			logErr  error
+		)
+		if m.showAllRev {
+			// "all()" reaches the root commit; use a generous limit so the
+			// entire history is shown rather than truncated at 50.
+			entries, logErr = r.LogRevset("all()", 10000)
+		} else {
+			entries, logErr = r.Log(50)
+		}
 		status, statErr := r.Status()
 		return refreshMsg{entries: entries, logErr: logErr, status: status, statErr: statErr}
 	}
@@ -658,6 +672,16 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			return m, m.simpleCmd(func() error { return r.Abandon(rev) }, "abandoned "+rev)
 		}
 		return m, nil
+	case "A":
+		m.showAllRev = !m.showAllRev
+		m.cursor = 0
+		m.offset = 0
+		if m.showAllRev {
+			m.message = "showing all revisions"
+		} else {
+			m.message = "showing default revisions"
+		}
+		return m, m.refreshCmd()
 	case "b":
 		m.bookmarkMode = true
 		m.bookmarkAction = ""
@@ -1321,14 +1345,23 @@ func (m Model) renderStatusBar() string {
 		return bgRow(m.width, colDarkerGray, seg{text: " ✖ " + msg, fg: colRed})
 
 	case m.message != "":
-		return bgRow(m.width, colDarkerGray, seg{text: " " + m.message, fg: colGray})
+		return bgRow(m.width, colDarkerGray, seg{text: m.revsetBadge() + m.message, fg: colGray})
 
 	case len(m.statusEntries) > 0:
-		return bgRow(m.width, colDarkerGray, seg{text: fmt.Sprintf(" %d changed file(s)", len(m.statusEntries)), fg: colGray})
+		return bgRow(m.width, colDarkerGray, seg{text: m.revsetBadge() + fmt.Sprintf("%d changed file(s)", len(m.statusEntries)), fg: colGray})
 
 	default:
-		return bgRow(m.width, colDarkerGray, seg{text: " clean working copy ✓", fg: colGray})
+		return bgRow(m.width, colDarkerGray, seg{text: m.revsetBadge() + "clean working copy ✓", fg: colGray})
 	}
+}
+
+// revsetBadge returns a leading status-bar marker indicating the active log
+// revset: "[all] " when showing every revision, otherwise a single space.
+func (m Model) revsetBadge() string {
+	if m.showAllRev {
+		return " [all] "
+	}
+	return " "
 }
 
 func (m Model) selChangeID() string {

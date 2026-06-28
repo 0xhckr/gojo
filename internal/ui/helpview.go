@@ -34,6 +34,7 @@ var helpSections = []helpSection{
 		{"e", "jj edit  (set working copy)"},
 		{"n", "jj new  (create change)"},
 		{"a", "jj abandon  (remove commit)"},
+		{"A", "toggle all revisions  (all())"},
 		{"b", "bookmark mode"},
 		{"g", "git mode"},
 		{"u", "jj undo"},
