@@ -170,17 +170,24 @@ type actionDoneMsg struct {
 
 // elevReq describes a pending elevation prompt: re-run a failed operation
 // with an extra trailing flag (e.g. --ignore-immutable, --allow-backwards).
+// retry produces the tea.Cmd that re-runs the operation with the flag added;
+// it may be a captured subprocess (actionDoneMsg result) or an ExecProcess
+// (editor flows like describe), which is why it returns a Cmd rather than an
+// error.
 type elevReq struct {
-	flag    string        // the flag a retry appends (e.g. "--ignore-immutable")
-	reason  string        // short description of why elevation is needed
-	retry   func() error  // re-run the operation with the flag added
-	success string        // ok message reported on a successful elevated retry
+	flag   string             // the flag a retry appends (e.g. "--ignore-immutable")
+	reason string             // short description of why elevation is needed
+	retry  func() tea.Cmd     // re-run the operation with the flag added
 }
 
 type aiDoneMsg struct {
 	changeID string
 	message  string
 	err      error
+	// elev, when non-nil, means the AI message was generated but applying it
+	// failed with an elevatable error; Update stashes it as pendingElev so the
+	// user can confirm reapplying the message with the flag appended.
+	elev *elevReq
 }
 
 type describeFinishedMsg struct {
@@ -277,13 +284,13 @@ func (m Model) actionCmd(spec actionSpec) tea.Cmd {
 		if err := spec.run(); err != nil {
 			if spec.elevate != nil {
 				if flag, reason := jj.DetectElevation(err.Error()); flag != "" {
+					retryFn := spec.elevate(flag)
 					return actionDoneMsg{
 						err: err,
 						elev: &elevReq{
-							flag:    flag,
-							reason:  reason,
-							retry:   spec.elevate(flag),
-							success: spec.okMsg,
+							flag:   flag,
+							reason: reason,
+							retry:  func() tea.Cmd { return m.syncFnCmd(retryFn, spec.okMsg) },
 						},
 					}
 				}
@@ -294,14 +301,15 @@ func (m Model) actionCmd(spec actionSpec) tea.Cmd {
 	}
 }
 
-// runElevCmd runs an elevated retry. Its result is a plain actionDoneMsg with
-// no elev attached, so a second failure does not re-prompt (avoids loops).
-func (m Model) runElevCmd(req *elevReq) tea.Cmd {
+// syncFnCmd runs a captured-subprocess operation (fn) and wraps its result in
+// an actionDoneMsg. Used for elevation retries: the returned msg has no elev
+// attached, so a second failure does not re-prompt (avoids loops).
+func (m Model) syncFnCmd(fn func() error, okMsg string) tea.Cmd {
 	return func() tea.Msg {
-		if err := req.retry(); err != nil {
+		if err := fn(); err != nil {
 			return actionDoneMsg{err: err}
 		}
-		return actionDoneMsg{message: req.success, refresh: true}
+		return actionDoneMsg{message: okMsg, refresh: true}
 	}
 }
 
@@ -328,14 +336,32 @@ func (m Model) aiCmd(changeID string) tea.Cmd {
 			return aiDoneMsg{changeID: changeID, err: err}
 		}
 		if err := r.Describe(changeID, msg); err != nil {
+			// The AI message was generated but applying it failed. If the cause
+			// is elevatable (e.g. immutable commit), offer to reapply the
+			// already-generated message with the flag, avoiding a second AI call.
+			if flag, reason := jj.DetectElevation(err.Error()); flag != "" {
+				return aiDoneMsg{
+					changeID: changeID,
+					err:      err,
+					elev: &elevReq{
+						flag:   flag,
+						reason: reason,
+						retry:  func() tea.Cmd { return m.syncFnCmd(func() error { return r.Describe(changeID, msg, flag) }, "AI described "+changeID) },
+					},
+				}
+			}
 			return aiDoneMsg{changeID: changeID, err: err}
 		}
 		return aiDoneMsg{changeID: changeID, message: msg}
 	}
 }
 
-func (m Model) describeCmd(changeID string) tea.Cmd {
-	c := exec.Command(m.cfg.JJPath, "describe", "-r", changeID)
+// describeCmd runs `jj describe -r <changeID>` (suspending the TUI for
+// $EDITOR) with optional extra trailing flags, used for elevation retries on
+// immutable commits.
+func (m Model) describeCmd(changeID string, extra ...string) tea.Cmd {
+	args := append([]string{"describe", "-r", changeID}, extra...)
+	c := exec.Command(m.cfg.JJPath, args...)
 	c.Dir = m.cfg.RepoRoot
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return describeFinishedMsg{changeID: changeID, err: err}
@@ -537,6 +563,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case aiDoneMsg:
 		delete(m.aiLoading, msg.changeID)
 		if msg.err != nil {
+			if msg.elev != nil {
+				m.pendingElev = msg.elev
+				m.errMsg = ""
+				return m, nil
+			}
 			m.errMsg = msg.err.Error()
 			return m, nil
 		}
@@ -992,9 +1023,9 @@ func (m Model) handleElevKey(k string) (tea.Model, tea.Cmd) {
 	case "y", "Y", "enter":
 		req := m.pendingElev
 		m.pendingElev = nil
-		return m, m.runElevCmd(req)
+		return m, req.retry()
 	default:
-		// Cancel: surface the original underlying error so the user sees why.
+		// Cancel: drop the prompt and return to the previous view.
 		m.pendingElev = nil
 		return m, nil
 	}
@@ -1059,6 +1090,19 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "d":
 		if e := m.selectedEntry(); e != nil {
+			// The editor flow runs via ExecProcess, which attaches the terminal —
+			// so jj's "is immutable" error text isn't captured and can't be
+			// detected after the fact. Check the entry's immutability up front
+			// and offer an elevation retry with --ignore-immutable instead.
+			if e.IsImmutable {
+				changeID := e.ChangeID
+				m.pendingElev = &elevReq{
+					flag:   "--ignore-immutable",
+					reason: "target is immutable",
+					retry:  func() tea.Cmd { return m.describeCmd(changeID, "--ignore-immutable") },
+				}
+				return m, nil
+			}
 			return m, m.describeCmd(e.ChangeID)
 		}
 		return m, nil
@@ -1495,10 +1539,9 @@ func (m Model) execBookmark(action, input string) tea.Cmd {
 				return actionDoneMsg{
 					err: err,
 					elev: &elevReq{
-						flag:    flag,
-						reason:  reason,
-						retry:   func() error { return run(flag) },
-						success: okMsg,
+						flag:   flag,
+						reason: reason,
+						retry:  func() tea.Cmd { return m.syncFnCmd(func() error { return run(flag) }, okMsg) },
 					},
 				}
 			}

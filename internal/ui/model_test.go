@@ -256,10 +256,9 @@ func TestElevationPromptFlow(t *testing.T) {
 	// elevation request.
 	retried := false
 	req := &elevReq{
-		flag:    "--ignore-immutable",
-		reason:  "target is immutable",
-		success: "abandoned xyz",
-		retry:   func() error { retried = true; return nil },
+		flag:   "--ignore-immutable",
+		reason: "target is immutable",
+		retry:  func() tea.Cmd { retried = true; return nil },
 	}
 	m = step(t, m, actionDoneMsg{err: errors.New("is immutable"), elev: req})
 	if m.pendingElev == nil {
@@ -289,10 +288,9 @@ func TestElevationCancel(t *testing.T) {
 	m := bootedModel(t)
 	retried := false
 	req := &elevReq{
-		flag:    "--allow-backwards",
-		reason:  "backwards",
-		success: "moved",
-		retry:   func() error { retried = true; return nil },
+		flag:   "--allow-backwards",
+		reason: "backwards",
+		retry:  func() tea.Cmd { retried = true; return nil },
 	}
 	m = step(t, m, actionDoneMsg{err: errors.New("is immutable"), elev: req})
 	if m.pendingElev == nil {
@@ -308,3 +306,44 @@ func TestElevationCancel(t *testing.T) {
 	}
 }
 
+
+// TestDescribeImmutablePromptsElevation checks that pressing 'd' (editor
+// describe) on an immutable commit offers an elevation retry instead of
+// launching the editor and failing with an uncapturable error.
+func TestDescribeImmutablePromptsElevation(t *testing.T) {
+	m := bootedModel(t)
+	if len(m.entries) == 0 {
+		t.Skip("no entries")
+	}
+	// Force the selected entry to look immutable (the editor flow can't read
+	// jj's error back, so detection relies on this flag).
+	m.entries[m.cursor].IsImmutable = true
+	changeID := m.entries[m.cursor].ChangeID
+
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if m.pendingElev == nil {
+		t.Fatal("'d' on immutable commit did not surface an elevation prompt")
+	}
+	if m.pendingElev.flag != "--ignore-immutable" {
+		t.Errorf("elev flag = %q, want --ignore-immutable", m.pendingElev.flag)
+	}
+	plain := stripView(m)
+	if !strings.Contains(plain, "retry with") || !strings.Contains(plain, "--ignore-immutable") {
+		t.Errorf("status bar missing elevation prompt: %q", plain)
+	}
+
+	// Confirming builds the elevated describe command (ExecProcess) for the
+	// same change id.
+	var cmd tea.Cmd
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	mm := m2.(Model)
+	if mm.pendingElev != nil {
+		t.Error("confirm did not clear pendingElev")
+	}
+	if cmd == nil {
+		t.Fatal("confirm did not produce an elevated describe command")
+	}
+	// We can't run the ExecProcess in a headless test; just confirm a command
+	// was issued. The change id is baked into describeCmd, not inspectable here.
+	_ = changeID
+}
