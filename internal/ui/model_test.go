@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -244,3 +245,66 @@ func TestGitModeRendering(t *testing.T) {
 		t.Error("status bar missing remote menu")
 	}
 }
+
+// TestElevationPromptFlow checks that an elevatable failure surfaces a
+// "retry with --flag?" prompt, that confirming runs the elevated retry, and
+// that cancelling clears it.
+func TestElevationPromptFlow(t *testing.T) {
+	m := bootedModel(t)
+
+	// Simulate an action failing with an immutability error that carries an
+	// elevation request.
+	retried := false
+	req := &elevReq{
+		flag:    "--ignore-immutable",
+		reason:  "target is immutable",
+		success: "abandoned xyz",
+		retry:   func() error { retried = true; return nil },
+	}
+	m = step(t, m, actionDoneMsg{err: errors.New("is immutable"), elev: req})
+	if m.pendingElev == nil {
+		t.Fatal("elevation failure did not set pendingElev")
+	}
+	plain := stripView(m)
+	if !strings.Contains(plain, "retry with") || !strings.Contains(plain, "--ignore-immutable") {
+		t.Errorf("status bar missing elevation prompt: %q", plain)
+	}
+	if !strings.Contains(plain, "y confirm") || !strings.Contains(plain, "cancel") {
+		t.Errorf("status bar missing confirm/cancel hints: %q", plain)
+	}
+
+	// Confirming runs the elevated retry.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if m.pendingElev != nil {
+		t.Error("confirm did not clear pendingElev")
+	}
+	if !retried {
+		t.Error("confirm did not run the elevated retry closure")
+	}
+}
+
+// TestElevationCancel checks that any non-confirm key cancels the prompt
+// without running the retry.
+func TestElevationCancel(t *testing.T) {
+	m := bootedModel(t)
+	retried := false
+	req := &elevReq{
+		flag:    "--allow-backwards",
+		reason:  "backwards",
+		success: "moved",
+		retry:   func() error { retried = true; return nil },
+	}
+	m = step(t, m, actionDoneMsg{err: errors.New("is immutable"), elev: req})
+	if m.pendingElev == nil {
+		t.Fatal("elevation failure did not set pendingElev")
+	}
+
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.pendingElev != nil {
+		t.Error("esc did not cancel pendingElev")
+	}
+	if retried {
+		t.Error("cancel should not run the retry closure")
+	}
+}
+

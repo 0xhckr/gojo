@@ -106,6 +106,11 @@ type Model struct {
 	spinnerFrame   int
 	spinnerRunning bool
 
+	// pendingElev is a pending elevation prompt. When an action fails with a
+	// recognized "needs --flag" error, gojo asks the user whether to retry with
+	// that flag appended; confirming runs pendingElev.retry.
+	pendingElev *elevReq
+
 	// Auto-refresh poll. Runs only while the terminal is focused so an idle or
 	// backgrounded gojo isn't firing jj subprocesses every couple seconds.
 	focused bool
@@ -152,6 +157,19 @@ type actionDoneMsg struct {
 	message string
 	err     error
 	refresh bool
+	// elev, when non-nil, means the action failed with an error that an
+	// elevation flag could fix; Update stashes it as pendingElev so the user
+	// can confirm a retry instead of seeing a bare error.
+	elev *elevReq
+}
+
+// elevReq describes a pending elevation prompt: re-run a failed operation
+// with an extra trailing flag (e.g. --ignore-immutable, --allow-backwards).
+type elevReq struct {
+	flag    string        // the flag a retry appends (e.g. "--ignore-immutable")
+	reason  string        // short description of why elevation is needed
+	retry   func() error  // re-run the operation with the flag added
+	success string        // ok message reported on a successful elevated retry
 }
 
 type aiDoneMsg struct {
@@ -232,6 +250,53 @@ func (m Model) simpleCmd(fn func() error, okMsg string) tea.Cmd {
 			return actionDoneMsg{err: err}
 		}
 		return actionDoneMsg{message: okMsg, refresh: true}
+	}
+}
+
+// actionSpec describes a runnable jj operation that may be retried with an
+// elevation flag. elevate, when non-nil, rebuilds the operation with an extra
+// trailing flag appended — used when the first attempt fails with a
+// recognized "needs --flag" error (see jj.DetectElevation).
+type actionSpec struct {
+	run     func() error
+	okMsg   string
+	elevate func(flag string) func() error
+}
+
+// actionCmd runs spec.run. On an elevatable failure it attaches an elevReq to
+// the resulting actionDoneMsg so Update can prompt the user; otherwise it
+// behaves like simpleCmd. A nil elevate means the operation is never
+// elevatable (e.g. undo/redo).
+func (m Model) actionCmd(spec actionSpec) tea.Cmd {
+	return func() tea.Msg {
+		if err := spec.run(); err != nil {
+			if spec.elevate != nil {
+				if flag, reason := jj.DetectElevation(err.Error()); flag != "" {
+					return actionDoneMsg{
+						err: err,
+						elev: &elevReq{
+							flag:    flag,
+							reason:  reason,
+							retry:   spec.elevate(flag),
+							success: spec.okMsg,
+						},
+					}
+				}
+			}
+			return actionDoneMsg{err: err}
+		}
+		return actionDoneMsg{message: spec.okMsg, refresh: true}
+	}
+}
+
+// runElevCmd runs an elevated retry. Its result is a plain actionDoneMsg with
+// no elev attached, so a second failure does not re-prompt (avoids loops).
+func (m Model) runElevCmd(req *elevReq) tea.Cmd {
+	return func() tea.Msg {
+		if err := req.retry(); err != nil {
+			return actionDoneMsg{err: err}
+		}
+		return actionDoneMsg{message: req.success, refresh: true}
 	}
 }
 
@@ -388,6 +453,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case actionDoneMsg:
 		if msg.err != nil {
+			if msg.elev != nil {
+				// Surface the elevation prompt instead of the bare error.
+				m.pendingElev = msg.elev
+				m.errMsg = ""
+				return m, nil
+			}
 			m.errMsg = msg.err.Error()
 			return m, nil
 		}
@@ -791,6 +862,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
+	// A pending elevation prompt captures all keys until answered.
+	if m.pendingElev != nil {
+		return m.handleElevKey(k)
+	}
+
 	if m.bookmarkMode {
 		return m.handleBookmarkKey(msg, k)
 	}
@@ -855,6 +931,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m.handleLogKey(msg, k)
+}
+
+// handleElevKey handles input while an elevation prompt is on screen. 'y'
+// or enter retries the failed operation with the suggested flag appended;
+// anything else cancels and returns to the log view with the original error
+// shown.
+func (m Model) handleElevKey(k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "y", "Y", "enter":
+		req := m.pendingElev
+		m.pendingElev = nil
+		return m, m.runElevCmd(req)
+	default:
+		// Cancel: surface the original underlying error so the user sees why.
+		m.pendingElev = nil
+		return m, nil
+	}
 }
 
 func (m Model) handleHelpKey(k string) Model {
@@ -936,7 +1029,11 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		if e := m.selectedEntry(); e != nil {
 			rev := e.ChangeID
 			r := m.runner
-			return m, m.simpleCmd(func() error { return r.Edit(rev) }, "editing "+rev)
+			return m, m.actionCmd(actionSpec{
+				run:     func() error { return r.Edit(rev) },
+				okMsg:   "editing " + rev,
+				elevate: func(flag string) func() error { return func() error { return r.Edit(rev, flag) } },
+			})
 		}
 		return m, nil
 	case "n":
@@ -945,7 +1042,11 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			rev = e.ChangeID
 		}
 		r := m.runner
-		return m, m.simpleCmd(func() error { return r.New(rev) }, "created new change")
+		return m, m.actionCmd(actionSpec{
+			run:     func() error { return r.New(rev) },
+			okMsg:   "created new change",
+			elevate: func(flag string) func() error { return func() error { return r.New(rev, flag) } },
+		})
 	case "a":
 		if e := m.selectedEntry(); e != nil {
 			if e.IsWorkingCopy {
@@ -954,7 +1055,11 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			}
 			rev := e.ChangeID
 			r := m.runner
-			return m, m.simpleCmd(func() error { return r.Abandon(rev) }, "abandoned "+rev)
+			return m, m.actionCmd(actionSpec{
+				run:     func() error { return r.Abandon(rev) },
+				okMsg:   "abandoned " + rev,
+				elevate: func(flag string) func() error { return func() error { return r.Abandon(rev, flag) } },
+			})
 		}
 		return m, nil
 	case "A":
@@ -1139,9 +1244,12 @@ func (m Model) execRebase() (tea.Model, tea.Cmd) {
 	label := rebasePlaceLabels[m.rebasePlace]
 	m.rebaseMode = false
 	r := m.runner
-	return m, m.simpleCmd(
-		func() error { return r.Rebase(srcFlag, src, placeFlag, dest) },
-		"rebased "+src+" "+label+" "+dest,
+	return m, m.actionCmd(
+		actionSpec{
+			run:     func() error { return r.Rebase(srcFlag, src, placeFlag, dest) },
+			okMsg:   "rebased " + src + " " + label + " " + dest,
+			elevate: func(flag string) func() error { return func() error { return r.Rebase(srcFlag, src, placeFlag, dest, flag) } },
+		},
 	)
 }
 
@@ -1270,11 +1378,19 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 	case "f":
 		m.gitMode = false
 		r := m.runner
-		return m, m.simpleCmd(func() error { return r.GitFetch() }, "fetched")
+		return m, m.actionCmd(actionSpec{
+			run:     func() error { return r.GitFetch() },
+			okMsg:   "fetched",
+			elevate: func(flag string) func() error { return func() error { return r.GitFetch(flag) } },
+		})
 	case "p":
 		m.gitMode = false
 		r := m.runner
-		return m, m.simpleCmd(func() error { return r.GitPush() }, "pushed")
+		return m, m.actionCmd(actionSpec{
+			run:     func() error { return r.GitPush() },
+			okMsg:   "pushed",
+			elevate: func(flag string) func() error { return func() error { return r.GitPush(flag) } },
+		})
 	case "r":
 		m.remoteMode = true
 		m.remoteAction = ""
@@ -1293,35 +1409,50 @@ func (m Model) execBookmark(action, input string) tea.Cmd {
 	if action == "l" {
 		return listCmd(r.BookmarkList, "bookmark list")
 	}
-	return func() tea.Msg {
-		var err error
+	// run performs the bookmark action; runElevated re-runs it with an extra
+	// trailing flag for elevation retries.
+	run := func(extra string) error {
 		switch action {
 		case "c":
-			err = r.BookmarkCreate(input, rev)
+			return r.BookmarkCreate(input, rev, extra)
 		case "d":
-			err = r.BookmarkDelete(input)
+			return r.BookmarkDelete(input, extra)
 		case "f":
-			err = r.BookmarkForget(input)
+			return r.BookmarkForget(input, extra)
 		case "m":
-			err = r.BookmarkMove(input, rev)
+			return r.BookmarkMove(input, rev, extra)
 		case "r":
 			parts := strings.Fields(input)
 			if len(parts) < 2 {
-				err = errors.New("rename requires: <old> <new>")
-			} else {
-				err = r.BookmarkRename(parts[0], parts[1])
+				return errors.New("rename requires: <old> <new>")
 			}
+			return r.BookmarkRename(parts[0], parts[1])
 		case "s":
-			err = r.BookmarkSet(input, rev)
+			return r.BookmarkSet(input, rev, extra)
 		case "t":
-			err = r.BookmarkTrack(input)
+			return r.BookmarkTrack(input)
 		case "T":
-			err = r.BookmarkUntrack(input)
+			return r.BookmarkUntrack(input)
 		}
-		if err != nil {
+		return nil
+	}
+	okMsg := "bookmark " + action + ": " + input
+	return func() tea.Msg {
+		if err := run(""); err != nil {
+			if flag, reason := jj.DetectElevation(err.Error()); flag != "" {
+				return actionDoneMsg{
+					err: err,
+					elev: &elevReq{
+						flag:    flag,
+						reason:  reason,
+						retry:   func() error { return run(flag) },
+						success: okMsg,
+					},
+				}
+			}
 			return actionDoneMsg{err: err}
 		}
-		return actionDoneMsg{message: "bookmark " + action + ": " + input, refresh: true}
+		return actionDoneMsg{message: okMsg, refresh: true}
 	}
 }
 
@@ -1532,6 +1663,17 @@ func (m Model) renderSuggestions() string {
 
 func (m Model) renderStatusBar() []string {
 	switch {
+	case m.pendingElev != nil:
+		segs := []seg{
+			{text: " ⚠ retry with ", fg: colYellow},
+			{text: m.pendingElev.flag, fg: colYellow, bold: true},
+			{text: "? (" + m.pendingElev.reason + ")  ", fg: colYellow},
+			{text: "y confirm", fg: colPurple, underline: true},
+			{text: " · ", fg: colGray},
+			{text: "n/esc cancel", fg: colGray},
+		}
+		return []string{bgRow(m.width, colDarkerGray, segs...)}
+
 	case m.bookmarkMode:
 		if m.bookmarkAction != "" {
 			prompts := map[string]string{

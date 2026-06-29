@@ -141,31 +141,38 @@ func (r *Runner) FileShow(rev, path string) (string, error) {
 	return r.run("file", "show", "-r", rev, path)
 }
 
-// Describe sets a revision's description.
-func (r *Runner) Describe(rev, message string) error {
-	_, err := r.run("describe", "-r", rev, "-m", message)
-	return err
-}
-
-// Edit makes a revision the working copy.
-func (r *Runner) Edit(rev string) error {
-	_, err := r.run("edit", "-r", rev)
-	return err
-}
-
-// New creates a new change, optionally on top of rev.
-func (r *Runner) New(rev string) error {
-	args := []string{"new"}
-	if rev != "" {
-		args = append(args, "-r", rev)
-	}
+// Describe sets a revision's description. Extra flags (e.g.
+// "--ignore-immutable") are appended for elevation retries.
+func (r *Runner) Describe(rev, message string, extra ...string) error {
+	args := append([]string{"describe", "-r", rev, "-m", message}, extra...)
 	_, err := r.run(args...)
 	return err
 }
 
-// Abandon removes a revision.
-func (r *Runner) Abandon(rev string) error {
-	_, err := r.run("abandon", "-r", rev)
+// Edit makes a revision the working copy. Extra flags are appended for
+// elevation retries.
+func (r *Runner) Edit(rev string, extra ...string) error {
+	args := append([]string{"edit", "-r", rev}, extra...)
+	_, err := r.run(args...)
+	return err
+}
+
+// New creates a new change, optionally on top of rev. Extra flags are appended
+// for elevation retries.
+func (r *Runner) New(rev string, extra ...string) error {
+	args := []string{"new"}
+	if rev != "" {
+		args = append(args, "-r", rev)
+	}
+	args = append(args, extra...)
+	_, err := r.run(args...)
+	return err
+}
+
+// Abandon removes a revision. Extra flags are appended for elevation retries.
+func (r *Runner) Abandon(rev string, extra ...string) error {
+	args := append([]string{"abandon", "-r", rev}, extra...)
+	_, err := r.run(args...)
 	return err
 }
 
@@ -186,30 +193,38 @@ func (r *Runner) Redo() error {
 // srcFlag selects what moves: "-r" (the single revision) or "-s" (the revision
 // and all of its descendants). placeFlag selects where it lands relative to
 // dest: "--onto" (onto dest, as a child), "--insert-after", or "--insert-before".
-func (r *Runner) Rebase(srcFlag, src, placeFlag, dest string) error {
-	_, err := r.run("rebase", srcFlag, src, placeFlag, dest)
-	return err
-}
-
-// BookmarkCreate creates a bookmark, optionally at rev.
-func (r *Runner) BookmarkCreate(name, rev string) error {
-	args := []string{"bookmark", "create", name}
-	if rev != "" {
-		args = append(args, "-r", rev)
-	}
+// Extra flags are appended for elevation retries.
+func (r *Runner) Rebase(srcFlag, src, placeFlag, dest string, extra ...string) error {
+	args := append([]string{"rebase", srcFlag, src, placeFlag, dest}, extra...)
 	_, err := r.run(args...)
 	return err
 }
 
-// BookmarkDelete deletes a bookmark.
-func (r *Runner) BookmarkDelete(name string) error {
-	_, err := r.run("bookmark", "delete", name)
+// BookmarkCreate creates a bookmark, optionally at rev. Extra flags are
+// appended for elevation retries.
+func (r *Runner) BookmarkCreate(name, rev string, extra ...string) error {
+	args := []string{"bookmark", "create", name}
+	if rev != "" {
+		args = append(args, "-r", rev)
+	}
+	args = append(args, extra...)
+	_, err := r.run(args...)
 	return err
 }
 
-// BookmarkForget forgets a bookmark.
-func (r *Runner) BookmarkForget(name string) error {
-	_, err := r.run("bookmark", "forget", name)
+// BookmarkDelete deletes a bookmark. Extra flags are appended for elevation
+// retries.
+func (r *Runner) BookmarkDelete(name string, extra ...string) error {
+	args := append([]string{"bookmark", "delete", name}, extra...)
+	_, err := r.run(args...)
+	return err
+}
+
+// BookmarkForget forgets a bookmark. Extra flags are appended for elevation
+// retries.
+func (r *Runner) BookmarkForget(name string, extra ...string) error {
+	args := append([]string{"bookmark", "forget", name}, extra...)
+	_, err := r.run(args...)
 	return err
 }
 
@@ -218,9 +233,11 @@ func (r *Runner) BookmarkList() (string, error) {
 	return r.run("bookmark", "list")
 }
 
-// BookmarkMove moves a bookmark to rev.
-func (r *Runner) BookmarkMove(name, rev string) error {
-	_, err := r.run("bookmark", "move", name, "--to", rev)
+// BookmarkMove moves a bookmark to rev. Extra flags (e.g.
+// "--allow-backwards") are appended for elevation retries.
+func (r *Runner) BookmarkMove(name, rev string, extra ...string) error {
+	args := append([]string{"bookmark", "move", name, "--to", rev}, extra...)
+	_, err := r.run(args...)
 	return err
 }
 
@@ -230,12 +247,14 @@ func (r *Runner) BookmarkRename(oldName, newName string) error {
 	return err
 }
 
-// BookmarkSet sets a bookmark, optionally at rev.
-func (r *Runner) BookmarkSet(name, rev string) error {
+// BookmarkSet sets a bookmark, optionally at rev. Extra flags (e.g.
+// "--allow-backwards") are appended for elevation retries.
+func (r *Runner) BookmarkSet(name, rev string, extra ...string) error {
 	args := []string{"bookmark", "set", name}
 	if rev != "" {
 		args = append(args, "-r", rev)
 	}
+	args = append(args, extra...)
 	_, err := r.run(args...)
 	return err
 }
@@ -252,15 +271,19 @@ func (r *Runner) BookmarkUntrack(name string) error {
 	return err
 }
 
-// GitFetch fetches from the git remote.
-func (r *Runner) GitFetch() error {
-	_, err := r.run("git", "fetch")
+// GitFetch fetches from the git remote. Extra flags are appended for elevation
+// retries.
+func (r *Runner) GitFetch(extra ...string) error {
+	args := append([]string{"git", "fetch"}, extra...)
+	_, err := r.run(args...)
 	return err
 }
 
-// GitPush pushes to the git remote.
-func (r *Runner) GitPush() error {
-	_, err := r.run("git", "push")
+// GitPush pushes to the git remote. Extra flags are appended for elevation
+// retries.
+func (r *Runner) GitPush(extra ...string) error {
+	args := append([]string{"git", "push"}, extra...)
+	_, err := r.run(args...)
 	return err
 }
 
@@ -291,6 +314,29 @@ func (r *Runner) RemoteRename(oldName, newName string) error {
 func (r *Runner) RemoteSetURL(name, url string) error {
 	_, err := r.run("git", "remote", "set-url", name, url)
 	return err
+}
+
+// ── Elevation ─────────────────────────────────────────────────────────────
+
+// DetectElevation inspects a jj error message. If it matches a known
+// "operation refused — use --flag" pattern, it returns the flag an elevated
+// retry should append plus a short human reason. Otherwise it returns "".
+//
+// Currently recognized:
+//   - "... is immutable"        → --ignore-immutable
+//   - "backwards or sideways"   → --allow-backwards
+//
+// Matching is on lowercased substrings so it survives jj rewording the
+// surrounding text across versions.
+func DetectElevation(errStr string) (flag, reason string) {
+	s := strings.ToLower(errStr)
+	switch {
+	case strings.Contains(s, "is immutable"):
+		return "--ignore-immutable", "target is immutable"
+	case strings.Contains(s, "backwards or sideways"):
+		return "--allow-backwards", "bookmark moves backwards/sideways"
+	}
+	return "", ""
 }
 
 // ── Parsers ───────────────────────────────────────────────────────────────
