@@ -2,6 +2,19 @@ package jj
 
 import "testing"
 
+func TestAppendExtraSkipsEmpty(t *testing.T) {
+	got := appendExtra([]string{"bookmark", "set", "foo"}, []string{"", "--allow-backwards", ""})
+	want := []string{"bookmark", "set", "foo", "--allow-backwards"}
+	if len(got) != len(want) {
+		t.Fatalf("appendExtra len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("appendExtra[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestDetectElevation(t *testing.T) {
 	cases := []struct {
 		name    string

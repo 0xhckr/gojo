@@ -141,10 +141,22 @@ func (r *Runner) FileShow(rev, path string) (string, error) {
 	return r.run("file", "show", "-r", rev, path)
 }
 
+// appendExtra appends only non-empty entries from extra to args. Empty
+// strings would otherwise become stray positional arguments (breaking
+// variadic-name subcommands like `bookmark set <NAMES>...`).
+func appendExtra(args []string, extra []string) []string {
+	for _, e := range extra {
+		if e != "" {
+			args = append(args, e)
+		}
+	}
+	return args
+}
+
 // Describe sets a revision's description. Extra flags (e.g.
 // "--ignore-immutable") are appended for elevation retries.
 func (r *Runner) Describe(rev, message string, extra ...string) error {
-	args := append([]string{"describe", "-r", rev, "-m", message}, extra...)
+	args := appendExtra([]string{"describe", "-r", rev, "-m", message}, extra)
 	_, err := r.run(args...)
 	return err
 }
@@ -152,7 +164,7 @@ func (r *Runner) Describe(rev, message string, extra ...string) error {
 // Edit makes a revision the working copy. Extra flags are appended for
 // elevation retries.
 func (r *Runner) Edit(rev string, extra ...string) error {
-	args := append([]string{"edit", "-r", rev}, extra...)
+	args := appendExtra([]string{"edit", "-r", rev}, extra)
 	_, err := r.run(args...)
 	return err
 }
@@ -164,14 +176,14 @@ func (r *Runner) New(rev string, extra ...string) error {
 	if rev != "" {
 		args = append(args, "-r", rev)
 	}
-	args = append(args, extra...)
+	args = appendExtra(args, extra)
 	_, err := r.run(args...)
 	return err
 }
 
 // Abandon removes a revision. Extra flags are appended for elevation retries.
 func (r *Runner) Abandon(rev string, extra ...string) error {
-	args := append([]string{"abandon", "-r", rev}, extra...)
+	args := appendExtra([]string{"abandon", "-r", rev}, extra)
 	_, err := r.run(args...)
 	return err
 }
@@ -195,7 +207,7 @@ func (r *Runner) Redo() error {
 // dest: "--onto" (onto dest, as a child), "--insert-after", or "--insert-before".
 // Extra flags are appended for elevation retries.
 func (r *Runner) Rebase(srcFlag, src, placeFlag, dest string, extra ...string) error {
-	args := append([]string{"rebase", srcFlag, src, placeFlag, dest}, extra...)
+	args := appendExtra([]string{"rebase", srcFlag, src, placeFlag, dest}, extra)
 	_, err := r.run(args...)
 	return err
 }
@@ -207,7 +219,7 @@ func (r *Runner) BookmarkCreate(name, rev string, extra ...string) error {
 	if rev != "" {
 		args = append(args, "-r", rev)
 	}
-	args = append(args, extra...)
+	args = appendExtra(args, extra)
 	_, err := r.run(args...)
 	return err
 }
@@ -215,7 +227,7 @@ func (r *Runner) BookmarkCreate(name, rev string, extra ...string) error {
 // BookmarkDelete deletes a bookmark. Extra flags are appended for elevation
 // retries.
 func (r *Runner) BookmarkDelete(name string, extra ...string) error {
-	args := append([]string{"bookmark", "delete", name}, extra...)
+	args := appendExtra([]string{"bookmark", "delete", name}, extra)
 	_, err := r.run(args...)
 	return err
 }
@@ -223,7 +235,7 @@ func (r *Runner) BookmarkDelete(name string, extra ...string) error {
 // BookmarkForget forgets a bookmark. Extra flags are appended for elevation
 // retries.
 func (r *Runner) BookmarkForget(name string, extra ...string) error {
-	args := append([]string{"bookmark", "forget", name}, extra...)
+	args := appendExtra([]string{"bookmark", "forget", name}, extra)
 	_, err := r.run(args...)
 	return err
 }
@@ -236,7 +248,7 @@ func (r *Runner) BookmarkList() (string, error) {
 // BookmarkMove moves a bookmark to rev. Extra flags (e.g.
 // "--allow-backwards") are appended for elevation retries.
 func (r *Runner) BookmarkMove(name, rev string, extra ...string) error {
-	args := append([]string{"bookmark", "move", name, "--to", rev}, extra...)
+	args := appendExtra([]string{"bookmark", "move", name, "--to", rev}, extra)
 	_, err := r.run(args...)
 	return err
 }
@@ -254,7 +266,7 @@ func (r *Runner) BookmarkSet(name, rev string, extra ...string) error {
 	if rev != "" {
 		args = append(args, "-r", rev)
 	}
-	args = append(args, extra...)
+	args = appendExtra(args, extra)
 	_, err := r.run(args...)
 	return err
 }
@@ -274,7 +286,7 @@ func (r *Runner) BookmarkUntrack(name string) error {
 // GitFetch fetches from the git remote. Extra flags are appended for elevation
 // retries.
 func (r *Runner) GitFetch(extra ...string) error {
-	args := append([]string{"git", "fetch"}, extra...)
+	args := appendExtra([]string{"git", "fetch"}, extra)
 	_, err := r.run(args...)
 	return err
 }
@@ -282,7 +294,7 @@ func (r *Runner) GitFetch(extra ...string) error {
 // GitPush pushes to the git remote. Extra flags are appended for elevation
 // retries.
 func (r *Runner) GitPush(extra ...string) error {
-	args := append([]string{"git", "push"}, extra...)
+	args := appendExtra([]string{"git", "push"}, extra)
 	_, err := r.run(args...)
 	return err
 }
