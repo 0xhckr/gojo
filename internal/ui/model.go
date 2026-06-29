@@ -307,7 +307,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.recomputeOffset()
 		if m.diffOpen {
-			m.diffFollowCursor()
+			// Preserve the user's scroll position (which may be free-scrolled to
+			// show the status section); just clamp into the valid range for the
+			// new height.
+			m.diffClampMax()
+			if r := m.diffCursorBodyRow(); r >= 0 && (r < m.diffScrollY || r >= m.diffScrollY+m.diffBodyHeight()) {
+				// Only re-anchor if the cursor itself fell out of view.
+				m.diffFollowCursor()
+			}
 		}
 		return m, nil
 
@@ -371,7 +378,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.diffCurLine = len(m.diffChunks[m.diffCurChunk]) - 1
 			}
 		}
-		m.diffFollowCursor()
+		// Preserve the viewport across a refresh (the user may have free-scrolled
+		// to the status section); only re-anchor if the cursor fell out of view.
+		m.diffClampMax()
+		if r := m.diffCursorBodyRow(); r >= 0 && (r < m.diffScrollY || r >= m.diffScrollY+m.diffBodyHeight()) {
+			m.diffFollowCursor()
+		}
 		return m, nil
 
 	case actionDoneMsg:
@@ -624,38 +636,44 @@ func (m *Model) diffFollowCursor() {
 	m.diffClampMax()
 }
 
-// diffEnterChunkDown scrolls for entering a chunk from above. When the chunk
-// fits, the whole chunk is shown; when it's taller than the viewport, its first
-// line is pinned to the top so as much of it as possible is visible.
+// diffChunkContext is the number of context lines shown above (when entering
+// from above) or below (when entering from below) a chunk on snap, so the
+// change is seen in its surrounding context.
+const diffChunkContext = 3
+
+// diffEnterChunkDown scrolls for entering a chunk from above (cursor on its
+// first line). It reveals diffChunkContext lines before the chunk, then as much
+// of the chunk as fits in the viewport.
 func (m *Model) diffEnterChunkDown() {
 	cur := m.diffChunks[m.diffCurChunk]
-	first, last := cur[0], cur[len(cur)-1]
-	h := m.diffBodyHeight()
-	if last-first+1 <= h {
-		m.diffFollowCursor()
-	} else {
-		m.diffScrollY = first
-		m.diffClampMax()
+	first := cur[0]
+	top := first - diffChunkContext
+	if top < 0 {
+		top = 0
 	}
+	m.diffScrollY = top
+	m.diffClampMax()
 }
 
-// diffEnterChunkUp is the upward mirror: for a tall chunk, pin its last line to
-// the viewport bottom.
+// diffEnterChunkUp scrolls for entering a chunk from below (cursor on its last
+// line). It reveals diffChunkContext lines after the chunk, then as much of the
+// chunk as fits in the viewport.
 func (m *Model) diffEnterChunkUp() {
 	cur := m.diffChunks[m.diffCurChunk]
-	first, last := cur[0], cur[len(cur)-1]
+	last := cur[len(cur)-1]
 	h := m.diffBodyHeight()
-	if last-first+1 <= h {
-		m.diffFollowCursor()
-	} else {
-		m.diffScrollY = last - h + 1
-		m.diffClampMax()
+	top := last + diffChunkContext - h + 1
+	if top < 0 {
+		top = 0
 	}
+	m.diffScrollY = top
+	m.diffClampMax()
 }
 
 // diffMoveDown advances the cursor: steps within the current chunk, revealing
 // one line at a time for long chunks, then jumps to the next chunk. Falls back
-// to free line-scrolling when there are no chunks (e.g. raw list output).
+// to free line-scrolling when there are no chunks (e.g. raw list output). At
+// the very bottom it free-scrolls to reveal trailing context.
 func (m *Model) diffMoveDown() {
 	if len(m.diffChunks) == 0 {
 		if m.diffScrollY < m.diffMaxScroll() {
@@ -673,10 +691,17 @@ func (m *Model) diffMoveDown() {
 		m.diffCurChunk++
 		m.diffCurLine = 0
 		m.diffEnterChunkDown()
+		return
+	}
+	// Last line of the last chunk: free-scroll down to reveal trailing context.
+	if m.diffScrollY < m.diffMaxScroll() {
+		m.diffScrollY++
 	}
 }
 
-// diffMoveUp is the upward mirror of diffMoveDown.
+// diffMoveUp is the upward mirror of diffMoveDown. At the very top it
+// free-scrolls upward to reveal the status section / preceding context, with
+// the cursor resting on the first chunk line.
 func (m *Model) diffMoveUp() {
 	if len(m.diffChunks) == 0 {
 		if m.diffScrollY > 0 {
@@ -693,6 +718,12 @@ func (m *Model) diffMoveUp() {
 		m.diffCurChunk--
 		m.diffCurLine = len(m.diffChunks[m.diffCurChunk]) - 1
 		m.diffEnterChunkUp()
+		return
+	}
+	// First line of the first chunk: free-scroll up to reveal the status header
+	// and preceding context. The cursor stays put.
+	if m.diffScrollY > 0 {
+		m.diffScrollY--
 	}
 }
 

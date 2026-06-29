@@ -95,7 +95,9 @@ func TestComputeDiffChunks(t *testing.T) {
 
 // TestDiffCursorScroll verifies the "reveal one line at a time" behavior for a
 // long chunk: stepping down through a chunk taller than the viewport scrolls a
-// line at a time, and stepping past the end jumps to the next chunk.
+// line at a time, and stepping past the end jumps to the next chunk. It also
+// checks that snapping to a chunk shows diffChunkContext lines of context
+// before it.
 func TestDiffCursorScroll(t *testing.T) {
 	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,1 +1,10 @@\n"
 	for i := 0; i < 10; i++ {
@@ -110,13 +112,16 @@ func TestDiffCursorScroll(t *testing.T) {
 	m.diffCurChunk, m.diffCurLine = 0, 0
 	bodyH := m.diffBodyHeight() // visible rows below title
 
-	// Entering chunk 0 from above puts its first line at the viewport top
-	// (chunk 0 is taller than the viewport, so it's pinned to show as much as
-	// possible from the start).
+	// Entering chunk 0 from above reveals diffChunkContext lines of context
+	// before the chunk (clamped at 0), then as much of the chunk as fits.
 	m.diffEnterChunkDown()
-	startTop := m.diffScrollY
-	if startTop != m.diffChunks[0][0] {
-		t.Fatalf("enterChunkDown = %d, want chunk0 start %d", startTop, m.diffChunks[0][0])
+	wantTop := m.diffChunks[0][0] - diffChunkContext
+	if wantTop < 0 {
+		wantTop = 0
+	}
+	if m.diffScrollY != wantTop {
+		t.Fatalf("enterChunkDown scrollY = %d, want %d (chunk0 start %d - ctx %d)",
+			m.diffScrollY, wantTop, m.diffChunks[0][0], diffChunkContext)
 	}
 
 	// Walk down chunk 0: cursor stays in view, and once it passes the bottom
@@ -132,13 +137,10 @@ func TestDiffCursorScroll(t *testing.T) {
 		}
 	}
 
-	// One more down: jump to chunk 1, line 0, with chunk 1's top at the top.
+	// One more down: jump to chunk 1, line 0, with context shown above it.
 	m.diffMoveDown()
 	if m.diffCurChunk != 1 || m.diffCurLine != 0 {
 		t.Fatalf("after chunk0: chunk=%d line=%d, want 1,0", m.diffCurChunk, m.diffCurLine)
-	}
-	if m.diffScrollY != m.diffChunks[1][0] && m.diffScrollY != m.diffMaxScroll() {
-		t.Errorf("chunk1 scrollY = %d, want %d (or clamped max %d)", m.diffScrollY, m.diffChunks[1][0], m.diffMaxScroll())
 	}
 	c1 := m.diffCursorBodyRow()
 	if c1 < m.diffScrollY || c1 >= m.diffScrollY+bodyH {
@@ -146,14 +148,59 @@ func TestDiffCursorScroll(t *testing.T) {
 	}
 
 	// Walk back up into chunk 0: entering from below lands on chunk 0's last
-	// line, pinned to the viewport bottom.
+	// line, with diffChunkContext lines of context shown after it.
 	m.diffMoveUp()
 	if m.diffCurChunk != 0 || m.diffCurLine != len(m.diffChunks[0])-1 {
 		t.Fatalf("moveUp: chunk=%d line=%d, want 0,%d", m.diffCurChunk, m.diffCurLine, len(m.diffChunks[0])-1)
 	}
 	last := m.diffChunks[0][len(m.diffChunks[0])-1]
-	if m.diffScrollY != last-bodyH+1 {
-		t.Errorf("chunk0 re-entry scrollY = %d, want %d", m.diffScrollY, last-bodyH+1)
+	wantUp := last + diffChunkContext - bodyH + 1
+	if wantUp < 0 {
+		wantUp = 0
+	}
+	if wantUp > m.diffMaxScroll() {
+		wantUp = m.diffMaxScroll()
+	}
+	if m.diffScrollY != wantUp {
+		t.Errorf("chunk0 re-entry scrollY = %d, want %d", m.diffScrollY, wantUp)
+	}
+}
+
+// TestDiffCursorFreeScrollTop verifies that pressing up at the first line of
+// the first chunk free-scrolls the viewport upward to reveal the status
+// section, with the cursor resting on the first chunk line.
+func TestDiffCursorFreeScrollTop(t *testing.T) {
+	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,1 +1,2 @@\n+x\n+y\n"
+	m := Model{width: 80, height: 24, view: viewLog, diffOpen: true}
+	rows := renderDiff(raw)
+	m.diffRows = rows
+	m.diffStatus = nil
+	m.diffDigits = maxLineDigits(rows)
+	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen())
+	m.diffCurChunk, m.diffCurLine = 0, 0
+	m.diffEnterChunkDown()
+	cursorRow := m.diffCursorBodyRow()
+	startScroll := m.diffScrollY
+
+	// Press up repeatedly: the viewport scrolls up one line at a time until the
+	// status section (top, scrollY 0) is visible, while the cursor stays put.
+	for m.diffScrollY > 0 {
+		m.diffMoveUp()
+		if m.diffCursorBodyRow() != cursorRow {
+			t.Fatalf("cursor moved to %d, want it to stay at %d", m.diffCursorBodyRow(), cursorRow)
+		}
+		if m.diffScrollY >= startScroll {
+			t.Fatalf("scrollY = %d did not decrease from %d", m.diffScrollY, startScroll)
+		}
+	}
+	if m.diffScrollY != 0 {
+		t.Errorf("expected to reach top (scrollY 0), got %d", m.diffScrollY)
+	}
+	// One more up at the very top is a no-op.
+	prev := m.diffScrollY
+	m.diffMoveUp()
+	if m.diffScrollY != prev {
+		t.Errorf("scrollY changed to %d at top, want %d", m.diffScrollY, prev)
 	}
 }
 
@@ -184,7 +231,10 @@ func TestDiffCursorRefresh(t *testing.T) {
 		t.Fatal("expected refresh detection")
 	}
 	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen()) // unchanged shape
-	m.diffFollowCursor()
+	m.diffClampMax() // refresh path preserves viewport; only clamps
+	if r := m.diffCursorBodyRow(); r >= 0 && (r < m.diffScrollY || r >= m.diffScrollY+m.diffBodyHeight()) {
+		m.diffFollowCursor()
+	}
 	if m.diffCurChunk != 0 || m.diffCurLine != 2 {
 		t.Errorf("after refresh: chunk=%d line=%d, want preserved 0,2", m.diffCurChunk, m.diffCurLine)
 	}
