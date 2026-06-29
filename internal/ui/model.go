@@ -64,6 +64,14 @@ type Model struct {
 	diffRaw     string
 	diffScrollY int
 
+	// Chunk cursor — navigates change chunks (contiguous add/del runs) in the
+	// diff panel. diffChunks holds body-row indices per chunk; diffCurChunk /
+	// diffCurLine track the focused line. Empty when the diff has no chunks or
+	// is showing raw list output.
+	diffChunks   [][]int
+	diffCurChunk int
+	diffCurLine  int
+
 	helpScrollY int
 
 	// Bookmark mode.
@@ -298,6 +306,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.recomputeOffset()
+		if m.diffOpen {
+			m.diffFollowCursor()
+		}
 		return m, nil
 
 	case bootMsg:
@@ -340,9 +351,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errMsg = msg.err.Error()
 			return m, nil
 		}
+		// A revision diff is reloaded on every focus/poll refresh. Treat that as
+		// a refresh (not a fresh open) so the user's cursor position survives —
+		// otherwise the 2s poll yanks navigation back to the first chunk.
+		isRefresh := m.diffIsRevision && msg.rev == m.diffRev && len(m.diffRows) > 0
 		m.diffStatus = msg.status
 		m.diffRows = msg.rows
 		m.diffDigits = maxLineDigits(msg.rows)
+		m.diffChunks = computeDiffChunks(msg.rows, m.diffHeadLen())
+		if !isRefresh {
+			m.diffCurChunk = 0
+			m.diffCurLine = 0
+		} else if len(m.diffChunks) > 0 {
+			// The diff may have changed shape; clamp the cursor back into range.
+			if m.diffCurChunk >= len(m.diffChunks) {
+				m.diffCurChunk = len(m.diffChunks) - 1
+			}
+			if m.diffCurLine >= len(m.diffChunks[m.diffCurChunk]) {
+				m.diffCurLine = len(m.diffChunks[m.diffCurChunk]) - 1
+			}
+		}
+		m.diffFollowCursor()
 		return m, nil
 
 	case actionDoneMsg:
@@ -367,6 +396,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diffRaw = msg.content
 		m.diffRows = nil
 		m.diffStatus = nil
+		m.diffChunks = nil
 		m.diffLoading = false
 		m.diffScrollY = 0
 		return m, nil
@@ -504,6 +534,213 @@ func (m Model) diffMaxScroll() int {
 	return max(0, bodyTotal-bodyH)
 }
 
+// diffHeadLen is the number of body rows occupied by the status header, items,
+// and separator — everything above the first diff/raw line.
+func (m Model) diffHeadLen() int {
+	statusCount := len(m.diffStatus)
+	if statusCount == 0 {
+		statusCount = 1 // "(no changes)" row
+	}
+	return statusCount + 2
+}
+
+// diffBodyHeight is the number of visible rows below the sticky diff title.
+func (m Model) diffBodyHeight() int {
+	h := m.contentHeight() - 1
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+// diffCursorBodyRow is the body-row index of the focused line, or -1 if the
+// diff has no chunks to navigate.
+func (m Model) diffCursorBodyRow() int {
+	if len(m.diffChunks) == 0 || m.diffCurChunk < 0 || m.diffCurChunk >= len(m.diffChunks) {
+		return -1
+	}
+	cur := m.diffChunks[m.diffCurChunk]
+	if m.diffCurLine < 0 || m.diffCurLine >= len(cur) {
+		return -1
+	}
+	return cur[m.diffCurLine]
+}
+
+// diffChunkRows returns a set of the body-row indices in the focused chunk,
+// for rendering the dim extent bar. Returns nil when there is no cursor.
+func (m Model) diffChunkRows() map[int]bool {
+	if len(m.diffChunks) == 0 || m.diffCurChunk < 0 || m.diffCurChunk >= len(m.diffChunks) {
+		return nil
+	}
+	out := make(map[int]bool, len(m.diffChunks[m.diffCurChunk]))
+	for _, r := range m.diffChunks[m.diffCurChunk] {
+		out[r] = true
+	}
+	return out
+}
+
+// diffClampMax keeps diffScrollY within the scrollable range.
+func (m *Model) diffClampMax() {
+	if m.diffScrollY < 0 {
+		m.diffScrollY = 0
+	}
+	if mx := m.diffMaxScroll(); m.diffScrollY > mx {
+		m.diffScrollY = mx
+	}
+}
+
+// diffFollowCursor scrolls the minimum amount needed so the cursor is visible
+// AND as much of the focused chunk as possible is shown.
+//   - For a chunk that fits in the viewport, the whole chunk is kept visible,
+//     so surrounding context (hunk header above, context lines below) stays on
+//     screen too.
+//   - For a chunk taller than the viewport, only the cursor line is guaranteed
+//     visible — so stepping at an edge reveals exactly one new line.
+func (m *Model) diffFollowCursor() {
+	row := m.diffCursorBodyRow()
+	if row < 0 {
+		return
+	}
+	cur := m.diffChunks[m.diffCurChunk]
+	h := m.diffBodyHeight()
+	first, last := cur[0], cur[len(cur)-1]
+	if last-first+1 <= h {
+		// Whole chunk fits: keep it entirely in view (scroll only if needed).
+		if first < m.diffScrollY {
+			m.diffScrollY = first
+		}
+		if last >= m.diffScrollY+h {
+			m.diffScrollY = last - h + 1
+		}
+	} else {
+		// Chunk too big: minimal reveal of the cursor line only.
+		if row < m.diffScrollY {
+			m.diffScrollY = row
+		}
+		if row >= m.diffScrollY+h {
+			m.diffScrollY = row - h + 1
+		}
+	}
+	m.diffClampMax()
+}
+
+// diffEnterChunkDown scrolls for entering a chunk from above. When the chunk
+// fits, the whole chunk is shown; when it's taller than the viewport, its first
+// line is pinned to the top so as much of it as possible is visible.
+func (m *Model) diffEnterChunkDown() {
+	cur := m.diffChunks[m.diffCurChunk]
+	first, last := cur[0], cur[len(cur)-1]
+	h := m.diffBodyHeight()
+	if last-first+1 <= h {
+		m.diffFollowCursor()
+	} else {
+		m.diffScrollY = first
+		m.diffClampMax()
+	}
+}
+
+// diffEnterChunkUp is the upward mirror: for a tall chunk, pin its last line to
+// the viewport bottom.
+func (m *Model) diffEnterChunkUp() {
+	cur := m.diffChunks[m.diffCurChunk]
+	first, last := cur[0], cur[len(cur)-1]
+	h := m.diffBodyHeight()
+	if last-first+1 <= h {
+		m.diffFollowCursor()
+	} else {
+		m.diffScrollY = last - h + 1
+		m.diffClampMax()
+	}
+}
+
+// diffMoveDown advances the cursor: steps within the current chunk, revealing
+// one line at a time for long chunks, then jumps to the next chunk. Falls back
+// to free line-scrolling when there are no chunks (e.g. raw list output).
+func (m *Model) diffMoveDown() {
+	if len(m.diffChunks) == 0 {
+		if m.diffScrollY < m.diffMaxScroll() {
+			m.diffScrollY++
+		}
+		return
+	}
+	cur := m.diffChunks[m.diffCurChunk]
+	if m.diffCurLine < len(cur)-1 {
+		m.diffCurLine++
+		m.diffFollowCursor()
+		return
+	}
+	if m.diffCurChunk < len(m.diffChunks)-1 {
+		m.diffCurChunk++
+		m.diffCurLine = 0
+		m.diffEnterChunkDown()
+	}
+}
+
+// diffMoveUp is the upward mirror of diffMoveDown.
+func (m *Model) diffMoveUp() {
+	if len(m.diffChunks) == 0 {
+		if m.diffScrollY > 0 {
+			m.diffScrollY--
+		}
+		return
+	}
+	if m.diffCurLine > 0 {
+		m.diffCurLine--
+		m.diffFollowCursor()
+		return
+	}
+	if m.diffCurChunk > 0 {
+		m.diffCurChunk--
+		m.diffCurLine = len(m.diffChunks[m.diffCurChunk]) - 1
+		m.diffEnterChunkUp()
+	}
+}
+
+// diffMoveTop jumps to the first line of the first chunk.
+func (m *Model) diffMoveTop() {
+	if len(m.diffChunks) == 0 {
+		m.diffScrollY = 0
+		return
+	}
+	m.diffCurChunk = 0
+	m.diffCurLine = 0
+	m.diffFollowCursor()
+}
+
+// diffMoveBottom jumps to the last line of the last chunk.
+func (m *Model) diffMoveBottom() {
+	if len(m.diffChunks) == 0 {
+		m.diffScrollY = m.diffMaxScroll()
+		return
+	}
+	m.diffCurChunk = len(m.diffChunks) - 1
+	m.diffCurLine = len(m.diffChunks[m.diffCurChunk]) - 1
+	m.diffFollowCursor()
+}
+
+// computeDiffChunks groups contiguous addition/deletion lines into chunks,
+// recording each line's body-row index. Any file header, hunk header, or
+// context line breaks a chunk.
+func computeDiffChunks(rows []diffRow, headLen int) [][]int {
+	var chunks [][]int
+	var cur []int
+	flush := func() {
+		if len(cur) > 0 {
+			chunks = append(chunks, cur)
+			cur = nil
+		}
+	}
+	for i, r := range rows {
+		if r.kind == rowLine && (r.lineKind == "addition" || r.lineKind == "deletion") {
+			cur = append(cur, headLen+i)
+		} else {
+			flush()
+		}
+	}
+	flush()
+	return chunks
+}
+
 func (m Model) selectedEntry() *jj.LogEntry {
 	if len(m.entries) == 0 || m.cursor >= len(m.entries) {
 		return nil
@@ -575,13 +812,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter", "q", "esc":
 			m.diffOpen = false
 		case "up", "k":
-			if m.diffScrollY > 0 {
-				m.diffScrollY--
-			}
+			m.diffMoveUp()
 		case "down", "j":
-			if m.diffScrollY < m.diffMaxScroll() {
-				m.diffScrollY++
-			}
+			m.diffMoveDown()
+		case "home", "g":
+			m.diffMoveTop()
+		case "end", "G":
+			m.diffMoveBottom()
 		}
 		return m, nil
 	}
@@ -642,6 +879,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			m.diffRaw = ""
 			m.diffRows = nil
 			m.diffStatus = nil
+			m.diffChunks = nil
 			return m, m.openDiffCmd(e.CommitID, e.ChangeID)
 		}
 		return m, nil
@@ -1211,7 +1449,7 @@ func (m Model) View() string {
 	case m.view == viewHelp:
 		lines = append(lines, renderHelp(m.width, ch, m.helpScrollY)...)
 	case m.diffOpen:
-		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffLoading, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY)...)
+		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffLoading, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows())...)
 	default:
 		rb := rebaseView{
 			active:  m.rebaseMode,
@@ -1391,8 +1629,8 @@ func (m Model) helpBarItems() [][2]string {
 	switch {
 	case m.diffOpen:
 		return [][2]string{
-			{"⏎ close", "⏎"}, {"↑/k", "↑"}, {"↓/j", "↓"},
-			{"q close", "q"},
+			{"⏎ close", "⏎"}, {"↑/k chunk↑", "↑"}, {"↓/j chunk↓", "↓"},
+			{"g top", "g"}, {"G bot", "G"}, {"q close", "q"},
 		}
 	case m.view == viewHelp:
 		return [][2]string{

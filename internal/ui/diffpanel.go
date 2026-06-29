@@ -66,7 +66,12 @@ func statusSym(k jj.StatusKind) string {
 
 // renderDiffPanel produces exactly height lines for the diff panel. Only the
 // visible window of rows is styled, so scroll cost is independent of diff size.
-func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int) []string {
+//
+// cursorBodyRow is the body-row index of the focused change line (-1 if none);
+// chunkRows is the set of body-row indices that belong to the focused chunk.
+// A thin left-edge bar is drawn for those rows: bright for the cursor line,
+// dim for the rest of the chunk.
+func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool) []string {
 	// Title bar — the only sticky chrome; status + separator + diff all scroll
 	// together below it as one body.
 	titleLine := " " + rev
@@ -102,9 +107,9 @@ func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow
 		}
 		idx := i - len(head)
 		if rawLines != nil {
-			content = append(content, plainRow(width, seg{text: rawLines[idx], fg: colWhite}))
+			content = append(content, plainRow(width, seg{text: " ", fg: nil}, seg{text: rawLines[idx], fg: colWhite}))
 		} else {
-			content = append(content, renderDiffRow(width, gutterWidth, digits, rows[idx]))
+			content = append(content, renderDiffRow(width, gutterWidth, digits, rows[idx], cursorBar(rows[idx], i, cursorBodyRow, chunkRows)))
 		}
 	}
 
@@ -160,17 +165,17 @@ func visibleRange(scrollY, count, total int) (int, int) {
 	return start, end
 }
 
-func renderDiffRow(width, gutterWidth, digits int, r diffRow) string {
+func renderDiffRow(width, gutterWidth, digits int, r diffRow, barColor lipgloss.TerminalColor) string {
 	switch r.kind {
 	case rowFileHeader:
 		label := r.path + "  (" + r.changeType + ")"
 		if r.prevPath != "" {
 			label = r.prevPath + " → " + r.path + "  (" + r.changeType + ")"
 		}
-		return bgRow(width, diffFileHeaderBg, seg{text: " " + label, fg: diffFileHeaderFg, bold: true})
+		return bgRow(width, diffFileHeaderBg, seg{text: "  " + label, fg: diffFileHeaderFg, bold: true})
 
 	case rowHunkHeader:
-		return bgRow(width, diffHunkHeaderBg, seg{text: " " + r.hunkText, fg: diffHunkHeaderFg})
+		return bgRow(width, diffHunkHeaderBg, seg{text: "  " + r.hunkText, fg: diffHunkHeaderFg})
 
 	default:
 		gutter := lineNumText(r, digits)
@@ -184,7 +189,15 @@ func renderDiffRow(width, gutterWidth, digits int, r diffRow) string {
 			lineFg = diffContextFg
 		}
 
-		segs := []seg{{text: gutter, fg: diffLineNumber}}
+		// 1-column cursor gutter: a ▌ left-half-block glyph when the line is in
+		// the focused chunk (bright on the cursor line, dim on the rest), else a
+		// plain space so alignment stays consistent.
+		gutterSeg := seg{text: " "}
+		if barColor != nil {
+			gutterSeg = seg{text: "▌", fg: barColor}
+		}
+		segs := []seg{gutterSeg}
+		segs = append(segs, seg{text: gutter, fg: diffLineNumber})
 		for _, s := range r.spans {
 			// Syntax-highlight colors from chroma are truecolor hex; fall back
 			// to the line's kind color when a token has no color.
@@ -192,7 +205,7 @@ func renderDiffRow(width, gutterWidth, digits int, r diffRow) string {
 			if s.fg != "" {
 				fg = lipgloss.Color(s.fg)
 			}
-			segs = append(segs, seg{text: s.text, fg: fg})
+			segs = append(segs, seg{text: s.text, fg: fg, bg: lineBg})
 		}
 		_ = gutterWidth
 		if lineBg == nil {
@@ -200,4 +213,31 @@ func renderDiffRow(width, gutterWidth, digits int, r diffRow) string {
 		}
 		return bgRow(width, lineBg, segs...)
 	}
+}
+
+// cursorBar picks the foreground color for the ▌ cursor glyph on a given
+// content line. The focused line gets a bright color; other lines in the same
+// chunk get a dim tint; everything else gets nothing.
+func cursorBar(r diffRow, bodyRow, cursorBodyRow int, chunkRows map[int]bool) lipgloss.TerminalColor {
+	if r.kind != rowLine {
+		return nil
+	}
+	isCursor := bodyRow == cursorBodyRow
+	inChunk := chunkRows != nil && chunkRows[bodyRow]
+	if !isCursor && !inChunk {
+		return nil
+	}
+	switch r.lineKind {
+	case "addition":
+		if isCursor {
+			return diffCursorAddBright
+		}
+		return diffCursorAddDim
+	case "deletion":
+		if isCursor {
+			return diffCursorDelBright
+		}
+		return diffCursorDelDim
+	}
+	return nil
 }

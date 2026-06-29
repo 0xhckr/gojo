@@ -46,6 +46,14 @@ var (
 	diffRemovedBg    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#F2DADA", Dark: "#2e1a1a"}
 	diffHunkHeaderBg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#D4E8E8", Dark: "#1a2a2a"}
 	diffFileHeaderBg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#ECE8CE", Dark: "#2a2a1a"}
+
+	// Chunk cursor — a thin left-edge bar marking the focused change chunk.
+	// The current line pops in a bright ANSI color; the rest of the chunk is
+	// tinted so its extent stays visible while navigating line by line.
+	diffCursorAddBright lipgloss.TerminalColor = lipgloss.Color("10") // bright green
+	diffCursorDelBright lipgloss.TerminalColor = lipgloss.Color("9")  // bright red
+	diffCursorAddDim    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#A8D8A8", Dark: "#2e4a2e"}
+	diffCursorDelDim    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#D8A8A8", Dark: "#4a2e2e"}
 )
 
 // spinnerFrames cycles a braille spinner.
