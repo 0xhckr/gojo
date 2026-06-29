@@ -546,7 +546,7 @@ func renderBlameLine(width, digits, blameW int, l jj.AnnotateLine, kind blameKin
 
 	num := padNum(l.LineNo, digits)
 
-	// The blame cell is a fixed total width so the `│` separator (and thus
+	// The blame cell is a fixed total width so the `▌` separator (and thus
 	// the source code) stays aligned across every row kind.
 	//   cellW = 1 (lead) + 8 (cid) + 1 (gap) + authorW
 	authorW := blameW - 9
@@ -577,7 +577,7 @@ func renderBlameLine(width, digits, blameW int, l jj.AnnotateLine, kind blameKin
 	default:
 		segs = append(segs, seg{text: strings.Repeat(" ", 8+1+authorW), bg: bg})
 	}
-	segs = append(segs, seg{text: "│ ", fg: colDarkGray, bg: bg})
+	segs = append(segs, seg{text: "▌ ", fg: diffBorder, bg: bg})
 	segs = append(segs, seg{text: num + " ", fg: colGray, bg: bg})
 	if len(lineSpans) > 0 {
 		for _, s := range lineSpans {
