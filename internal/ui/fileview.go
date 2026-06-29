@@ -210,17 +210,37 @@ func (fv *fileViewState) pickerVisibleRange(height int) (int, int) {
 	return off, end
 }
 
-// blameVisibleRange keeps the cursor inside the viewport, scrolling minimally.
-func (fv *fileViewState) blameVisibleRange(height int) (int, int) {
+// blameVisibleRange keeps the cursor inside the viewport, scrolling
+// minimally. scrollMargin is the minimum number of lines kept between the
+// cursor and the bottom of the content area (0 lets the cursor reach the
+// last visible line).
+func (fv *fileViewState) blameVisibleRange(height, scrollMargin int) (int, int) {
 	total := len(fv.lines)
 	if height <= 0 {
 		return 0, 0
 	}
+	if scrollMargin < 0 {
+		scrollMargin = 0
+	}
+	// The margin is a bottom reserve; the cursor may not enter the last
+	// `scrollMargin` rows of the viewport (clamped so it never exceeds the
+	// available height).
+	margin := scrollMargin
+	if margin >= height {
+		margin = height - 1
+		if margin < 0 {
+			margin = 0
+		}
+	}
+	bottomLimit := height - margin // cursor must stay above this row index
+	if bottomLimit < 1 {
+		bottomLimit = 1
+	}
 	if fv.cursorY < fv.scrollY {
 		fv.scrollY = fv.cursorY
 	}
-	if fv.cursorY >= fv.scrollY+height {
-		fv.scrollY = fv.cursorY - height + 1
+	if fv.cursorY >= fv.scrollY+bottomLimit {
+		fv.scrollY = fv.cursorY - bottomLimit + 1
 	}
 	if fv.scrollY < 0 {
 		fv.scrollY = 0
@@ -414,7 +434,7 @@ func (m Model) renderFileBlame(width, height int) []string {
 		blameW = 12
 	}
 
-	start, end := fv.blameVisibleRange(contentH)
+	start, end := fv.blameVisibleRange(contentH, m.blameScrollMargin())
 	fv.ensureSections()
 	// Only the cursor's current section shows its blame text; every other
 	// section is silent (just its background tint), so the view stays calm as

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -15,7 +16,15 @@ type Config struct {
 	OpenRouterAPIKey string
 	OpenRouterModel  string
 	CommitPrompt     string
+
+	// BlameScrollMargin is the minimum number of lines kept between the
+	// cursor and the bottom of the file-view blame viewport. 0 lets the
+	// cursor reach the last visible line; the default is 8.
+	BlameScrollMargin int
 }
+
+// DefaultBlameScrollMargin is used when blame_scroll_margin is unset.
+const DefaultBlameScrollMargin = 8
 
 // applyTOMLConfig parses a minimal subset of TOML, optionally restricted to a
 // single section (e.g. "tools.gojo"). Only the keys gojo cares about are read.
@@ -59,6 +68,10 @@ func applyTOMLConfig(cfg *Config, raw string, section string) {
 			cfg.OpenRouterModel = val
 		case "commit_prompt":
 			cfg.CommitPrompt = val
+		case "blame_scroll_margin":
+			if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil && n >= 0 {
+				cfg.BlameScrollMargin = n
+			}
 		}
 	}
 }

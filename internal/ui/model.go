@@ -63,11 +63,11 @@ type Model struct {
 	diffRev        string
 	diffIsRevision bool // true: showing a revision diff (reloadable); false: a list view
 	diffLoading    bool
-	diffStatus  []jj.StatusEntry
-	diffRows    []diffRow
-	diffDigits  int // gutter width, computed once when the diff loads
-	diffRaw     string
-	diffScrollY int
+	diffStatus     []jj.StatusEntry
+	diffRows       []diffRow
+	diffDigits     int // gutter width, computed once when the diff loads
+	diffRaw        string
+	diffScrollY    int
 
 	// Chunk cursor — navigates change chunks (contiguous add/del runs) in the
 	// diff panel. diffChunks holds body-row indices per chunk; diffCurChunk /
@@ -180,9 +180,9 @@ type actionDoneMsg struct {
 // (editor flows like describe), which is why it returns a Cmd rather than an
 // error.
 type elevReq struct {
-	flag   string             // the flag a retry appends (e.g. "--ignore-immutable")
-	reason string             // short description of why elevation is needed
-	retry  func() tea.Cmd     // re-run the operation with the flag added
+	flag   string         // the flag a retry appends (e.g. "--ignore-immutable")
+	reason string         // short description of why elevation is needed
+	retry  func() tea.Cmd // re-run the operation with the flag added
 }
 
 type aiDoneMsg struct {
@@ -373,7 +373,9 @@ func (m Model) aiCmd(changeID string) tea.Cmd {
 					elev: &elevReq{
 						flag:   flag,
 						reason: reason,
-						retry:  func() tea.Cmd { return m.syncFnCmd(func() error { return r.Describe(changeID, msg, flag) }, "AI described "+changeID) },
+						retry: func() tea.Cmd {
+							return m.syncFnCmd(func() error { return r.Describe(changeID, msg, flag) }, "AI described "+changeID)
+						},
 					},
 				}
 			}
@@ -2251,6 +2253,15 @@ func (m Model) selChangeID() string {
 		return e.ChangeID
 	}
 	return ""
+}
+
+// blameScrollMargin returns the configured minimum spacing between the blame
+// cursor and the bottom of the content area, defaulting to 8 when unset.
+func (m Model) blameScrollMargin() int {
+	if m.cfg.BlameScrollMargin > 0 {
+		return m.cfg.BlameScrollMargin
+	}
+	return jj.DefaultBlameScrollMargin
 }
 
 // defaultHelpBarItems is the ordered list of global shortcut hints shown in
