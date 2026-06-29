@@ -419,13 +419,6 @@ func renderBlameLine(width, digits, blameW int, l jj.AnnotateLine, showBlame, is
 	if at > 0 {
 		author = author[:at] // drop the domain for brevity
 	}
-	authorW := blameW - 9
-	if authorW < 1 {
-		authorW = 1
-	}
-	if len([]rune(author)) > authorW {
-		author = string([]rune(author)[:authorW])
-	}
 
 	var cidFg lipgloss.TerminalColor = colPurple
 	authorFg := colBlue
@@ -438,15 +431,20 @@ func renderBlameLine(width, digits, blameW int, l jj.AnnotateLine, showBlame, is
 
 	num := padNum(l.LineNo, digits)
 
-	segs := []seg{{text: " ", bg: bg}}
-	segs = append(segs, seg{text: cid, fg: cidFg, bg: bg, bold: showBlame})
-	segs = append(segs, seg{text: " ", bg: bg})
-	segs = append(segs, seg{text: author, fg: authorFg, bg: bg})
-	// pad blame cell to fixed width
-	used := 1 + 8 + 1 + len([]rune(author))
-	if used < 1+blameW {
-		segs = append(segs, seg{text: strings.Repeat(" ", 1+blameW-used), bg: bg})
+	// The blame cell is a fixed width so the source text stays aligned
+	// whether or not blame is shown on this line: leading space + cid
+	// (padded to 8) + space + author (padded to authorW).
+	authorW := blameW - 9
+	if authorW < 1 {
+		authorW = 1
 	}
+	cidCell := cid + strings.Repeat(" ", 8-len([]rune(cid)))
+	authorCell := author + strings.Repeat(" ", authorW-len([]rune(author)))
+
+	segs := []seg{{text: " ", bg: bg}}
+	segs = append(segs, seg{text: cidCell, fg: cidFg, bg: bg, bold: showBlame})
+	segs = append(segs, seg{text: " ", bg: bg})
+	segs = append(segs, seg{text: authorCell, fg: authorFg, bg: bg})
 	segs = append(segs, seg{text: "│ ", fg: colDarkGray, bg: bg})
 	segs = append(segs, seg{text: num + " ", fg: colGray, bg: bg})
 	text := strings.ReplaceAll(l.Text, "\t", "    ")
