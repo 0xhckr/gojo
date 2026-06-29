@@ -50,10 +50,11 @@ type fileViewState struct {
 	offset int
 
 	// blame (file open)
-	path    string
-	lines   []jj.AnnotateLine
-	cursorY int // absolute line index under the cursor
-	scrollY int // top visible line index
+	path       string
+	lines      []jj.AnnotateLine
+	lineParity []int // absolute section parity per line (0/1), stable across scroll
+	cursorY    int   // absolute line index under the cursor
+	scrollY    int   // top visible line index
 
 	// history
 	hist    []jj.LogEntry
@@ -149,6 +150,24 @@ func (fv *fileViewState) reflow() {
 	if fv.cursor < 0 {
 		fv.cursor = 0
 	}
+}
+
+// ensureSections computes the absolute per-line section parity (0/1) from
+// the top of the file, so blame section bands stay stable as the viewport
+// scrolls. Idempotent: recomputes only when the line count changes.
+func (fv *fileViewState) ensureSections() {
+	if len(fv.lineParity) == len(fv.lines) {
+		return
+	}
+	parity := make([]int, len(fv.lines))
+	for i, l := range fv.lines {
+		if i > 0 && l.ChangeID == fv.lines[i-1].ChangeID {
+			parity[i] = parity[i-1]
+		} else {
+			parity[i] = parity[i-1] ^ 1
+		}
+	}
+	fv.lineParity = parity
 }
 
 // curRow returns the row under the picker cursor, or nil.
@@ -388,23 +407,13 @@ func (m Model) renderFileBlame(width, height int) []string {
 	}
 
 	start, end := fv.blameVisibleRange(contentH)
-	// Seed the section parity from the line just above the viewport so the
-	// alternating bands stay stable as the user scrolls.
-	parity := 0
-	prev := ""
-	if start > 0 {
-		prev = fv.lines[start-1].ChangeID
-	}
+	fv.ensureSections()
 	var content []string
 	for i := start; i < end; i++ {
 		l := fv.lines[i]
-		if l.ChangeID != prev {
-			parity++
-			prev = l.ChangeID
-		}
 		showBlame := i == 0 || fv.lines[i-1].ChangeID != l.ChangeID
 		sectionBg := blameSectionBgA
-		if parity%2 == 1 {
+		if fv.lineParity[i]%2 == 1 {
 			sectionBg = blameSectionBgB
 		}
 		content = append(content, renderBlameLine(width, digits, blameW, l, showBlame, i == fv.cursorY, sectionBg))
