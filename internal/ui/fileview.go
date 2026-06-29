@@ -416,10 +416,17 @@ func (m Model) renderFileBlame(width, height int) []string {
 
 	start, end := fv.blameVisibleRange(contentH)
 	fv.ensureSections()
+	// Only the cursor's current section shows its blame text; every other
+	// section is silent (just its background tint), so the view stays calm as
+	// you scroll. Recompute the cursor section's start line each render.
+	cursorSectionStart := fv.cursorY
+	for cursorSectionStart > 0 && fv.lines[cursorSectionStart-1].ChangeID == fv.lines[fv.cursorY].ChangeID {
+		cursorSectionStart--
+	}
 	var content []string
 	for i := start; i < end; i++ {
 		l := fv.lines[i]
-		showBlame := i == 0 || fv.lines[i-1].ChangeID != l.ChangeID
+		showBlame := i == cursorSectionStart
 		sectionBg := blameSectionBgA
 		if fv.lineParity[i]%2 == 1 {
 			sectionBg = blameSectionBgB
