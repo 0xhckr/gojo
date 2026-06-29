@@ -46,6 +46,94 @@ func bootedModel(t *testing.T) Model {
 	return m
 }
 
+func TestFileViewPickerBlameHistory(t *testing.T) {
+	m := bootedModel(t)
+
+	// Enter the file view (synthetic file list, no subprocess needed).
+	m.view = viewFile
+	m = step(t, m, fileListMsg{files: []string{"a/b.go", "a/c.go", "main.go"}})
+
+	if m.fileView.phase != filePicker {
+		t.Fatalf("expected picker phase, got %v", m.fileView.phase)
+	}
+	// Tree: dir "a" (expanded) + b.go + c.go, then root file main.go.
+	if len(m.fileView.rows) < 4 {
+		t.Fatalf("expected >=4 visible rows, got %d (%+v)", len(m.fileView.rows), m.fileView.rows)
+	}
+	// Move down to the first file inside a/ (index 1) and open it.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.fileView.rows[m.fileView.cursor].node.full == "" {
+		t.Fatalf("cursor not on a file: %+v", m.fileView.rows[m.fileView.cursor].node)
+	}
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Annotate result arrives asynchronously; feed it directly.
+	// Lines 1-2 are commit mwqwmwpp (multi-line section, has a description);
+	// line 3 is commit kxmyusxx (single-line section, has a description, so it
+	// expands and highlights line 4 too); line 4 is commit nwmqpxkp.
+	ann := []jj.AnnotateLine{
+		{ChangeID: "mwqwmwpp", CommitID: "b2fe214a", Author: "hackr@hackr.sh", LineNo: 1, Description: "Rewrite gojo", Text: "package main"},
+		{ChangeID: "mwqwmwpp", CommitID: "b2fe214a", Author: "hackr@hackr.sh", LineNo: 2, Description: "Rewrite gojo", Text: ""},
+		{ChangeID: "kxmyusxx", CommitID: "aa0100ff", Author: "al@ice.gg", LineNo: 3, Description: "add main", Text: "func main() {}"},
+		{ChangeID: "nwmqpxkp", CommitID: "11ff00bb", Author: "bo@b.io", LineNo: 4, Description: "doc", Text: "// done"},
+	}
+	m = step(t, m, fileAnnotateMsg{path: "a/b.go", lines: ann})
+	if m.fileView.phase != fileBlame {
+		t.Fatalf("expected blame phase, got %v", m.fileView.phase)
+	}
+
+	// The rendered blame view shows the email (not the truncated username)
+	// and the commit description on the line below it.
+	view := stripView(m)
+	if !strings.Contains(view, "hackr@hackr.sh") {
+		t.Fatalf("blame view missing email: %s", view)
+	}
+	if !strings.Contains(view, "Rewrite gojo") {
+		t.Fatalf("blame view missing description: %s", view)
+	}
+
+	// Status bar shows the focused line's commit (git-blame style).
+	bar := m.renderFileStatusBar()[0]
+	if !strings.Contains(bar, "mwqwmwpp") || !strings.Contains(bar, "hackr@hackr.sh") {
+		t.Fatalf("status bar missing blame info: %s", bar)
+	}
+
+	// Move down to line 3 (single-line section kxmyusxx). Its description
+	// ("add main") shows on the line below and the section expands.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	bar = m.renderFileStatusBar()[0]
+	if !strings.Contains(bar, "kxmyusxx") {
+		t.Fatalf("status bar didn't follow cursor to new commit: %s", bar)
+	}
+	view = stripView(m)
+	if !strings.Contains(view, "add main") {
+		t.Fatalf("blame view missing single-line section description: %s", view)
+	}
+
+	// 'h' opens file history.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	m = step(t, m, fileHistoryMsg{entries: []jj.LogEntry{{ChangeID: "kxmyusxx", CommitID: "aa0100ff", Subject: "edit b"}}})
+	if m.fileView.phase != fileHistory {
+		t.Fatalf("expected history phase, got %v", m.fileView.phase)
+	}
+
+	// esc returns to blame; q from blame steps back to the picker (like esc),
+	// and q from the picker then leaves the file view entirely.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.fileView.phase != fileBlame {
+		t.Fatalf("expected blame phase after esc from history, got %v", m.fileView.phase)
+	}
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if m.fileView.phase != filePicker {
+		t.Fatalf("expected picker phase after q from blame, got %v", m.fileView.phase)
+	}
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if m.view != viewLog {
+		t.Fatalf("expected to return to log view, got %v", m.view)
+	}
+}
+
 func TestViewBootAndLayout(t *testing.T) {
 	m := bootedModel(t)
 
@@ -305,7 +393,6 @@ func TestElevationCancel(t *testing.T) {
 		t.Error("cancel should not run the retry closure")
 	}
 }
-
 
 // TestDescribeImmutablePromptsElevation checks that pressing 'd' (editor
 // describe) on an immutable commit offers an elevation retry instead of

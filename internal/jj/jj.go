@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -139,6 +140,73 @@ func (r *Runner) DiffSummary(rev string) ([]StatusEntry, error) {
 // FileShow returns the contents of a file at a revision.
 func (r *Runner) FileShow(rev, path string) (string, error) {
 	return r.run("file", "show", "-r", rev, path)
+}
+
+// annotateTemplate emits one record per source line: blame fields joined by
+// '|', a \x01 marker, then the line's content (which jj includes with its
+// trailing newline). Bare keywords (commit, line_number, content) are the
+// AnnotationLine's no-arg methods; the Commit methods take parens. The
+// description (5th field) is parsed with a split limit so a '|' inside it is
+// preserved.
+const annotateTemplate = `commit.change_id().short(8) ++ "|" ++ commit.commit_id().short(8) ++ "|" ++ commit.author().email() ++ "|" ++ line_number ++ "|" ++ commit.description().first_line() ++ "\x01" ++ content`
+
+// AnnotateLine is one line of a file plus the commit that last touched it.
+type AnnotateLine struct {
+	ChangeID    string
+	CommitID    string
+	Author      string
+	LineNo      int
+	Description string // first line of the commit message (may be empty)
+	Text        string
+}
+
+// FileList lists the tracked files in the working-copy revision (@).
+func (r *Runner) FileList() ([]string, error) {
+	out, err := r.run("file", "list")
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return files, nil
+}
+
+// FileAnnotate returns per-line blame for a file at a revision ("" = @).
+func (r *Runner) FileAnnotate(path, rev string) ([]AnnotateLine, error) {
+	args := []string{"file", "annotate", "-T", annotateTemplate}
+	if rev != "" {
+		args = append(args, "-r", rev)
+	}
+	args = append(args, path)
+	out, err := r.run(args...)
+	if err != nil {
+		return nil, err
+	}
+	return parseAnnotate(out), nil
+}
+
+// FileLog returns the commit log restricted to revisions that touched path.
+// revset defaults to "all()". The path filters the revset down to touching
+// commits. limit <= 0 streams every matching revision.
+func (r *Runner) FileLog(path, revset string, limit int) ([]LogEntry, error) {
+	if revset == "" {
+		revset = "all()"
+	}
+	args := []string{"log", "--color", "never", "-T", logTemplate}
+	if limit > 0 {
+		args = append(args, "-n", fmt.Sprint(limit))
+	}
+	args = append(args, "-r", revset, "--", path)
+	out, err := r.run(args...)
+	if err != nil {
+		return nil, err
+	}
+	return parseLog(out), nil
 }
 
 // appendExtra appends only non-empty entries from extra to args. Empty
@@ -438,6 +506,40 @@ func parseLog(raw string) []LogEntry {
 	}
 
 	return entries
+}
+
+func parseAnnotate(raw string) []AnnotateLine {
+	var lines []AnnotateLine
+	for _, rec := range strings.Split(raw, "\n") {
+		// Each record carries its source line's own trailing newline, so
+		// splitting on "\n" yields one record per element (plus a trailing ""
+		// when the file ends with a newline).
+		if rec == "" {
+			continue
+		}
+		idx := strings.IndexByte(rec, '\x01')
+		if idx < 0 {
+			continue
+		}
+		meta := rec[:idx]
+		text := rec[idx+1:]
+		// SplitN with a limit of 5 so the description (last field) keeps any
+		// '|' it contains.
+		fields := strings.SplitN(meta, "|", 5)
+		if len(fields) < 5 {
+			continue
+		}
+		ln, _ := strconv.Atoi(fields[3])
+		lines = append(lines, AnnotateLine{
+			ChangeID:    fields[0],
+			CommitID:    fields[1],
+			Author:      fields[2],
+			LineNo:      ln,
+			Description: fields[4],
+			Text:        text,
+		})
+	}
+	return lines
 }
 
 func parseStatus(raw string) []StatusEntry {

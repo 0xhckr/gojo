@@ -231,7 +231,7 @@ func TestDiffCursorRefresh(t *testing.T) {
 		t.Fatal("expected refresh detection")
 	}
 	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen()) // unchanged shape
-	m.diffClampMax() // refresh path preserves viewport; only clamps
+	m.diffClampMax()                                        // refresh path preserves viewport; only clamps
 	if r := m.diffCursorBodyRow(); r >= 0 && (r < m.diffScrollY || r >= m.diffScrollY+m.diffBodyHeight()) {
 		m.diffFollowCursor()
 	}

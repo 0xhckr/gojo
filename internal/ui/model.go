@@ -20,6 +20,7 @@ type viewMode int
 const (
 	viewLog viewMode = iota
 	viewHelp
+	viewFile
 )
 
 // Rebase placement options, indexed by Model.rebasePlace.
@@ -42,6 +43,10 @@ type Model struct {
 
 	view viewMode
 
+	// File view: browse tracked files, open one with git-blame-style
+	// annotation, and inspect its history. Driven by fileViewState.
+	fileView fileViewState
+
 	entries       []jj.LogEntry
 	cursor        int
 	offset        int
@@ -58,11 +63,11 @@ type Model struct {
 	diffRev        string
 	diffIsRevision bool // true: showing a revision diff (reloadable); false: a list view
 	diffLoading    bool
-	diffStatus  []jj.StatusEntry
-	diffRows    []diffRow
-	diffDigits  int // gutter width, computed once when the diff loads
-	diffRaw     string
-	diffScrollY int
+	diffStatus     []jj.StatusEntry
+	diffRows       []diffRow
+	diffDigits     int // gutter width, computed once when the diff loads
+	diffRaw        string
+	diffScrollY    int
 
 	// Chunk cursor — navigates change chunks (contiguous add/del runs) in the
 	// diff panel. diffChunks holds body-row indices per chunk; diffCurChunk /
@@ -175,9 +180,9 @@ type actionDoneMsg struct {
 // (editor flows like describe), which is why it returns a Cmd rather than an
 // error.
 type elevReq struct {
-	flag   string             // the flag a retry appends (e.g. "--ignore-immutable")
-	reason string             // short description of why elevation is needed
-	retry  func() tea.Cmd     // re-run the operation with the flag added
+	flag   string         // the flag a retry appends (e.g. "--ignore-immutable")
+	reason string         // short description of why elevation is needed
+	retry  func() tea.Cmd // re-run the operation with the flag added
 }
 
 type aiDoneMsg struct {
@@ -210,6 +215,28 @@ type listLoadedMsg struct {
 type spinnerTickMsg struct{}
 
 type pollMsg struct{}
+
+// File-view messages.
+type fileListMsg struct {
+	files []string
+	err   error
+}
+
+type fileAnnotateMsg struct {
+	path  string
+	lines []jj.AnnotateLine
+	err   error
+}
+
+type fileHistoryMsg struct {
+	entries []jj.LogEntry
+	err     error
+}
+
+type fzfPickedMsg struct {
+	path string
+	err  error
+}
 
 // ── Init ────────────────────────────────────────────────────────────────────
 
@@ -346,7 +373,9 @@ func (m Model) aiCmd(changeID string) tea.Cmd {
 					elev: &elevReq{
 						flag:   flag,
 						reason: reason,
-						retry:  func() tea.Cmd { return m.syncFnCmd(func() error { return r.Describe(changeID, msg, flag) }, "AI described "+changeID) },
+						retry: func() tea.Cmd {
+							return m.syncFnCmd(func() error { return r.Describe(changeID, msg, flag) }, "AI described "+changeID)
+						},
 					},
 				}
 			}
@@ -626,6 +655,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, tea.Batch(append(m.refreshFocusedCmds(), pollTick())...)
+
+	case fileListMsg:
+		m.popBusy()
+		if msg.err != nil {
+			m.fileView.err = msg.err.Error()
+			return m, nil
+		}
+		m.fileView.err = ""
+		m.fileView = newFileViewState(msg.files)
+		return m, nil
+
+	case fileAnnotateMsg:
+		m.popBusy()
+		if msg.err != nil {
+			m.fileView.err = msg.err.Error()
+			return m, nil
+		}
+		m.fileView.err = ""
+		m.fileView.path = msg.path
+		m.fileView.lines = msg.lines
+		m.fileView.highlights = nil // recompute lazily for the new file
+		m.fileView.cursorY = 0
+		m.fileView.scrollY = 0
+		m.fileView.phase = fileBlame
+		return m, nil
+
+	case fileHistoryMsg:
+		m.popBusy()
+		if msg.err != nil {
+			m.fileView.err = msg.err.Error()
+			return m, nil
+		}
+		m.fileView.err = ""
+		m.fileView.hist = msg.entries
+		m.fileView.histCur = 0
+		m.fileView.histOff = 0
+		m.fileView.phase = fileHistory
+		return m, nil
+
+	case fzfPickedMsg:
+		if msg.err != nil || msg.path == "" {
+			// fzf cancelled (esc) — stay in the picker.
+			return m, nil
+		}
+		m.fileView.err = ""
+		m, tick := m.startBusy("annotating " + msg.path + "…")
+		return m, tea.Batch(tick, m.loadAnnotateCmd(msg.path))
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -964,6 +1040,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSquashKey(k)
 	}
 
+	// File view handles its own keys (including q/esc to leave) per phase.
+	if m.view == viewFile {
+		return m.handleFileKey(msg, k)
+	}
+
 	// Global keys.
 	if k == "q" {
 		if m.view == viewHelp {
@@ -994,21 +1075,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleHelpKey(k), nil
 	}
 
-	// Log view.
+	// Diff panel overlays whichever view opened it (log or file).
 	if m.diffOpen {
-		switch k {
-		case "enter", "q", "esc":
-			m.diffOpen = false
-		case "up", "k":
-			m.diffMoveUp()
-		case "down", "j":
-			m.diffMoveDown()
-		case "home", "g":
-			m.diffMoveTop()
-		case "end", "G":
-			m.diffMoveBottom()
-		}
-		return m, nil
+		return m.handleDiffKey(k)
 	}
 
 	return m.handleLogKey(msg, k)
@@ -1050,6 +1119,236 @@ func (m Model) handleHelpKey(k string) Model {
 		m.helpScrollY = min(maxS, m.helpScrollY+half)
 	}
 	return m
+}
+
+// handleFilePickerKey drives the tree-style file browser. Any typed
+// character launches fzf (pre-filled with that character) as the secondary
+// fuzzy picker; navigation keys move/expand the tree.
+func (m Model) handleFilePickerKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+	fv := &m.fileView
+	switch k {
+	case "esc", "q":
+		// Leave the file view entirely.
+		m.view = viewLog
+		m.fileView = fileViewState{}
+		return m, nil
+	case "up", "k":
+		if fv.cursor > 0 {
+			fv.cursor--
+		}
+		return m, nil
+	case "down", "j":
+		if fv.cursor < len(fv.rows)-1 {
+			fv.cursor++
+		}
+		return m, nil
+	case "home", "g":
+		fv.cursor = 0
+		return m, nil
+	case "end", "G":
+		fv.cursor = len(fv.rows) - 1
+		return m, nil
+	case "pgup":
+		fv.cursor = max(0, fv.cursor-10)
+		return m, nil
+	case "pgdown":
+		fv.cursor = min(len(fv.rows)-1, fv.cursor+10)
+		return m, nil
+	case "l", "right":
+		if row := fv.curRow(); row != nil && row.node.isDir {
+			row.node.expanded = true
+			fv.reflow()
+		}
+		return m, nil
+	case "h", "left":
+		if row := fv.curRow(); row != nil {
+			if row.node.isDir && row.node.expanded {
+				row.node.expanded = false
+				fv.reflow()
+			} else if row.depth > 0 {
+				// Jump to the parent directory.
+				for i := fv.cursor; i >= 0; i-- {
+					if fv.rows[i].depth < row.depth {
+						fv.cursor = i
+						break
+					}
+				}
+			}
+		}
+		return m, nil
+	case "enter", " ":
+		if row := fv.curRow(); row != nil {
+			if row.node.isDir {
+				row.node.expanded = !row.node.expanded
+				fv.reflow()
+				return m, nil
+			}
+			path := row.node.full
+			m, tick := m.startBusy("annotating " + path + "…")
+			return m, tea.Batch(tick, m.loadAnnotateCmd(path))
+		}
+		return m, nil
+	}
+
+	// Any typed character launches fzf as the secondary fuzzy picker,
+	// pre-seeded with that character.
+	if s, ok := typed(msg); ok && s != "" {
+		return m, m.fzfPickCmd(s)
+	}
+	return m, nil
+}
+
+func (m Model) handleFileBlameKey(k string) (tea.Model, tea.Cmd) {
+	fv := &m.fileView
+	total := len(fv.lines)
+	switch k {
+	case "esc", "q":
+		// Back to the picker.
+		fv.phase = filePicker
+		fv.err = ""
+		return m, nil
+	case "up", "k":
+		if fv.cursorY > 0 {
+			fv.cursorY--
+		}
+		return m, nil
+	case "down", "j":
+		if fv.cursorY < total-1 {
+			fv.cursorY++
+		}
+		return m, nil
+	case "home", "g":
+		fv.cursorY = 0
+		return m, nil
+	case "end", "G":
+		fv.cursorY = total - 1
+		return m, nil
+	case "pgup":
+		fv.cursorY = max(0, fv.cursorY-10)
+		return m, nil
+	case "pgdown":
+		fv.cursorY = min(total-1, fv.cursorY+10)
+		return m, nil
+	case "h":
+		// View file history (commits that touched this file).
+		path := fv.path
+		m, tick := m.startBusy("loading history for " + path + "…")
+		return m, tea.Batch(tick, m.loadFileHistoryCmd(path))
+	case "enter":
+		// Open the commit that last touched the focused line.
+		if fv.cursorY >= 0 && fv.cursorY < total {
+			line := fv.lines[fv.cursorY]
+			m.diffOpen = true
+			m.diffRev = line.ChangeID
+			m.diffIsRevision = true
+			m.diffLoading = true
+			m.diffScrollY = 0
+			m.diffRaw = ""
+			m.diffRows = nil
+			m.diffStatus = nil
+			m.diffChunks = nil
+			return m, m.openDiffCmd(line.CommitID, line.ChangeID)
+		}
+	}
+	return m, nil
+}
+
+func (m Model) handleFileHistoryKey(k string) (tea.Model, tea.Cmd) {
+	fv := &m.fileView
+	switch k {
+	case "esc", "q", "backspace":
+		// Back to the blame view of the same file.
+		fv.phase = fileBlame
+		fv.err = ""
+		return m, nil
+	case "up", "k":
+		if fv.histCur > 0 {
+			fv.histCur--
+		}
+		m.recomputeFileHistOffset()
+		return m, nil
+	case "down", "j":
+		if fv.histCur < len(fv.hist)-1 {
+			fv.histCur++
+		}
+		m.recomputeFileHistOffset()
+		return m, nil
+	case "home", "g":
+		fv.histCur = 0
+		m.recomputeFileHistOffset()
+		return m, nil
+	case "end", "G":
+		fv.histCur = len(fv.hist) - 1
+		m.recomputeFileHistOffset()
+		return m, nil
+	case "enter":
+		if fv.histCur >= 0 && fv.histCur < len(fv.hist) {
+			e := fv.hist[fv.histCur]
+			m.diffOpen = true
+			m.diffRev = e.ChangeID
+			m.diffIsRevision = true
+			m.diffLoading = true
+			m.diffScrollY = 0
+			m.diffRaw = ""
+			m.diffRows = nil
+			m.diffStatus = nil
+			m.diffChunks = nil
+			return m, m.openDiffCmd(e.CommitID, e.ChangeID)
+		}
+	}
+	return m, nil
+}
+
+// recomputeFileHistOffset keeps the history cursor on screen (variable-height
+// commits, same windowing as the main log).
+func (m *Model) recomputeFileHistOffset() {
+	fv := &m.fileView
+	entries := fv.hist
+	if len(entries) == 0 {
+		fv.histOff = 0
+		return
+	}
+	if fv.histCur >= len(entries) {
+		fv.histCur = len(entries) - 1
+	}
+	if fv.histCur < 0 {
+		fv.histCur = 0
+	}
+	avail := m.contentHeight() - 1
+	fv.histOff, _ = logWindow(entries, fv.histCur, fv.histOff, avail)
+}
+
+// handleDiffKey drives the diff panel navigation regardless of which view
+// (log or file) opened it. Closing the diff returns to that view.
+func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "enter", "q", "esc":
+		m.diffOpen = false
+	case "up", "k":
+		m.diffMoveUp()
+	case "down", "j":
+		m.diffMoveDown()
+	case "home", "g":
+		m.diffMoveTop()
+	case "end", "G":
+		m.diffMoveBottom()
+	}
+	return m, nil
+}
+
+func (m Model) handleFileKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+	// A diff opened from the blame/history sub-view overlays the file view.
+	if m.diffOpen {
+		return m.handleDiffKey(k)
+	}
+	switch m.fileView.phase {
+	case fileBlame:
+		return m.handleFileBlameKey(k)
+	case fileHistory:
+		return m.handleFileHistoryKey(k)
+	default:
+		return m.handleFilePickerKey(msg, k)
+	}
 }
 
 func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
@@ -1175,6 +1474,15 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		m.errMsg = ""
 		m.message = ""
 		return m, nil
+	case "f":
+		// File view: browse tracked files, open one with blame, inspect history.
+		m.view = viewFile
+		m.fileView = fileViewState{phase: filePicker}
+		m.fileView.err = ""
+		m.errMsg = ""
+		m.message = ""
+		m, tick := m.startBusy("listing files…")
+		return m, tea.Batch(tick, m.loadFileListCmd())
 	case "g":
 		m.gitMode = true
 		m.errMsg = ""
@@ -1339,9 +1647,11 @@ func (m Model) execRebase() (tea.Model, tea.Cmd) {
 	m.rebaseMode = false
 	r := m.runner
 	return m.busyActionCmd("rebasing…", actionSpec{
-		run:     func() error { return r.Rebase(srcFlag, src, placeFlag, dest) },
-		okMsg:   "rebased " + src + " " + label + " " + dest,
-		elevate: func(flag string) func() error { return func() error { return r.Rebase(srcFlag, src, placeFlag, dest, flag) } },
+		run:   func() error { return r.Rebase(srcFlag, src, placeFlag, dest) },
+		okMsg: "rebased " + src + " " + label + " " + dest,
+		elevate: func(flag string) func() error {
+			return func() error { return r.Rebase(srcFlag, src, placeFlag, dest, flag) }
+		},
 	})
 }
 
@@ -1707,6 +2017,8 @@ func (m Model) View() string {
 		lines = append(lines, renderHelp(m.width, ch, m.helpScrollY)...)
 	case m.diffOpen:
 		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffLoading, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows())...)
+	case m.view == viewFile:
+		lines = append(lines, m.renderFileView(m.width, ch)...)
 	default:
 		rb := rebaseView{
 			active:  m.rebaseMode,
@@ -1735,6 +2047,48 @@ func (m Model) View() string {
 	return strings.Join(padLines(lines, m.height), "\n")
 }
 
+// renderFileStatusBar renders the file-view status bar. In blame phase it
+// surfaces the git-blame-style info for the focused line (the commit that
+// last edited it and its author).
+func (m Model) renderFileStatusBar() []string {
+	fv := &m.fileView
+	switch fv.phase {
+	case filePicker:
+		text := fmt.Sprintf(" file browser · %d files · type to fzf", len(fv.files))
+		if fv.err != "" {
+			text = " ✖ " + fv.err
+			return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: colRed})}
+		}
+		return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: colGray})}
+	case fileHistory:
+		text := fmt.Sprintf(" history · %d commits · all()", len(fv.hist))
+		if fv.err != "" {
+			text = " ✖ " + fv.err
+			return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: colRed})}
+		}
+		return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: colGray})}
+	default: // fileBlame
+		if fv.err != "" {
+			return []string{bgRow(m.width, colDarkerGray, seg{text: " ✖ " + fv.err, fg: colRed})}
+		}
+		if len(fv.lines) == 0 {
+			return []string{bgRow(m.width, colDarkerGray, seg{text: " " + fv.path, fg: colGray})}
+		}
+		cur := max(0, min(fv.cursorY, len(fv.lines)-1))
+		l := fv.lines[cur]
+		segs := []seg{
+			{text: " blame ", fg: colGray},
+			{text: l.ChangeID, fg: colPurple, bold: true},
+			{text: " "},
+			{text: l.CommitID, fg: colGray},
+			{text: " "},
+			{text: l.Author, fg: colBlue},
+			{text: fmt.Sprintf("  L%d/%d", l.LineNo, len(fv.lines)), fg: colGray},
+		}
+		return []string{bgRow(m.width, colDarkerGray, segs...)}
+	}
+}
+
 func (m Model) renderSuggestions() string {
 	sugg := m.displaySuggestions()
 	segs := []seg{{text: " tab:", fg: colDarkGray}}
@@ -1758,6 +2112,8 @@ func (m Model) renderSuggestions() string {
 
 func (m Model) renderStatusBar() []string {
 	switch {
+	case m.view == viewFile:
+		return m.renderFileStatusBar()
 	case m.pendingElev != nil:
 		segs := []seg{
 			{text: " ⚠ retry with ", fg: colYellow},
@@ -1895,13 +2251,22 @@ func (m Model) selChangeID() string {
 	return ""
 }
 
+// blameScrollMargin returns the configured minimum spacing between the blame
+// cursor and the bottom of the content area, defaulting to 8 when unset.
+func (m Model) blameScrollMargin() int {
+	if m.cfg.BlameScrollMargin > 0 {
+		return m.cfg.BlameScrollMargin
+	}
+	return jj.DefaultBlameScrollMargin
+}
+
 // defaultHelpBarItems is the ordered list of global shortcut hints shown in
 // the bottom help bar while browsing the log (the default context).
 var defaultHelpBarItems = [][2]string{
 	{"⏎diff", "⏎"}, {"describe", "d"},
 	{"AI Desc", "D"}, {"bookmark", "b"}, {"git", "g"},
 	{"undo", "u"}, {"rebase", "r"}, {"squash", "s"}, {"edit", "e"}, {"new", "n"},
-	{"abandon", "a"}, {"?help", "?"}, {"quit", "q"},
+	{"abandon", "a"}, {"file", "f"}, {"?help", "?"}, {"quit", "q"},
 }
 
 // helpBarItems returns the shortcut hints shown in the bottom help bar for the
@@ -1914,6 +2279,24 @@ func (m Model) helpBarItems() [][2]string {
 		return [][2]string{
 			{"⏎ close", "⏎"}, {"↑/k chunk↑", "↑"}, {"↓/j chunk↓", "↓"},
 			{"g top", "g"}, {"G bot", "G"}, {"q close", "q"},
+		}
+	case m.view == viewFile:
+		switch m.fileView.phase {
+		case fileBlame:
+			return [][2]string{
+				{"↑/k", "↑"}, {"↓/j", "↓"}, {"g/G top/bot", "g"},
+				{"history", "h"}, {"open commit", "⏎"}, {"back", "esc/q"},
+			}
+		case fileHistory:
+			return [][2]string{
+				{"↑/k", "↑"}, {"↓/j", "↓"}, {"open commit", "⏎"},
+				{"back", "esc/q"},
+			}
+		default:
+			return [][2]string{
+				{"↑/k", "↑"}, {"↓/j", "↓"}, {"⏎/l open", "⏎"}, {"h collapse", "h"},
+				{"type→fzf", "f"}, {"quit", "q"},
+			}
 		}
 	case m.view == viewHelp:
 		return [][2]string{

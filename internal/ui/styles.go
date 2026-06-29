@@ -32,6 +32,13 @@ var (
 	colDarkerGray lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#E6E4EC", Dark: "#201F26"} // status / help bars
 )
 
+// Blame-view section backgrounds — alternating tints per blame hunk so
+// contiguous runs of the same commit stand out.
+var (
+	blameSectionBgA lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#F0F0F4", Dark: "#1c1b22"}
+	blameSectionBgB lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#E6E6EC", Dark: "#232228"}
+)
+
 // Diff panel colors.
 var (
 	diffAddedSign    lipgloss.TerminalColor = lipgloss.Color("2")
