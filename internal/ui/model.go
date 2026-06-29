@@ -465,7 +465,7 @@ func (m *Model) recomputeOffset() {
 }
 
 func (m Model) contentHeight() int {
-	h := m.height - 3 - m.helpBarHeight()
+	h := m.height - 2 - m.statusBarHeight() - m.helpBarHeight()
 	if m.suggestionsVisible() {
 		h--
 	}
@@ -473,6 +473,22 @@ func (m Model) contentHeight() int {
 		h = 0
 	}
 	return h
+}
+
+// statusBarHeight returns the number of terminal rows the status bar occupies.
+// Most states are a single row; the subcommand menus (bookmark/git/remote)
+// wrap onto extra rows when the terminal is narrow.
+func (m Model) statusBarHeight() int {
+	switch {
+	case m.bookmarkMode && m.bookmarkAction == "":
+		return len(wrapMenu(m.width, " [bookmark mode] ", colCyan, colPurple, " ", bookmarkMenuItems))
+	case m.gitMode && m.remoteMode && m.remoteAction == "":
+		return len(wrapMenu(m.width, " [git > remote] ", colPink, colPurple, " ", remoteMenuItems))
+	case m.gitMode && !m.remoteMode:
+		return len(wrapMenu(m.width, " [git mode] ", colDarkOrange, colPurple, " ", gitMenuItems))
+	default:
+		return 1
+	}
 }
 
 // diffMaxScroll is the furthest scroll offset that still keeps the last
@@ -1218,7 +1234,7 @@ func (m Model) View() string {
 	}
 
 	// Status bar + help bar.
-	lines = append(lines, m.renderStatusBar())
+	lines = append(lines, m.renderStatusBar()...)
 	lines = append(lines, m.renderHelpBar()...)
 
 	return strings.Join(padLines(lines, m.height), "\n")
@@ -1245,7 +1261,7 @@ func (m Model) renderSuggestions() string {
 	return bgRow(m.width, colDarkerGray, segs...)
 }
 
-func (m Model) renderStatusBar() string {
+func (m Model) renderStatusBar() []string {
 	switch {
 	case m.bookmarkMode:
 		if m.bookmarkAction != "" {
@@ -1257,18 +1273,9 @@ func (m Model) renderStatusBar() string {
 				"t": "track: ", "T": "untrack: ",
 			}
 			text := " [bookmark] " + prompts[m.bookmarkAction] + m.bookmarkInput + "█"
-			return bgRow(m.width, colDarkerGray, seg{text: text, fg: colCyan})
+			return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: colCyan})}
 		}
-		segs := []seg{{text: " [bookmark mode] ", fg: colCyan}}
-		segs = append(segs, hlSegs([][2]string{
-			{"create", "c"}, {"delete", "d"}, {"forget", "f"},
-			{"list", "l"}, {"move", "m"}, {"rename", "r"},
-			{"set", "s"}, {"track", "t"}, {"untrack", "T"},
-		}, colCyan, colPurple, " ")...)
-		segs = append(segs, seg{text: "  ", fg: colCyan})
-		segs = append(segs, hlSegs([][2]string{{"cancel", "esc"}}, colCyan, colPurple, " ")...)
-		segs = append(segs, seg{text: " ", fg: colCyan})
-		return bgRow(m.width, colDarkerGray, segs...)
+		return m.renderMenuRows(" [bookmark mode] ", colCyan, colPurple, bookmarkMenuItems)
 
 	case m.gitMode:
 		if m.remoteMode {
@@ -1280,26 +1287,11 @@ func (m Model) renderStatusBar() string {
 					"s": "set-url (name url): ",
 				}
 				text := " [git > remote] " + prompts[m.remoteAction] + m.remoteInput + "█"
-				return bgRow(m.width, colDarkerGray, seg{text: text, fg: colPink})
+				return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: colPink})}
 			}
-			segs := []seg{{text: " [git > remote] ", fg: colPink}}
-			segs = append(segs, hlSegs([][2]string{
-				{"add", "a"}, {"list", "l"}, {"remove", "r"},
-				{"rename", "m"}, {"set-url", "s"},
-			}, colPink, colPurple, " ")...)
-			segs = append(segs, seg{text: "  ", fg: colPink})
-			segs = append(segs, hlSegs([][2]string{{"cancel", "esc"}}, colPink, colPurple, " ")...)
-			segs = append(segs, seg{text: " ", fg: colPink})
-			return bgRow(m.width, colDarkerGray, segs...)
+			return m.renderMenuRows(" [git > remote] ", colPink, colPurple, remoteMenuItems)
 		}
-		segs := []seg{{text: " [git mode] ", fg: colDarkOrange}}
-		segs = append(segs, hlSegs([][2]string{
-			{"fetch", "f"}, {"push", "p"}, {"remote", "r"},
-		}, colDarkOrange, colPurple, " ")...)
-		segs = append(segs, seg{text: "  ", fg: colDarkOrange})
-		segs = append(segs, hlSegs([][2]string{{"cancel", "esc"}}, colDarkOrange, colPurple, " ")...)
-		segs = append(segs, seg{text: " ", fg: colDarkOrange})
-		return bgRow(m.width, colDarkerGray, segs...)
+		return m.renderMenuRows(" [git mode] ", colDarkOrange, colPurple, gitMenuItems)
 
 	case m.rebaseMode:
 		scope := "-r"
@@ -1319,7 +1311,7 @@ func (m Model) renderStatusBar() string {
 		segs = append(segs, seg{text: " " + rebasePlaceLabels[m.rebasePlace] + " ", fg: colYellow})
 		segs = append(segs, seg{text: dest, fg: colMagenta, bold: true})
 		segs = append(segs, seg{text: "   j/k move · s scope · tab place · ⏎ confirm · esc cancel", fg: colGray})
-		return bgRow(m.width, colDarkerGray, segs...)
+		return []string{bgRow(m.width, colDarkerGray, segs...)}
 
 	case m.squashMode:
 		src, dest := "?", "?"
@@ -1334,7 +1326,7 @@ func (m Model) renderStatusBar() string {
 		segs = append(segs, seg{text: " into ", fg: colYellow})
 		segs = append(segs, seg{text: dest, fg: colMagenta, bold: true})
 		segs = append(segs, seg{text: "   j/k move · ⏎ confirm · esc cancel", fg: colGray})
-		return bgRow(m.width, colDarkerGray, segs...)
+		return []string{bgRow(m.width, colDarkerGray, segs...)}
 
 	case m.errMsg != "":
 		msg := m.errMsg
@@ -1342,17 +1334,28 @@ func (m Model) renderStatusBar() string {
 		if limit > 0 && len(msg) > limit {
 			msg = msg[:limit]
 		}
-		return bgRow(m.width, colDarkerGray, seg{text: " ✖ " + msg, fg: colRed})
+		return []string{bgRow(m.width, colDarkerGray, seg{text: " ✖ " + msg, fg: colRed})}
 
 	case m.message != "":
-		return bgRow(m.width, colDarkerGray, seg{text: m.revsetBadge() + m.message, fg: colGray})
+		return []string{bgRow(m.width, colDarkerGray, seg{text: m.revsetBadge() + m.message, fg: colGray})}
 
 	case len(m.statusEntries) > 0:
-		return bgRow(m.width, colDarkerGray, seg{text: m.revsetBadge() + fmt.Sprintf("%d changed file(s)", len(m.statusEntries)), fg: colGray})
+		return []string{bgRow(m.width, colDarkerGray, seg{text: m.revsetBadge() + fmt.Sprintf("%d changed file(s)", len(m.statusEntries)), fg: colGray})}
 
 	default:
-		return bgRow(m.width, colDarkerGray, seg{text: m.revsetBadge() + "clean working copy ✓", fg: colGray})
+		return []string{bgRow(m.width, colDarkerGray, seg{text: m.revsetBadge() + "clean working copy ✓", fg: colGray})}
 	}
+}
+
+// renderMenuRows renders a subcommand menu, wrapping onto extra rows when the
+// terminal is too narrow to fit all items on one line.
+func (m Model) renderMenuRows(prefix string, base, hl lipgloss.TerminalColor, items [][2]string) []string {
+	packed := wrapMenu(m.width, prefix, base, hl, " ", items)
+	out := make([]string, len(packed))
+	for i, row := range packed {
+		out[i] = bgRow(m.width, colDarkerGray, row...)
+	}
+	return out
 }
 
 // revsetBadge returns a leading status-bar marker indicating the active log
@@ -1371,7 +1374,8 @@ func (m Model) selChangeID() string {
 	return ""
 }
 
-// helpBarItems is the ordered list of shortcut hints shown in the bottom bar.
+// helpBarItems is the ordered list of global shortcut hints shown in the
+// bottom help bar.
 var helpBarItems = [][2]string{
 	{"⏎diff", "⏎"}, {"describe", "d"},
 	{"AI Desc", "D"}, {"bookmark", "b"}, {"git", "g"},
@@ -1379,54 +1383,82 @@ var helpBarItems = [][2]string{
 	{"abandon", "a"}, {"?help", "?"}, {"quit", "q"},
 }
 
-const helpBarSep = "  "
+// Menu item lists for the status-bar subcommand menus. Each entry is
+// {label, key}; "cancel" is folded in so it wraps with the rest.
+var (
+	bookmarkMenuItems = [][2]string{
+		{"create", "c"}, {"delete", "d"}, {"forget", "f"},
+		{"list", "l"}, {"move", "m"}, {"rename", "r"},
+		{"set", "s"}, {"track", "t"}, {"untrack", "T"},
+		{"cancel", "esc"},
+	}
+	gitMenuItems = [][2]string{
+		{"fetch", "f"}, {"push", "p"}, {"remote", "r"},
+		{"cancel", "esc"},
+	}
+	remoteMenuItems = [][2]string{
+		{"add", "a"}, {"list", "l"}, {"remove", "r"},
+		{"rename", "m"}, {"set-url", "s"},
+		{"cancel", "esc"},
+	}
+)
 
-// helpBarHeight returns the number of terminal rows the wrapped help bar needs
-// at the current width. It mirrors the packing logic in renderHelpBar.
-func (m Model) helpBarHeight() int {
-	return len(packHelpBarRows(m.width))
-}
-
-// packHelpBarRows greedily packs helpBarItems into rows no wider than width,
-// returning the segment slices per row. Each row begins with a leading space
-// and items are separated by helpBarSep (two spaces).
-func packHelpBarRows(width int) [][]seg {
+// wrapMenu greedily packs highlightable menu items into rows no wider than
+// width, returning the segment slices per row. The first row is prefixed with
+// `prefix`; every subsequent (wrapped) row begins with a single leading space.
+// Items are separated by `sep`. base colors the item text, hl colors (and
+// underlines) the matched key substring. A lone item wider than the terminal is
+// allowed to overflow and is clipped by the caller.
+func wrapMenu(width int, prefix string, base, hl lipgloss.TerminalColor, sep string, items [][2]string) [][]seg {
 	if width <= 1 {
 		return [][]seg{{}}
 	}
+	prefixW := lipgloss.Width(prefix)
 	var rows [][]seg
-	cur := []seg{{text: " ", fg: colGray}}
-	curW := 1
-	for _, it := range helpBarItems {
+	// cur is the in-progress row's segments; curW its visible width; hasItem
+	// whether an item has already been placed on cur (so a separator is needed
+	// before the next one).
+	cur := []seg{{text: prefix, fg: base}}
+	curW := prefixW
+	hasItem := false
+	for _, it := range items {
 		itemW := lipgloss.Width(it[0])
 		addW := itemW
-		if len(cur) > 1 { // row already has an item beyond the leading space
-			addW += len(helpBarSep)
+		if hasItem {
+			addW += len(sep)
 		}
-		// If this item won't fit, flush the current row and start a new one —
-		// unless the current row only holds the leading space (lone item wider
-		// than the terminal), in which case we let it overflow and clip.
-		if curW+addW > width && len(cur) > 1 {
+		// Flush when the item won't fit — but only if cur already holds an item;
+		// otherwise the item alone is wider than the terminal and we let it
+		// overflow (clipped) rather than emitting an empty row.
+		if curW+addW > width && hasItem {
 			rows = append(rows, cur)
-			cur = []seg{{text: " ", fg: colGray}}
+			cur = []seg{{text: " ", fg: base}}
 			curW = 1
+			hasItem = false
 			addW = itemW
 		}
-		if len(cur) > 1 {
-			cur = append(cur, seg{text: helpBarSep, fg: colGray})
-			curW += len(helpBarSep)
+		if hasItem {
+			cur = append(cur, seg{text: sep, fg: base})
+			curW += len(sep)
 		}
-		cur = append(cur, hlSegs([][2]string{it}, colGray, colPurple, "")...)
+		cur = append(cur, hlSegs([][2]string{it}, base, hl, "")...)
 		curW += itemW
+		hasItem = true
 	}
 	rows = append(rows, cur)
 	return rows
 }
 
-// renderHelpBar renders the shortcut hints, wrapping onto extra rows when the
-// terminal is too narrow to fit them all on one line.
+// helpBarHeight returns the number of terminal rows the wrapped help bar needs
+// at the current width.
+func (m Model) helpBarHeight() int {
+	return len(wrapMenu(m.width, " ", colGray, colPurple, "  ", helpBarItems))
+}
+
+// renderHelpBar renders the global shortcut hints, wrapping onto extra rows
+// when the terminal is too narrow to fit them all on one line.
 func (m Model) renderHelpBar() []string {
-	packed := packHelpBarRows(m.width)
+	packed := wrapMenu(m.width, " ", colGray, colPurple, "  ", helpBarItems)
 	out := make([]string, len(packed))
 	for i, row := range packed {
 		out[i] = bgRow(m.width, colDarkerGray, row...)
