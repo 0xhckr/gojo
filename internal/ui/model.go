@@ -675,6 +675,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fileView.err = ""
 		m.fileView.path = msg.path
 		m.fileView.lines = msg.lines
+		m.fileView.highlights = nil // recompute lazily for the new file
 		m.fileView.cursorY = 0
 		m.fileView.scrollY = 0
 		m.fileView.phase = fileBlame

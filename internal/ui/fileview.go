@@ -53,8 +53,9 @@ type fileViewState struct {
 	path       string
 	lines      []jj.AnnotateLine
 	lineParity []int // absolute section parity per line (0/1), stable across scroll
-	cursorY    int   // absolute line index under the cursor
-	scrollY    int   // top visible line index
+	highlights [][]span // per-line syntax-highlighted spans (chroma); nil until computed
+	cursorY    int      // absolute line index under the cursor
+	scrollY    int      // top visible line index
 
 	// history
 	hist    []jj.LogEntry
@@ -176,6 +177,27 @@ func (fv *fileViewState) ensureSections() {
 		}
 	}
 	fv.lineParity = parity
+}
+
+// ensureHighlights lazily syntax-highlights the open file's source lines
+// via chroma, caching the per-line spans. Falls back to nil (plain text)
+// when no lexer matches the file. Idempotent across renders.
+func (fv *fileViewState) ensureHighlights() {
+	if fv.highlights != nil {
+		return
+	}
+	if fv.path == "" || len(fv.lines) == 0 {
+		fv.highlights = [][]span{}
+		return
+	}
+	texts := make([]string, len(fv.lines))
+	for i, l := range fv.lines {
+		texts[i] = l.Text
+	}
+	fv.highlights = highlightLines(fv.path, texts)
+	if fv.highlights == nil {
+		fv.highlights = [][]span{} // sentinel: tried, no lexer
+	}
 }
 
 // cursorSection returns the [start, end) source-line range of the section
@@ -454,6 +476,7 @@ func (m Model) renderFileBlame(width, height int) []string {
 
 	start, end := fv.blameVisibleRange(contentH, m.blameScrollMargin())
 	fv.ensureSections()
+	fv.ensureHighlights()
 	// Only the cursor's current section shows its blame text; every other
 	// section is silent (just its background tint), so the view stays calm as
 	// you scroll. The blame block is two rows: email on the section's first
@@ -489,7 +512,11 @@ func (m Model) renderFileBlame(width, height int) []string {
 		if fv.lineParity[i]%2 == 1 {
 			sectionBg = blameSectionBgB
 		}
-		content = append(content, renderBlameLine(width, digits, blameW, l, kind, selected, sectionBg, cursorDesc))
+		var lineSpans []span
+		if fv.highlights != nil && i < len(fv.highlights) {
+			lineSpans = fv.highlights[i]
+		}
+		content = append(content, renderBlameLine(width, digits, blameW, l, kind, selected, sectionBg, cursorDesc, lineSpans))
 	}
 	content = padLines(content, contentH)
 	out = append(out, content...)
@@ -505,7 +532,7 @@ const (
 	blameDesc
 )
 
-func renderBlameLine(width, digits, blameW int, l jj.AnnotateLine, kind blameKind, selected bool, sectionBg lipgloss.TerminalColor, descText string) string {
+func renderBlameLine(width, digits, blameW int, l jj.AnnotateLine, kind blameKind, selected bool, sectionBg lipgloss.TerminalColor, descText string, lineSpans []span) string {
 	bg := sectionBg
 	if selected {
 		bg = colDarkPurple
@@ -552,8 +579,18 @@ func renderBlameLine(width, digits, blameW int, l jj.AnnotateLine, kind blameKin
 	}
 	segs = append(segs, seg{text: "│ ", fg: colDarkGray, bg: bg})
 	segs = append(segs, seg{text: num + " ", fg: colGray, bg: bg})
-	text := strings.ReplaceAll(l.Text, "\t", "    ")
-	segs = append(segs, seg{text: text, fg: colWhite, bg: bg})
+	if len(lineSpans) > 0 {
+		for _, s := range lineSpans {
+			var fg lipgloss.TerminalColor
+			if s.fg != "" {
+				fg = lipgloss.Color(s.fg)
+			}
+			segs = append(segs, seg{text: strings.ReplaceAll(s.text, "\t", "    "), fg: fg, bg: bg})
+		}
+	} else {
+		text := strings.ReplaceAll(l.Text, "\t", "    ")
+		segs = append(segs, seg{text: text, fg: colWhite, bg: bg})
+	}
 	return renderRow(width, bg, segs)
 }
 

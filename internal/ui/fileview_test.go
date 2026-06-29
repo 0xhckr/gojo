@@ -17,7 +17,7 @@ func TestBlameLineAlignment(t *testing.T) {
 	const width, digits, blameW = 80, 3, 21
 
 	sepCol := func(kind blameKind, desc string) int {
-		s := ansi.Strip(renderBlameLine(width, digits, blameW, l, kind, false, blameSectionBgA, desc))
+		s := ansi.Strip(renderBlameLine(width, digits, blameW, l, kind, false, blameSectionBgA, desc, nil))
 		return strings.Index(s, "│")
 	}
 	emailCol := sepCol(blameEmail, l.Description)
