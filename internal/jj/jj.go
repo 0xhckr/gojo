@@ -145,16 +145,19 @@ func (r *Runner) FileShow(rev, path string) (string, error) {
 // annotateTemplate emits one record per source line: blame fields joined by
 // '|', a \x01 marker, then the line's content (which jj includes with its
 // trailing newline). Bare keywords (commit, line_number, content) are the
-// AnnotationLine's no-arg methods; the Commit methods take parens.
-const annotateTemplate = `commit.change_id().short(8) ++ "|" ++ commit.commit_id().short(8) ++ "|" ++ commit.author().email() ++ "|" ++ line_number ++ "|\x01" ++ content`
+// AnnotationLine's no-arg methods; the Commit methods take parens. The
+// description (5th field) is parsed with a split limit so a '|' inside it is
+// preserved.
+const annotateTemplate = `commit.change_id().short(8) ++ "|" ++ commit.commit_id().short(8) ++ "|" ++ commit.author().email() ++ "|" ++ line_number ++ "|" ++ commit.description().first_line() ++ "\x01" ++ content`
 
 // AnnotateLine is one line of a file plus the commit that last touched it.
 type AnnotateLine struct {
-	ChangeID string
-	CommitID string
-	Author   string
-	LineNo   int
-	Text     string
+	ChangeID    string
+	CommitID    string
+	Author      string
+	LineNo      int
+	Description string // first line of the commit message (may be empty)
+	Text        string
 }
 
 // FileList lists the tracked files in the working-copy revision (@).
@@ -520,17 +523,20 @@ func parseAnnotate(raw string) []AnnotateLine {
 		}
 		meta := rec[:idx]
 		text := rec[idx+1:]
-		fields := strings.Split(meta, "|")
-		if len(fields) < 4 {
+		// SplitN with a limit of 5 so the description (last field) keeps any
+		// '|' it contains.
+		fields := strings.SplitN(meta, "|", 5)
+		if len(fields) < 5 {
 			continue
 		}
 		ln, _ := strconv.Atoi(fields[3])
 		lines = append(lines, AnnotateLine{
-			ChangeID: fields[0],
-			CommitID: fields[1],
-			Author:   fields[2],
-			LineNo:   ln,
-			Text:     text,
+			ChangeID:    fields[0],
+			CommitID:    fields[1],
+			Author:      fields[2],
+			LineNo:      ln,
+			Description: fields[4],
+			Text:        text,
 		})
 	}
 	return lines

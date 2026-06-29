@@ -178,6 +178,24 @@ func (fv *fileViewState) ensureSections() {
 	fv.lineParity = parity
 }
 
+// cursorSection returns the [start, end) source-line range of the section
+// (contiguous run of one change id) that contains the cursor.
+func (fv *fileViewState) cursorSection() (int, int) {
+	if len(fv.lines) == 0 {
+		return 0, 0
+	}
+	c := min(fv.cursorY, len(fv.lines)-1)
+	start := c
+	for start > 0 && fv.lines[start-1].ChangeID == fv.lines[c].ChangeID {
+		start--
+	}
+	end := c + 1
+	for end < len(fv.lines) && fv.lines[end].ChangeID == fv.lines[c].ChangeID {
+		end++
+	}
+	return start, end
+}
+
 // curRow returns the row under the picker cursor, or nil.
 func (fv *fileViewState) curRow() *treeRow {
 	if fv.cursor < 0 || fv.cursor >= len(fv.rows) {
@@ -438,68 +456,106 @@ func (m Model) renderFileBlame(width, height int) []string {
 	fv.ensureSections()
 	// Only the cursor's current section shows its blame text; every other
 	// section is silent (just its background tint), so the view stays calm as
-	// you scroll. Recompute the cursor section's start line each render.
-	cursorSectionStart := fv.cursorY
-	for cursorSectionStart > 0 && fv.lines[cursorSectionStart-1].ChangeID == fv.lines[fv.cursorY].ChangeID {
-		cursorSectionStart--
+	// you scroll. The blame block is two rows: email on the section's first
+	// visible line, description on the line below it.
+	secStart, secEnd := fv.cursorSection()
+	hasDesc := strings.TrimSpace(fv.lines[min(fv.cursorY, len(fv.lines)-1)].Description) != ""
+	cursorDesc := strings.TrimSpace(fv.lines[min(fv.cursorY, len(fv.lines)-1)].Description)
+	singleLine := secEnd-secStart == 1
+	// If the section start is scrolled off the top, anchor the email on the
+	// first visible line of the section so blame is always shown.
+	emailLine := secStart
+	if emailLine < start {
+		emailLine = start
 	}
+	descLine := emailLine + 1
+	// A single-line section expands: its description is shown on the line
+	// below (which belongs to the next section), and that line is treated as
+	// part of the selection.
+	expanded := singleLine && hasDesc
+
 	var content []string
 	for i := start; i < end; i++ {
 		l := fv.lines[i]
-		showBlame := i == cursorSectionStart
+		kind := blameNone
+		switch {
+		case i == emailLine:
+			kind = blameEmail
+		case hasDesc && i == descLine:
+			kind = blameDesc
+		}
+		selected := i == fv.cursorY || (expanded && i == descLine)
 		sectionBg := blameSectionBgA
 		if fv.lineParity[i]%2 == 1 {
 			sectionBg = blameSectionBgB
 		}
-		content = append(content, renderBlameLine(width, digits, blameW, l, showBlame, i == fv.cursorY, sectionBg))
+		content = append(content, renderBlameLine(width, digits, blameW, l, kind, selected, sectionBg, cursorDesc))
 	}
 	content = padLines(content, contentH)
 	out = append(out, content...)
 	return padLines(out, height)
 }
 
-func renderBlameLine(width, digits, blameW int, l jj.AnnotateLine, showBlame, isCursor bool, sectionBg lipgloss.TerminalColor) string {
+// blameKind selects what (if anything) the blame column shows on a row.
+type blameKind int
+
+const (
+	blameNone blameKind = iota
+	blameEmail
+	blameDesc
+)
+
+func renderBlameLine(width, digits, blameW int, l jj.AnnotateLine, kind blameKind, selected bool, sectionBg lipgloss.TerminalColor, descText string) string {
 	bg := sectionBg
-	if isCursor {
+	if selected {
 		bg = colDarkPurple
 	}
 
-	// blame cell: change_id padded to 8, then truncated author.
 	cid := l.ChangeID
 	if len(cid) > 8 {
 		cid = cid[:8]
 	}
-	author := l.Author
-	at := strings.IndexByte(author, '@')
-	if at > 0 {
-		author = author[:at] // drop the domain for brevity
-	}
-
-	var cidFg lipgloss.TerminalColor = colPurple
-	authorFg := colBlue
-	if !showBlame {
-		cidFg = nil
-		authorFg = nil
-		author = ""
-		cid = ""
-	}
+	email := l.Author // full email address
 
 	num := padNum(l.LineNo, digits)
 
 	// The blame cell is a fixed width so the source text stays aligned
-	// whether or not blame is shown on this line: leading space + cid
-	// (padded to 8) + space + author (padded to authorW).
-	authorW := blameW - 9
+	// regardless of what (if anything) the row shows.
+	authorW := blameW - 9 // blameW = 1 (lead) + 8 (cid) + 1 (sep) + authorW
 	if authorW < 1 {
 		authorW = 1
 	}
-	cidCell := cid + strings.Repeat(" ", 8-len([]rune(cid)))
-	authorCell := author + strings.Repeat(" ", authorW-len([]rune(author)))
+
+	var cidCell, textCell string
+	var cidFg, textFg lipgloss.TerminalColor
+	switch kind {
+	case blameEmail:
+		cidCell = cid + strings.Repeat(" ", 8-len([]rune(cid)))
+		cidFg = colPurple
+		if len([]rune(email)) > authorW {
+			email = string([]rune(email)[:authorW])
+		}
+		textCell = email + strings.Repeat(" ", authorW-len([]rune(email)))
+		textFg = colBlue
+	case blameDesc:
+		cidCell = strings.Repeat(" ", 8)
+		// description fills the whole blame column (cid + sep + author)
+		descW := 8 + 1 + authorW
+		desc := strings.TrimSpace(descText)
+		if len([]rune(desc)) > descW {
+			desc = string([]rune(desc)[:descW])
+		}
+		textCell = desc + strings.Repeat(" ", descW-len([]rune(desc)))
+		textFg = colGray
+	default:
+		cidCell = strings.Repeat(" ", 8)
+		textCell = strings.Repeat(" ", authorW)
+	}
 
 	segs := []seg{{text: " ", bg: bg}}
-	segs = append(segs, seg{text: cidCell, fg: cidFg, bg: bg, bold: showBlame})
+	segs = append(segs, seg{text: cidCell, fg: cidFg, bg: bg, bold: kind == blameEmail})
 	segs = append(segs, seg{text: " ", bg: bg})
-	segs = append(segs, seg{text: authorCell, fg: authorFg, bg: bg})
+	segs = append(segs, seg{text: textCell, fg: textFg, bg: bg})
 	segs = append(segs, seg{text: "│ ", fg: colDarkGray, bg: bg})
 	segs = append(segs, seg{text: num + " ", fg: colGray, bg: bg})
 	text := strings.ReplaceAll(l.Text, "\t", "    ")
