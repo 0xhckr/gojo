@@ -388,23 +388,34 @@ func (m Model) renderFileBlame(width, height int) []string {
 	}
 
 	start, end := fv.blameVisibleRange(contentH)
+	// Seed the section parity from the line just above the viewport so the
+	// alternating bands stay stable as the user scrolls.
+	parity := 0
+	prev := ""
+	if start > 0 {
+		prev = fv.lines[start-1].ChangeID
+	}
 	var content []string
-	prevChange := ""
 	for i := start; i < end; i++ {
 		l := fv.lines[i]
-		isCursor := i == fv.cursorY
-		showBlame := l.ChangeID != prevChange
-		prevChange = l.ChangeID
-
-		content = append(content, renderBlameLine(width, digits, blameW, l, showBlame, isCursor))
+		if l.ChangeID != prev {
+			parity++
+			prev = l.ChangeID
+		}
+		showBlame := i == 0 || fv.lines[i-1].ChangeID != l.ChangeID
+		sectionBg := blameSectionBgA
+		if parity%2 == 1 {
+			sectionBg = blameSectionBgB
+		}
+		content = append(content, renderBlameLine(width, digits, blameW, l, showBlame, i == fv.cursorY, sectionBg))
 	}
 	content = padLines(content, contentH)
 	out = append(out, content...)
 	return padLines(out, height)
 }
 
-func renderBlameLine(width, digits, blameW int, l jj.AnnotateLine, showBlame, isCursor bool) string {
-	var bg lipgloss.TerminalColor
+func renderBlameLine(width, digits, blameW int, l jj.AnnotateLine, showBlame, isCursor bool, sectionBg lipgloss.TerminalColor) string {
+	bg := sectionBg
 	if isCursor {
 		bg = colDarkPurple
 	}
