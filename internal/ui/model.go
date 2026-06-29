@@ -1374,13 +1374,37 @@ func (m Model) selChangeID() string {
 	return ""
 }
 
-// helpBarItems is the ordered list of global shortcut hints shown in the
-// bottom help bar.
-var helpBarItems = [][2]string{
+// defaultHelpBarItems is the ordered list of global shortcut hints shown in
+// the bottom help bar while browsing the log (the default context).
+var defaultHelpBarItems = [][2]string{
 	{"⏎diff", "⏎"}, {"describe", "d"},
 	{"AI Desc", "D"}, {"bookmark", "b"}, {"git", "g"},
 	{"undo", "u"}, {"rebase", "r"}, {"squash", "s"}, {"edit", "e"}, {"new", "n"},
 	{"abandon", "a"}, {"?help", "?"}, {"quit", "q"},
+}
+
+// helpBarItems returns the shortcut hints shown in the bottom help bar for the
+// current context. It returns nil when the help bar should be hidden entirely
+// (e.g. subcommand modes whose key hints are already surfaced in the status
+// bar), so the content area can reclaim that row.
+func (m Model) helpBarItems() [][2]string {
+	switch {
+	case m.diffOpen:
+		return [][2]string{
+			{"⏎ close", "⏎"}, {"↑/k", "↑"}, {"↓/j", "↓"},
+			{"q close", "q"},
+		}
+	case m.view == viewHelp:
+		return [][2]string{
+			{"↑/k", "↑"}, {"↓/j", "↓"}, {"?/q close", "?"},
+		}
+	case m.rebaseMode, m.squashMode,
+		m.bookmarkMode, m.gitMode:
+		// Keys for these modes are shown inline in the status bar.
+		return nil
+	default:
+		return defaultHelpBarItems
+	}
 }
 
 // Menu item lists for the status-bar subcommand menus. Each entry is
@@ -1449,16 +1473,25 @@ func wrapMenu(width int, prefix string, base, hl lipgloss.TerminalColor, sep str
 	return rows
 }
 
-// helpBarHeight returns the number of terminal rows the wrapped help bar needs
-// at the current width.
+// helpBarHeight returns the number of terminal rows the wrapped help bar
+// needs at the current width. Returns 0 when the help bar is hidden for the
+// active context.
 func (m Model) helpBarHeight() int {
-	return len(wrapMenu(m.width, " ", colGray, colPurple, "  ", helpBarItems))
+	items := m.helpBarItems()
+	if items == nil {
+		return 0
+	}
+	return len(wrapMenu(m.width, " ", colGray, colPurple, "  ", items))
 }
 
-// renderHelpBar renders the global shortcut hints, wrapping onto extra rows
-// when the terminal is too narrow to fit them all on one line.
+// renderHelpBar renders the context-specific shortcut hints, wrapping onto
+// extra rows when the terminal is too narrow to fit them all on one line.
 func (m Model) renderHelpBar() []string {
-	packed := wrapMenu(m.width, " ", colGray, colPurple, "  ", helpBarItems)
+	items := m.helpBarItems()
+	if items == nil {
+		return nil
+	}
+	packed := wrapMenu(m.width, " ", colGray, colPurple, "  ", items)
 	out := make([]string, len(packed))
 	for i, row := range packed {
 		out[i] = bgRow(m.width, colDarkerGray, row...)
