@@ -159,9 +159,17 @@ func (fv *fileViewState) ensureSections() {
 	if len(fv.lineParity) == len(fv.lines) {
 		return
 	}
+	if len(fv.lines) == 0 {
+		fv.lineParity = nil
+		return
+	}
 	parity := make([]int, len(fv.lines))
 	for i, l := range fv.lines {
-		if i > 0 && l.ChangeID == fv.lines[i-1].ChangeID {
+		if i == 0 {
+			parity[i] = 1
+			continue
+		}
+		if l.ChangeID == fv.lines[i-1].ChangeID {
 			parity[i] = parity[i-1]
 		} else {
 			parity[i] = parity[i-1] ^ 1
