@@ -519,43 +519,37 @@ func renderBlameLine(width, digits, blameW int, l jj.AnnotateLine, kind blameKin
 
 	num := padNum(l.LineNo, digits)
 
-	// The blame cell is a fixed width so the source text stays aligned
-	// regardless of what (if anything) the row shows.
-	authorW := blameW - 9 // blameW = 1 (lead) + 8 (cid) + 1 (sep) + authorW
+	// The blame cell is a fixed total width so the `│` separator (and thus
+	// the source code) stays aligned across every row kind.
+	//   cellW = 1 (lead) + 8 (cid) + 1 (gap) + authorW
+	authorW := blameW - 9
 	if authorW < 1 {
 		authorW = 1
 	}
 
-	var cidCell, textCell string
-	var cidFg, textFg lipgloss.TerminalColor
+	segs := []seg{{text: " ", bg: bg}} // lead
 	switch kind {
 	case blameEmail:
-		cidCell = cid + strings.Repeat(" ", 8-len([]rune(cid)))
-		cidFg = colPurple
+		cidPad := cid + strings.Repeat(" ", 8-len([]rune(cid)))
 		if len([]rune(email)) > authorW {
 			email = string([]rune(email)[:authorW])
 		}
-		textCell = email + strings.Repeat(" ", authorW-len([]rune(email)))
-		textFg = colBlue
+		emailPad := email + strings.Repeat(" ", authorW-len([]rune(email)))
+		segs = append(segs, seg{text: cidPad, fg: colPurple, bg: bg, bold: true})
+		segs = append(segs, seg{text: " ", bg: bg})
+		segs = append(segs, seg{text: emailPad, fg: colBlue, bg: bg})
 	case blameDesc:
-		cidCell = strings.Repeat(" ", 8)
-		// description fills the whole blame column (cid + sep + author)
+		// Description spans the cid + gap + author region so the separator
+		// stays at the same column as on other rows.
 		descW := 8 + 1 + authorW
 		desc := strings.TrimSpace(descText)
 		if len([]rune(desc)) > descW {
 			desc = string([]rune(desc)[:descW])
 		}
-		textCell = desc + strings.Repeat(" ", descW-len([]rune(desc)))
-		textFg = colGray
+		segs = append(segs, seg{text: desc + strings.Repeat(" ", descW-len([]rune(desc))), fg: colGray, bg: bg})
 	default:
-		cidCell = strings.Repeat(" ", 8)
-		textCell = strings.Repeat(" ", authorW)
+		segs = append(segs, seg{text: strings.Repeat(" ", 8+1+authorW), bg: bg})
 	}
-
-	segs := []seg{{text: " ", bg: bg}}
-	segs = append(segs, seg{text: cidCell, fg: cidFg, bg: bg, bold: kind == blameEmail})
-	segs = append(segs, seg{text: " ", bg: bg})
-	segs = append(segs, seg{text: textCell, fg: textFg, bg: bg})
 	segs = append(segs, seg{text: "│ ", fg: colDarkGray, bg: bg})
 	segs = append(segs, seg{text: num + " ", fg: colGray, bg: bg})
 	text := strings.ReplaceAll(l.Text, "\t", "    ")

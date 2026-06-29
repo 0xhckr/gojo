@@ -1,10 +1,35 @@
 package ui
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"gojo/internal/jj"
 )
+
+// TestBlameLineAlignment verifies the `│` separator (and thus the source
+// code) lands at the same column regardless of row kind (email / desc /
+// none), so the description row no longer indents the code.
+func TestBlameLineAlignment(t *testing.T) {
+	l := jj.AnnotateLine{ChangeID: "mwqwmwpp", CommitID: "b", Author: "hackr@hackr.sh", LineNo: 1, Description: "Rewrite gojo", Text: "x"}
+	const width, digits, blameW = 80, 3, 21
+
+	sepCol := func(kind blameKind, desc string) int {
+		s := ansi.Strip(renderBlameLine(width, digits, blameW, l, kind, false, blameSectionBgA, desc))
+		return strings.Index(s, "│")
+	}
+	emailCol := sepCol(blameEmail, l.Description)
+	descCol := sepCol(blameDesc, l.Description)
+	noneCol := sepCol(blameNone, "")
+	if emailCol < 0 || descCol < 0 || noneCol < 0 {
+		t.Fatalf("missing separator: email=%d desc=%d none=%d", emailCol, descCol, noneCol)
+	}
+	if emailCol != descCol || descCol != noneCol {
+		t.Fatalf("separator misaligned: email=%d desc=%d none=%d", emailCol, descCol, noneCol)
+	}
+}
 
 // TestBlameVisibleRangeMargin checks that the configured bottom margin is
 // respected: the cursor stays at least `margin` rows above the viewport
