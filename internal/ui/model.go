@@ -1201,15 +1201,10 @@ func (m Model) handleFileBlameKey(k string) (tea.Model, tea.Cmd) {
 	fv := &m.fileView
 	total := len(fv.lines)
 	switch k {
-	case "esc":
+	case "esc", "q":
 		// Back to the picker.
 		fv.phase = filePicker
 		fv.err = ""
-		return m, nil
-	case "q":
-		// Leave the file view entirely.
-		m.view = viewLog
-		m.fileView = fileViewState{}
 		return m, nil
 	case "up", "k":
 		if fv.cursorY > 0 {
@@ -2289,12 +2284,12 @@ func (m Model) helpBarItems() [][2]string {
 		case fileBlame:
 			return [][2]string{
 				{"↑/k", "↑"}, {"↓/j", "↓"}, {"g/G top/bot", "g"},
-				{"history", "h"}, {"open commit", "⏎"}, {"back", "esc"}, {"quit", "q"},
+				{"history", "h"}, {"open commit", "⏎"}, {"back", "esc/q"},
 			}
 		case fileHistory:
 			return [][2]string{
 				{"↑/k", "↑"}, {"↓/j", "↓"}, {"open commit", "⏎"},
-				{"back", "esc"}, {"quit", "q"},
+				{"back", "esc/q"},
 			}
 		default:
 			return [][2]string{

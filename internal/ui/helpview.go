@@ -76,8 +76,7 @@ var helpSections = []helpSection{
 		{"h", "file history  (all())"},
 		{"⏎", "open the line's commit"},
 		{"g / G", "jump top / bottom"},
-		{"esc", "back a step"},
-		{"q", "quit the file view"},
+		{"esc / q", "back a step / quit"},
 	}},
 	{title: "Help View", color: colPurple, bindings: []helpBinding{
 		{"↑/k, ↓/j", "scroll help"},

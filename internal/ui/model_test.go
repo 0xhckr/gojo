@@ -99,10 +99,15 @@ func TestFileViewPickerBlameHistory(t *testing.T) {
 		t.Fatalf("expected history phase, got %v", m.fileView.phase)
 	}
 
-	// esc returns to blame; q leaves the file view entirely.
+	// esc returns to blame; q from blame steps back to the picker (like esc),
+	// and q from the picker then leaves the file view entirely.
 	m = step(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.fileView.phase != fileBlame {
 		t.Fatalf("expected blame phase after esc from history, got %v", m.fileView.phase)
+	}
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if m.fileView.phase != filePicker {
+		t.Fatalf("expected picker phase after q from blame, got %v", m.fileView.phase)
 	}
 	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if m.view != viewLog {

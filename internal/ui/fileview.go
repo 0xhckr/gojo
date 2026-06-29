@@ -332,7 +332,7 @@ func (m Model) renderFileView(width, height int) []string {
 func (m Model) renderFilePicker(width, height int) []string {
 	fv := &m.fileView
 	titleLeft := " file browser"
-	titleRight := " f: fzf · ⏎ open · l/→ expand · h/← collapse · esc leave "
+	titleRight := " f: fzf · ⏎ open · l/→ expand · h/← collapse · esc/q leave "
 	pad := max(1, width-len(titleLeft)-len(titleRight))
 	out := []string{bgRow(width, colDarkPurple,
 		seg{text: titleLeft, fg: colPurple, bg: colDarkPurple},
@@ -406,7 +406,7 @@ func renderTreeRowString(width int, row treeRow, selected bool) string {
 func (m Model) renderFileBlame(width, height int) []string {
 	fv := &m.fileView
 	titleLeft := " " + fv.path + "  (blame)"
-	titleRight := " h: history · ⏎ open commit · esc leave "
+	titleRight := " h: history · ⏎ open commit · esc/q back "
 	pad := max(1, width-len(titleLeft)-len(titleRight))
 	out := []string{bgRow(width, colDarkPurple,
 		seg{text: titleLeft, fg: colWhite, bg: colDarkPurple},
