@@ -106,6 +106,11 @@ type Model struct {
 	spinnerFrame   int
 	spinnerRunning bool
 
+	// busy holds labels for in-flight background actions (e.g. "pushing…"),
+	// shown as a prominent spinner in the status bar until each completes.
+	// It's a stack so overlapping actions all keep the spinner animating.
+	busy []string
+
 	// pendingElev is a pending elevation prompt. When an action fails with a
 	// recognized "needs --flag" error, gojo asks the user whether to retry with
 	// that flag appended; confirming runs pendingElev.retry.
@@ -300,6 +305,21 @@ func (m Model) runElevCmd(req *elevReq) tea.Cmd {
 	}
 }
 
+// busyActionCmd runs an actionSpec while showing a prominent spinner labelled
+// `label` in the status bar. It pushes the label onto the busy stack, starts
+// the spinner tick, and runs the underlying actionCmd.
+func (m Model) busyActionCmd(label string, spec actionSpec) (tea.Model, tea.Cmd) {
+	m, tick := m.startBusy(label)
+	return m, tea.Batch(tick, m.actionCmd(spec))
+}
+
+// busySimpleCmd is the simpleCmd variant of busyActionCmd for non-elevatable
+// operations (e.g. undo/redo).
+func (m Model) busySimpleCmd(label string, fn func() error, okMsg string) (tea.Model, tea.Cmd) {
+	m, tick := m.startBusy(label)
+	return m, tea.Batch(tick, m.simpleCmd(fn, okMsg))
+}
+
 func (m Model) aiCmd(changeID string) tea.Cmd {
 	r := m.runner
 	return func() tea.Msg {
@@ -344,6 +364,33 @@ func spinnerTick() tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
 		return spinnerTickMsg{}
 	})
+}
+
+// spinnerActive reports whether any animated spinner is needed right now:
+// an AI describe in flight, or any background action on the busy stack.
+func (m Model) spinnerActive() bool {
+	return len(m.aiLoading) > 0 || len(m.busy) > 0
+}
+
+// startBusy pushes a background-action label onto the busy stack and ensures
+// the spinner tick loop is running, returning the updated model and a tick
+// command (nil if the loop is already going).
+func (m Model) startBusy(label string) (Model, tea.Cmd) {
+	m.busy = append(m.busy, label)
+	if !m.spinnerRunning {
+		m.spinnerRunning = true
+		return m, spinnerTick()
+	}
+	return m, nil
+}
+
+// popBusy removes the most recent background-action label (LIFO) once its
+// action completes. The spinner loop self-stops on its next tick when nothing
+// remains active.
+func (m *Model) popBusy() {
+	if len(m.busy) > 0 {
+		m.busy = m.busy[:len(m.busy)-1]
+	}
 }
 
 func pollTick() tea.Cmd {
@@ -452,6 +499,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case actionDoneMsg:
+		// Whatever the outcome, the action is no longer in flight.
+		m.popBusy()
 		if msg.err != nil {
 			if msg.elev != nil {
 				// Surface the elevation prompt instead of the bare error.
@@ -469,6 +518,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case listLoadedMsg:
+		m.popBusy()
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
 			return m, nil
@@ -511,7 +561,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case spinnerTickMsg:
 		m.spinnerFrame++
-		if len(m.aiLoading) > 0 {
+		if m.spinnerActive() {
 			return m, spinnerTick()
 		}
 		m.spinnerRunning = false
@@ -1029,7 +1079,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		if e := m.selectedEntry(); e != nil {
 			rev := e.ChangeID
 			r := m.runner
-			return m, m.actionCmd(actionSpec{
+			return m.busyActionCmd("editing "+rev+"…", actionSpec{
 				run:     func() error { return r.Edit(rev) },
 				okMsg:   "editing " + rev,
 				elevate: func(flag string) func() error { return func() error { return r.Edit(rev, flag) } },
@@ -1042,7 +1092,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			rev = e.ChangeID
 		}
 		r := m.runner
-		return m, m.actionCmd(actionSpec{
+		return m.busyActionCmd("creating change…", actionSpec{
 			run:     func() error { return r.New(rev) },
 			okMsg:   "created new change",
 			elevate: func(flag string) func() error { return func() error { return r.New(rev, flag) } },
@@ -1055,7 +1105,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			}
 			rev := e.ChangeID
 			r := m.runner
-			return m, m.actionCmd(actionSpec{
+			return m.busyActionCmd("abandoning "+rev+"…", actionSpec{
 				run:     func() error { return r.Abandon(rev) },
 				okMsg:   "abandoned " + rev,
 				elevate: func(flag string) func() error { return func() error { return r.Abandon(rev, flag) } },
@@ -1088,10 +1138,10 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "u":
 		r := m.runner
-		return m, m.simpleCmd(func() error { return r.Undo() }, "undone")
+		return m.busySimpleCmd("undoing…", func() error { return r.Undo() }, "undone")
 	case "R":
 		r := m.runner
-		return m, m.simpleCmd(func() error { return r.Redo() }, "redone")
+		return m.busySimpleCmd("redoing…", func() error { return r.Redo() }, "redone")
 	case "r":
 		if len(m.entries) < 2 {
 			m.errMsg = "need at least two revisions to rebase"
@@ -1244,13 +1294,11 @@ func (m Model) execRebase() (tea.Model, tea.Cmd) {
 	label := rebasePlaceLabels[m.rebasePlace]
 	m.rebaseMode = false
 	r := m.runner
-	return m, m.actionCmd(
-		actionSpec{
-			run:     func() error { return r.Rebase(srcFlag, src, placeFlag, dest) },
-			okMsg:   "rebased " + src + " " + label + " " + dest,
-			elevate: func(flag string) func() error { return func() error { return r.Rebase(srcFlag, src, placeFlag, dest, flag) } },
-		},
-	)
+	return m.busyActionCmd("rebasing…", actionSpec{
+		run:     func() error { return r.Rebase(srcFlag, src, placeFlag, dest) },
+		okMsg:   "rebased " + src + " " + label + " " + dest,
+		elevate: func(flag string) func() error { return func() error { return r.Rebase(srcFlag, src, placeFlag, dest, flag) } },
+	})
 }
 
 func (m Model) handleBookmarkKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
@@ -1276,7 +1324,8 @@ func (m Model) handleBookmarkKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) 
 			m.bookmarkMode = false
 			m.bookmarkAction = ""
 			m.bookmarkInput = ""
-			return m, m.execBookmark(action, input)
+			m, tick := m.startBusy("bookmark " + action + "…")
+			return m, tea.Batch(tick, m.execBookmark(action, input))
 		case "tab":
 			prefix := m.bookmarkInput
 			if m.acOriginal != nil {
@@ -1324,7 +1373,8 @@ func (m Model) handleBookmarkKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) 
 		return m, nil
 	case "l":
 		m.bookmarkMode = false
-		return m, m.execBookmark("l", "")
+		m, tick := m.startBusy("loading bookmarks…")
+		return m, tea.Batch(tick, m.execBookmark("l", ""))
 	}
 	return m, nil
 }
@@ -1344,7 +1394,8 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 				m.remoteAction = ""
 				m.remoteInput = ""
 				m.gitMode = false
-				return m, m.execRemote(action, input)
+				m, tick := m.startBusy("remote " + action + "…")
+				return m, tea.Batch(tick, m.execRemote(action, input))
 			case "backspace", "delete":
 				m.remoteInput = trimLastRune(m.remoteInput)
 				return m, nil
@@ -1362,7 +1413,8 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		case "l":
 			m.remoteMode = false
 			m.gitMode = false
-			return m, m.execRemote("l", "")
+			m, tick := m.startBusy("loading remotes…")
+			return m, tea.Batch(tick, m.execRemote("l", ""))
 		case "a", "r", "m", "s":
 			m.remoteAction = k
 			m.remoteInput = ""
@@ -1378,7 +1430,7 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 	case "f":
 		m.gitMode = false
 		r := m.runner
-		return m, m.actionCmd(actionSpec{
+		return m.busyActionCmd("fetching…", actionSpec{
 			run:     func() error { return r.GitFetch() },
 			okMsg:   "fetched",
 			elevate: func(flag string) func() error { return func() error { return r.GitFetch(flag) } },
@@ -1386,7 +1438,7 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 	case "p":
 		m.gitMode = false
 		r := m.runner
-		return m, m.actionCmd(actionSpec{
+		return m.busyActionCmd("pushing…", actionSpec{
 			run:     func() error { return r.GitPush() },
 			okMsg:   "pushed",
 			elevate: func(flag string) func() error { return func() error { return r.GitPush(flag) } },
@@ -1671,6 +1723,21 @@ func (m Model) renderStatusBar() []string {
 			{text: "y confirm", fg: colPurple, underline: true},
 			{text: " · ", fg: colGray},
 			{text: "n/esc cancel", fg: colGray},
+		}
+		return []string{bgRow(m.width, colDarkerGray, segs...)}
+
+	case len(m.busy) > 0:
+		// Prominent spinner for in-flight background actions (push, fetch,
+		// rebase, …). The most recent label leads; a count badge follows when
+		// several overlap.
+		label := m.busy[len(m.busy)-1]
+		frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+		segs := []seg{
+			{text: " " + frame + " ", fg: colMagenta},
+			{text: label, fg: colWhite},
+		}
+		if n := len(m.busy); n > 1 {
+			segs = append(segs, seg{text: fmt.Sprintf("  (×%d)", n), fg: colGray})
 		}
 		return []string{bgRow(m.width, colDarkerGray, segs...)}
 
