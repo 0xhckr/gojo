@@ -26,6 +26,7 @@ internal/
     helpview.go         — keybinding reference + scroll
 go.mod / go.sum         — module `gojo`, deps: bubbletea, lipgloss, chroma, x/ansi
 flake.nix               — nix flake: devShell (go, gopls, jujutsu) + buildGoModule package
+VERSION                 — single source of truth for the version (flake + goreleaser read it)
 .envrc                  — direnv: `use flake`
 ```
 

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
@@ -11,7 +12,18 @@ import (
 	"gojo/internal/ui"
 )
 
+// version is set at build time via ldflags (e.g. by goreleaser). It defaults
+// to "dev" for `go run` / `go build` without flags.
+var version = "dev"
+
 func main() {
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Println("gojo", version)
+		return
+	}
+
 	// Detect the terminal background once, before entering the alt screen, so
 	// the detection query doesn't corrupt the TUI. AdaptiveColor and the diff
 	// syntax-highlighting theme then read this cached value.

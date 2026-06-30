@@ -7,7 +7,10 @@
 
   outputs = { self, nixpkgs }:
     let
-      version = "0.1.0";
+      # Single source of truth for the version. goreleaser reads this too
+      # (see .goreleaser.yaml's before-hook, which verifies it matches the
+      # git tag), so bumping VERSION is the only place the version lives.
+      version = nixpkgs.lib.strings.trim (builtins.readFile ./VERSION);
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = fn: nixpkgs.lib.genAttrs systems (system: fn nixpkgs.legacyPackages.${system});
     in
@@ -19,6 +22,10 @@
             inherit version;
 
             src = self;
+
+            # Stamp the version into main.version, same as goreleaser does,
+            # so `gojo --version` matches the VERSION file.
+            ldflags = [ "-s -w" "-X main.version=${version}" ];
 
             # proxyVendor uses `go mod download` (full module zips) instead of
             # `go mod vendor`. Vendoring prunes to the build platform's
