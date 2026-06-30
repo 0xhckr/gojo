@@ -25,7 +25,17 @@ A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), b
 
 ## Installation
 
-### Nix (recommended)
+### Homebrew
+
+```sh
+brew tap 0xhckr/gojo
+brew install gojo
+```
+
+This installs `gojo` (plus `gj` symlink) and pulls in `jj` (jujutsu) as a
+runtime dependency automatically.
+
+### Nix/NixOS
 
 ```sh
 nix run github:0xhckr/gojo      # run directly
