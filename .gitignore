@@ -8,3 +8,6 @@ result
 
 # Vendored deps — resolved from go.mod/go.sum via the module proxy
 /vendor/
+
+# goreleaser build output
+dist/
