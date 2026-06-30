@@ -6,6 +6,7 @@ A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), b
   <img src="https://img.shields.io/badge/go-1.26+-00ADD8?style=flat&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/bubbletea-charm-FF75B7?style=flat" alt="Bubble Tea">
   <img src="https://img.shields.io/badge/jj-v0.41+-orange?style=flat" alt="jj v0.41+">
+  <img src="https://img.shields.io/badge/license-MIT-blue?style=flat" alt="MIT">
 </p>
 
 > ⚠️ **This project was developed using AI assistance.** It's been reviewed by a developer now and should be generally safe to use.
