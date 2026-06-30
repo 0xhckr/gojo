@@ -65,14 +65,18 @@ release:
   prerelease: auto
   name_template: "{{ .Tag }}"
 
-# Auto-generate and push the Homebrew formula to the tap repo.
-# Requires the HOMEBREW_TAP_GITHUB_TOKEN secret in the release workflow.
+# Auto-generate and push the Homebrew formula into this same repo at
+# Formula/gojo.rb. Because the formula lives in the repo we're releasing
+# from, the default GITHUB_TOKEN (granted `contents: write` by the
+# release workflow) is sufficient — no separate tap repo or PAT needed.
+# Users install via: brew tap 0xhckr/gojo https://github.com/0xhckr/gojo
 brews:
   - name: gojo
     repository:
       owner: 0xhckr
-      name: homebrew-gojo
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+      name: gojo
+      branch: main
+    directory: Formula
     homepage: https://github.com/0xhckr/gojo
     description: "Fullscreen terminal UI for jj (Jujutsu VCS)"
     license: MIT

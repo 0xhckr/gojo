@@ -29,12 +29,13 @@ A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), b
 ### Homebrew
 
 ```sh
-brew tap 0xhckr/gojo
+brew tap 0xhckr/gojo https://github.com/0xhckr/gojo
 brew install gojo
 ```
 
 This installs `gojo` (plus `gj` symlink) and pulls in `jj` (jujutsu) as a
-runtime dependency automatically.
+runtime dependency automatically. The explicit URL is needed because the
+formula lives in the source repo rather than a separate `homebrew-` repo.
 
 ### Nix/NixOS
 

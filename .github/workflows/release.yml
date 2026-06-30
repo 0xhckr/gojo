@@ -31,6 +31,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # PAT with `repo` (or fine-grained Contents:RW) on 0xhckr/homebrew-gojo,
-          # so goreleaser can push the auto-generated formula to the tap.
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          # No separate tap token needed: the Homebrew formula is committed
+          # back into this same repo (Formula/gojo.rb), which GITHUB_TOKEN
+          # can already write to thanks to the `contents: write` permission.

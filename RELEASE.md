@@ -3,40 +3,20 @@
 gojo uses [goreleaser](https://goreleaser.com) (v2) to cross-build binaries,
 publish a GitHub Release, and auto-update the Homebrew formula.
 
-## One-time setup
+The formula lives in **this same repo** at `Formula/gojo.rb` — there is no
+separate tap repo and no PAT to manage. The default `GITHUB_TOKEN` (granted
+`contents: write` by the release workflow) is enough to commit the formula
+back into `0xhckr/gojo`.
 
-You only do this once.
+## Prerequisites
 
-### 1. Create the tap repo
+- The repo `0xhckr/gojo` must be **public** (Homebrew can't install from
+  private repos without per-user credentials).
+- Actions must be enabled (they are by default).
 
-Create an **empty** GitHub repo named `homebrew-gojo` under `0xhckr`
-(Homebrew requires tap repos to be prefixed with `homebrew-`).
+That's it — no setup steps.
 
-```
-https://github.com/new
-  Owner:  0xhckr
-  Name:   homebrew-gojo
-```
-
-No license / README / .gitignore — leave it empty.
-
-### 2. Create a PAT for the tap
-
-goreleaser needs push access to `0xhckr/homebrew-gojo`. The default
-`GITHUB_TOKEN` is scoped to `0xhckr/gojo` only, so create a PAT:
-
-- **Fine-grained** (recommended): scoped to `0xhckr/homebrew-gojo` only,
-  with **Contents: Read and write**.
-- **Classic**: a `public_repo` (or `repo` for private) scoped token.
-
-Save it as a secret in `0xhckr/gojo`:
-
-```
-https://github.com/0xhckr/gojo/settings/secrets/actions
-  Name:  HOMEBREW_TAP_GITHUB_TOKEN
-```
-
-### 3. Tag the first release
+## Releasing
 
 The **VERSION** file at the repo root is the single source of truth for the
 version number. To release:
@@ -58,13 +38,19 @@ drift silently. The `release` workflow then:
 1. Builds `gojo` for `linux/{amd64,arm64}` and `darwin/{amd64,arm64}`.
 2. Stamps `main.version` via ldflags (`gojo --version` → `gojo 1.0.0`).
 3. Publishes tarballs + checksums to the GitHub Release.
-4. Generates `Formula/gojo.rb` and pushes it to `0xhckr/homebrew-gojo`.
+4. Generates `Formula/gojo.rb` and commits it back to `main` in this repo.
 
 ## Installing (end users)
 
 ```sh
-brew tap 0xhckr/gojo
+brew tap 0xhckr/gojo https://github.com/0xhckr/gojo
 brew install gojo
 ```
+
+The explicit URL is required because Homebrew's `brew tap <user>/<repo>`
+shorthand only auto-discovers repos named `homebrew-<repo>`. Since the
+formula lives here instead of in a `homebrew-gojo` repo, the URL must be
+given. (This is the only downside of the single-repo setup; it trades one
+extra line at install time for not maintaining a second repo + PAT.)
 
 This also installs `jj` (jujutsu) as a runtime dependency and a `gj` symlink.
