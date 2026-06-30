@@ -1,0 +1,33 @@
+---
+name: Bug report
+about: Something in gojo isn't working as expected
+title: ""
+labels: bug
+assignees: ""
+---
+
+## What happened
+
+<!-- A short description of the problem. -->
+
+## What I expected
+
+<!-- What you thought would happen instead. -->
+
+## Reproduction
+
+1.
+2.
+3.
+
+## Environment
+
+- gojo version: <!-- `gojo --version` -->
+- jj version: <!-- `jj version` -->
+- OS: <!-- macOS / Linux distro + version -->
+- Terminal: <!-- e.g. iTerm2, Alacritty, kitty, GNOME Terminal -->
+- Installed via: <!-- Homebrew / Nix / from source -->
+
+## Additional context
+
+<!-- Screenshots, logs, or anything else relevant. -->
