@@ -23,7 +23,8 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: "~> v2"
+          # Pinned to match release.yml — see note there about `brews`.
+          version: "~> v2.15"
           args: check
 
       - name: Build

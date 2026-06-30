@@ -27,7 +27,12 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: "~> v2"
+          # Pinned to v2.15.x: v2.16 hard-deprecated the `brews` section,
+          # but gojo is a cross-platform CLI (not a macOS .app), so Casks
+          # would break Linuxbrew installs. Formulas are still the correct
+          # Homebrew construct for CLI tools. Unpin only if we migrate off
+          # formulas or drop Linux support.
+          version: "~> v2.15"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
