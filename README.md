@@ -3,7 +3,7 @@
 A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), built in [Go](https://go.dev) with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lip Gloss](https://github.com/charmbracelet/lipgloss).
 
 <p align="center">
-  <img src="https://img.shields.io/badge/go-1.24+-00ADD8?style=flat&logo=go" alt="Go">
+  <img src="https://img.shields.io/badge/go-1.26+-00ADD8?style=flat&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/bubbletea-charm-FF75B7?style=flat" alt="Bubble Tea">
   <img src="https://img.shields.io/badge/jj-v0.41+-orange?style=flat" alt="jj v0.41+">
 </p>
@@ -36,7 +36,7 @@ go run .
 
 ### From source
 
-Requires Go 1.24+ and `jj` in `$PATH`.
+Requires Go 1.26+ and `jj` in `$PATH`.
 
 ```sh
 go build -o gojo .
@@ -45,7 +45,7 @@ go build -o gojo .
 
 ## Requirements
 
-- [Go](https://go.dev) 1.24+ (to build)
+- [Go](https://go.dev) 1.26+ (to build)
 - [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS) v0.41+ in `$PATH`
 - A jj repository (run `gojo` inside any `.jj` directory)
 
