@@ -1,0 +1,26 @@
+version: 2
+
+updates:
+  # Go modules — bubbletea, lipgloss, chroma, x/ansi, etc.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # GitHub Actions — keep actions/checkout, setup-go, goreleaser-action current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: chore
+      include: scope
