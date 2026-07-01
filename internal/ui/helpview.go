@@ -157,6 +157,7 @@ func helpMaxScroll(contentHeight int) int {
 }
 
 // renderHelp produces exactly height lines (including the title bar).
+// A scrollbar on the right edge shows position when the help content overflows.
 func renderHelp(width, height, scrollY int) []string {
 	rows := helpRows()
 	total := len(rows)
@@ -169,6 +170,7 @@ func renderHelp(width, height, scrollY int) []string {
 
 	end := min(clampedY+contentH, total)
 	sliced := rows[clampedY:end]
+	visLines := end - clampedY
 
 	// Title bar.
 	titleLeft := " gojo help"
@@ -178,21 +180,32 @@ func renderHelp(width, height, scrollY int) []string {
 
 	out := []string{title}
 
-	for _, row := range sliced {
+	// Scrollbar: reserve columns when content overflows.
+	scrollW := width
+	thumbStart, thumbEnd := scrollbarThumb(total, clampedY, visLines, contentH)
+	hasBar := thumbStart >= 0
+	if hasBar {
+		scrollW -= scrollbarWidth
+	}
+
+	for i, row := range sliced {
+		lineIdx := i // 0-based within the visible window
+		var rowStr string
 		switch row.kind {
 		case helpBlank:
-			out = append(out, blankRow(width, colPanel))
+			rowStr = blankRow(scrollW, colPanel)
 		case helpTitle:
-			out = append(out, bgRow(width, colPanel, seg{text: "┃ ", fg: row.section.color, bold: true, bg: colPanel}, seg{text: row.section.title, fg: row.section.color, bg: colPanel}))
+			rowStr = bgRow(scrollW, colPanel, seg{text: "┃ ", fg: row.section.color, bold: true, bg: colPanel}, seg{text: row.section.title, fg: row.section.color, bg: colPanel})
 		case helpSep:
-			sep := "  " + strings.Repeat("─", min(width-4, 30))
-			out = append(out, bgRow(width, colPanel, seg{text: sep, fg: colBorder, bg: colPanel}))
+			sep := "  " + strings.Repeat("─", min(scrollW-4, 30))
+			rowStr = bgRow(scrollW, colPanel, seg{text: sep, fg: colBorder, bg: colPanel})
 		case helpBindingRow:
 			b := row.binding
 			keyPad := max(0, helpKeyCol-len([]rune(b.key)))
 			line := "    " + b.key + strings.Repeat(" ", keyPad) + b.desc
-			out = append(out, bgRow(width, colPanel, seg{text: line, fg: colTextMuted, bg: colPanel}))
+			rowStr = bgRow(scrollW, colPanel, seg{text: line, fg: colTextMuted, bg: colPanel})
 		}
+		out = append(out, renderRowWithBarFromString(scrollW, width, colPanel, hasBar, lineIdx, thumbStart, thumbEnd, rowStr))
 	}
 
 	// Pad to full height.

@@ -125,6 +125,11 @@ type Model struct {
 	// backgrounded gojo isn't firing jj subprocesses every couple seconds.
 	focused bool
 	polling bool
+
+	// scrollDragging is true while the user is click-and-dragging the
+	// scrollbar thumb. Set on MouseActionPress inside the scrollbar area,
+	// cleared on MouseActionRelease.
+	scrollDragging bool
 }
 
 // NewModel builds the initial model.
@@ -704,6 +709,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m, tick := m.startBusy("annotating " + msg.path + "…")
 		return m, tea.Batch(tick, m.loadAnnotateCmd(msg.path))
 
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -1082,6 +1090,230 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m.handleLogKey(msg, k)
+}
+
+// ── Mouse handling ──────────────────────────────────────────────────────────
+
+// contentTopBarHeight is the number of lines above the content area (the gojo
+// top bar: label row + blank row).
+const contentTopBarHeight = 2
+
+// handleMouse dispatches mouse events: wheel scrolling and click-and-drag on
+// the scrollbar. The scrollbar occupies the rightmost scrollbarWidth columns of
+// the content area. Each view has a 1-line title/padding row at the top of the
+// content area, so the scrollbar track starts at the second content line.
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if !m.ready {
+		return m, nil
+	}
+
+	// Wheel events work regardless of cursor position.
+	if msg.Action == tea.MouseActionPress {
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			return m.handleWheel(-1)
+		case tea.MouseButtonWheelDown:
+			return m.handleWheel(1)
+		}
+	}
+
+	ch := m.contentHeight()
+	trackStartY := contentTopBarHeight + 1 // +1 for the view's title/padding row
+	trackH := ch - 1
+
+	// Check if the mouse is in the scrollbar column range.
+	if msg.X < m.width-scrollbarWidth || msg.X >= m.width {
+		// Not on the scrollbar. Release any active drag.
+		if msg.Action == tea.MouseActionRelease {
+			m.scrollDragging = false
+		}
+		return m, nil
+	}
+
+	// Check if the mouse is in the scrollbar track row range.
+	if msg.Y < trackStartY || msg.Y >= trackStartY+trackH || trackH < 1 {
+		if msg.Action == tea.MouseActionRelease {
+			m.scrollDragging = false
+		}
+		return m, nil
+	}
+
+	switch msg.Action {
+	case tea.MouseActionPress:
+		if msg.Button == tea.MouseButtonLeft {
+			m.scrollDragging = true
+			return m.applyScrollBarDrag(msg.Y)
+		}
+	case tea.MouseActionMotion:
+		if m.scrollDragging {
+			return m.applyScrollBarDrag(msg.Y)
+		}
+	case tea.MouseActionRelease:
+		m.scrollDragging = false
+	}
+
+	return m, nil
+}
+
+// applyScrollBarDrag maps the mouse Y position to a scroll offset for the
+// active view and applies it.
+func (m Model) applyScrollBarDrag(mouseY int) (tea.Model, tea.Cmd) {
+	ch := m.contentHeight()
+	trackH := ch - 1
+	if trackH < 1 {
+		return m, nil
+	}
+
+	trackY := mouseY - contentTopBarHeight - 1 // 0-based within the track
+	if trackY < 0 {
+		trackY = 0
+	}
+	if trackY >= trackH {
+		trackY = trackH - 1
+	}
+
+	switch {
+	case m.diffOpen:
+		maxScroll := m.diffMaxScroll()
+		if maxScroll > 0 {
+			m.diffScrollY = trackY * maxScroll / max(1, trackH-1)
+		} else {
+			m.diffScrollY = 0
+		}
+		m.diffClampMax()
+
+	case m.view == viewHelp:
+		maxScroll := helpMaxScroll(trackH)
+		if maxScroll > 0 {
+			m.helpScrollY = trackY * maxScroll / max(1, trackH-1)
+		} else {
+			m.helpScrollY = 0
+		}
+
+	case m.view == viewFile && m.fileView.phase == fileHistory:
+		fv := &m.fileView
+		if len(fv.hist) == 0 {
+			return m, nil
+		}
+		var totalLines int
+		for i := range fv.hist {
+			totalLines += commitLines(fv.hist[i])
+		}
+		if totalLines <= trackH {
+			return m, nil
+		}
+		maxLineScroll := totalLines - trackH
+		targetFirstLine := trackY * maxLineScroll / max(1, trackH-1)
+		idx := entryAtLine(fv.hist, targetFirstLine)
+		fv.histCur = idx
+		fv.histOff = idx
+		m.recomputeFileHistOffset()
+
+	case m.view == viewFile:
+		// Picker and blame views don't have scrollbars.
+		return m, nil
+
+	default:
+		// Log view.
+		if len(m.entries) == 0 {
+			return m, nil
+		}
+		var totalLines int
+		for i := range m.entries {
+			totalLines += commitLines(m.entries[i])
+		}
+		if totalLines <= trackH {
+			return m, nil
+		}
+		maxLineScroll := totalLines - trackH
+		targetFirstLine := trackY * maxLineScroll / max(1, trackH-1)
+		idx := entryAtLine(m.entries, targetFirstLine)
+		if m.rebaseMode {
+			m.rebaseDest = idx
+		} else if m.squashMode {
+			m.squashDest = idx
+		} else {
+			m.cursor = idx
+		}
+		m.offset = idx
+		m.recomputeOffset()
+	}
+
+	return m, nil
+}
+
+// handleWheel scrolls the active view by one unit in the given direction
+// (−1 = up, +1 = down).
+func (m Model) handleWheel(dir int) (tea.Model, tea.Cmd) {
+	switch {
+	case m.diffOpen:
+		if dir > 0 {
+			m.diffMoveDown()
+		} else {
+			m.diffMoveUp()
+		}
+
+	case m.view == viewHelp:
+		contentH := m.contentHeight() - 1
+		maxS := helpMaxScroll(contentH)
+		if dir > 0 {
+			m.helpScrollY = min(maxS, m.helpScrollY+1)
+		} else {
+			m.helpScrollY = max(0, m.helpScrollY-1)
+		}
+
+	case m.view == viewFile && m.fileView.phase == fileBlame:
+		fv := &m.fileView
+		if dir > 0 {
+			if fv.cursorY < len(fv.lines)-1 {
+				fv.cursorY++
+			}
+		} else {
+			if fv.cursorY > 0 {
+				fv.cursorY--
+			}
+		}
+
+	case m.view == viewFile && m.fileView.phase == filePicker:
+		fv := &m.fileView
+		if dir > 0 {
+			if fv.cursor < len(fv.rows)-1 {
+				fv.cursor++
+			}
+		} else {
+			if fv.cursor > 0 {
+				fv.cursor--
+			}
+		}
+
+	case m.view == viewFile && m.fileView.phase == fileHistory:
+		fv := &m.fileView
+		if dir > 0 {
+			if fv.histCur < len(fv.hist)-1 {
+				fv.histCur++
+			}
+		} else {
+			if fv.histCur > 0 {
+				fv.histCur--
+			}
+		}
+		m.recomputeFileHistOffset()
+
+	default:
+		// Log view.
+		if dir > 0 {
+			if m.cursor < len(m.entries)-1 {
+				m.cursor++
+			}
+		} else {
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		}
+		m.recomputeOffset()
+	}
+
+	return m, nil
 }
 
 // handleElevKey handles input while an elevation prompt is on screen. 'y'

@@ -33,6 +33,7 @@ func main() {
 		ui.NewModel(),
 		tea.WithAltScreen(),
 		tea.WithReportFocus(),
+		tea.WithMouseCellMotion(),
 	)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "fatal:", err)

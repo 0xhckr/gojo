@@ -92,12 +92,12 @@ func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow
 
 	start, end := visibleRange(scrollY, contentH, bodyTotal)
 
-	// Scrollbar: reserve 1 column on the right when content overflows.
+	// Scrollbar: reserve columns on the right when content overflows.
 	scrollW := width
 	thumbStart, thumbEnd := scrollbarThumb(bodyTotal, start, end-start, contentH)
 	hasBar := thumbStart >= 0
 	if hasBar {
-		scrollW--
+		scrollW -= scrollbarWidth
 	}
 
 	gutterWidth := digits*2 + 4

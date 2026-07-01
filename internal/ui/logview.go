@@ -8,7 +8,30 @@ import (
 	"gojo/internal/jj"
 )
 
+// scrollbarWidth is the number of columns reserved for the scrollbar track.
+// Two columns makes the thumb easy to grab with the mouse for click-and-drag
+// scrolling.
+const scrollbarWidth = 2
+
 func commitLines(e jj.LogEntry) int { return 2 + len(e.EdgeLines) }
+
+// entryAtLine returns the index of the entry whose content lines contain the
+// given absolute line number (0-based). Used to map a scrollbar drag position
+// back to a commit index for cursor-driven views like the log.
+func entryAtLine(entries []jj.LogEntry, line int) int {
+	if len(entries) == 0 {
+		return 0
+	}
+	cum := 0
+	for i := range entries {
+		cl := commitLines(entries[i])
+		if cum+cl > line {
+			return i
+		}
+		cum += cl
+	}
+	return len(entries) - 1
+}
 
 // rebaseView carries the live rebase-mode selection into log rendering so the
 // source (picked-up) and destination (drop target) commits can be marked.
@@ -116,12 +139,12 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 		totalLines += cl
 	}
 
-	// Scrollbar: reserve 1 column on the right when content overflows.
+	// Scrollbar: reserve columns on the right when content overflows.
 	scrollW := width
 	thumbStart, thumbEnd := scrollbarThumb(totalLines, firstVisLine, visLines, availableLines)
 	hasBar := thumbStart >= 0
 	if hasBar {
-		scrollW--
+		scrollW -= scrollbarWidth
 	}
 
 	var lines []string
@@ -215,22 +238,22 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 }
 
 // renderRowWithBar renders a content row to scrollW columns, then appends a
-// scrollbar column (track or thumb) to fill the full width. lineIdx is the
-// 0-based index within the content area (excluding top padding), used to
+// scrollbar track (scrollbarWidth columns) to fill the full width. lineIdx is
+// the 0-based index within the content area (excluding top padding), used to
 // determine thumb position.
 func renderRowWithBar(scrollW, fullW int, bg lipgloss.TerminalColor, hasBar bool, lineIdx, thumbStart, thumbEnd int, segs []seg) string {
 	row := renderRow(scrollW, bg, segs)
 	if !hasBar {
 		return bgRow(fullW, bg, segs...)
 	}
-	// Scrollbar column.
-	var sbSeg seg
+	// Scrollbar columns: a 1-column gap + the bar glyph.
+	var sbSegs []seg
 	if lineIdx >= thumbStart && lineIdx < thumbEnd {
-		sbSeg = seg{text: "┃", fg: colBorderActive, bg: bg}
+		sbSegs = []seg{{text: " ", bg: bg}, {text: "┃", fg: colBorderActive, bg: bg}}
 	} else {
-		sbSeg = seg{text: "│", fg: colBorderSubtle, bg: bg}
+		sbSegs = []seg{{text: " ", bg: bg}, {text: "│", fg: colBorderSubtle, bg: bg}}
 	}
-	scrollbar := renderSegs([]seg{sbSeg})
+	scrollbar := renderSegs(sbSegs)
 	// Pad row to scrollW if needed.
 	rw := lipgloss.Width(row)
 	if rw < scrollW {
@@ -245,20 +268,20 @@ func renderRowWithBar(scrollW, fullW int, bg lipgloss.TerminalColor, hasBar bool
 }
 
 // renderRowWithBarFromString is like renderRowWithBar but takes a pre-rendered
-// string instead of []seg. Used by the diff panel where rows are already
-// styled with their own backgrounds.
+// string instead of []seg. Used by the diff panel and help view where rows are
+// already styled with their own backgrounds.
 func renderRowWithBarFromString(scrollW, fullW int, bg lipgloss.TerminalColor, hasBar bool, lineIdx, thumbStart, thumbEnd int, row string) string {
 	if !hasBar {
 		return clip(row, fullW)
 	}
 	row = clip(row, scrollW)
-	var sbSeg seg
+	var sbSegs []seg
 	if lineIdx >= thumbStart && lineIdx < thumbEnd {
-		sbSeg = seg{text: "┃", fg: colBorderActive, bg: bg}
+		sbSegs = []seg{{text: " ", bg: bg}, {text: "┃", fg: colBorderActive, bg: bg}}
 	} else {
-		sbSeg = seg{text: "│", fg: colBorderSubtle, bg: bg}
+		sbSegs = []seg{{text: " ", bg: bg}, {text: "│", fg: colBorderSubtle, bg: bg}}
 	}
-	scrollbar := renderSegs([]seg{sbSeg})
+	scrollbar := renderSegs(sbSegs)
 	rw := lipgloss.Width(row)
 	if rw < scrollW {
 		if bg != nil {
