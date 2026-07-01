@@ -594,6 +594,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.diffFollowCursor()
 			}
 		}
+		if m.view == viewFile && m.fileView.phase == fileBlame {
+			m.fileView.buildBlameCache(m.width, fileViewContentH(m))
+		}
 		return m, nil
 
 	case bootMsg:
@@ -887,6 +890,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fileView.highlights = nil // recompute lazily for the new file
 		m.fileView.cursorY = 0
 		m.fileView.phase = fileBlame
+		m.fileView.buildBlameCache(m.width, fileViewContentH(m))
 		return m, nil
 
 	case fileHistoryMsg:
@@ -1661,15 +1665,13 @@ func (m Model) applyScrollBarDrag(mouseY int) (tea.Model, tea.Cmd) {
 		if len(fv.lines) == 0 {
 			return m, nil
 		}
-		fv.ensureHighlights()
-		rows := annotateToDiffRows(fv.lines, fv.highlights)
-		digits := lineDigits(len(fv.lines))
-		// Head is sticky chrome (3 lines) — not part of the scrollable body.
-		bodyH := trackH - 3
-		if bodyH < 1 {
-			bodyH = 1
+		// Use the cached layout (built in Update) instead of recomputing.
+		bodyH := fileViewContentH(m)
+		layout := fv.blameLayout
+		if !fv.blameCacheValid(m.width, bodyH) {
+			fv.buildBlameCache(m.width, bodyH)
+			layout = fv.blameLayout
 		}
-		layout := computeDiffLayoutPure(m.width, bodyH, 0, rows, "", digits, nil, false, true)
 		if layout.total <= bodyH {
 			return m, nil
 		}
@@ -2890,7 +2892,7 @@ func (m Model) View() string {
 		lines = append(lines, renderHelp(m.width, ch, m.helpScrollY)...)
 	case m.diffOpen:
 		sv := splitView{active: m.splitMode, marked: m.splitMarked}
-		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), m.diffCollapsed, sv, false, nil)...)
+		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), m.diffCollapsed, sv, false, nil, nil)...)
 	case m.view == viewFile:
 		lines = append(lines, m.renderFileView(m.width, ch)...)
 	default:

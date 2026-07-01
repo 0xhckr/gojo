@@ -55,6 +55,17 @@ type fileViewState struct {
 	highlights [][]span // per-line syntax-highlighted spans (chroma); nil until computed
 	cursorY    int      // absolute line index under the cursor
 
+	// blame cache — built in Update (not View) so it persists across frames.
+	// View uses a value receiver, so any render-time mutation is lost. The
+	// cache bundles the expensive O(file-size) computations: syntax
+	// highlighting, row conversion, and wrapped-line layout. Rebuilt on file
+	// load and resize.
+	blameRows     []diffRow  // annotateToDiffRows output
+	blameDigits   int        // line-number gutter width
+	blameLayout   diffLayout // wrapped-line layout for the body
+	blameCacheW   int        // width used to build the cache (0 = dirty)
+	blameCacheCH  int        // contentH used to build the cache
+
 	// history
 	hist    []jj.LogEntry
 	histCur int
@@ -170,6 +181,25 @@ func (fv *fileViewState) ensureHighlights() {
 	if fv.highlights == nil {
 		fv.highlights = [][]span{} // sentinel: tried, no lexer
 	}
+}
+
+// buildBlameCache pre-computes the expensive O(file-size) data that
+// renderFileBlame needs every frame: syntax highlighting, diffRow
+// conversion, and the wrapped-line layout. Must be called from Update (not
+// View) so the cache persists across frames — View's value receiver would
+// discard any render-time mutation. Rebuild when width or contentH changes.
+func (fv *fileViewState) buildBlameCache(width, contentH int) {
+	fv.ensureHighlights()
+	fv.blameRows = annotateToDiffRows(fv.lines, fv.highlights)
+	fv.blameDigits = lineDigits(len(fv.lines))
+	fv.blameLayout = computeDiffLayoutPure(width, contentH, 0, fv.blameRows, "", fv.blameDigits, nil, false, true)
+	fv.blameCacheW = width
+	fv.blameCacheCH = contentH
+}
+
+// blameCacheValid reports whether the blame cache matches the given dimensions.
+func (fv *fileViewState) blameCacheValid(width, contentH int) bool {
+	return fv.blameCacheW == width && fv.blameCacheCH == contentH && fv.blameRows != nil
 }
 
 // curRow returns the row under the picker cursor, or nil.
@@ -431,10 +461,6 @@ func (m Model) renderFileBlame(width, height int) []string {
 		return padLines([]string{title, plainRow(width, seg{text: "  (empty file)", fg: colGray})}, height)
 	}
 
-	fv.ensureHighlights()
-	rows := annotateToDiffRows(fv.lines, fv.highlights)
-	digits := lineDigits(len(fv.lines))
-
 	// Build the blame head from the cursor's current line. This is rendered
 	// as sticky chrome (always visible) by renderDiffPanel, not as part of
 	// the scrollable body.
@@ -448,28 +474,30 @@ func (m Model) renderFileBlame(width, height int) []string {
 	head := buildBlameHead(width, cid, cur.Author, desc)
 	headLen := len(head)
 
-	// Compute the set of row indices that belong to the cursor's current
-	// section (contiguous run of the same ChangeID) so the ┃ bar can
-	// highlight the entire hunk.
-	sectionRows := map[int]bool{}
-	if cursorY >= 0 && cursorY < len(fv.lines) {
-		target := fv.lines[cursorY].ChangeID
-		for i := 0; i < len(fv.lines); i++ {
-			if fv.lines[i].ChangeID == target {
-				sectionRows[i] = true
-			}
-		}
-	}
-
 	contentH := height - 1 - headLen // minus title bar and sticky blame header
 	if contentH < 1 {
 		contentH = 1
 	}
 
-	// Compute the layout to map between source-line indices (which the file
-	// view's cursor uses) and terminal-line indices (which renderDiffPanel
-	// expects). The head is sticky chrome, so headLen=0 for the body layout.
-	layout := computeDiffLayoutPure(width, contentH, 0, rows, "", digits, nil, false, true)
+	// Use the pre-computed cache (built in Update) for the expensive
+	// O(file-size) data: syntax highlighting, row conversion, and
+	// wrapped-line layout. Fall back to inline computation only when the
+	// cache is stale (e.g., tests that bypass Update).
+	rows := fv.blameRows
+	digits := fv.blameDigits
+	layout := fv.blameLayout
+	if !fv.blameCacheValid(width, contentH) {
+		fv.ensureHighlights()
+		rows = annotateToDiffRows(fv.lines, fv.highlights)
+		digits = lineDigits(len(fv.lines))
+		layout = computeDiffLayoutPure(width, contentH, 0, rows, "", digits, nil, false, true)
+	}
+
+	// Compute the set of row indices that belong to the cursor's current
+	// section (contiguous run of the same ChangeID) so the ┃ bar can
+	// highlight the entire hunk. Scan outward from the cursor rather than
+	// iterating the entire file.
+	sectionRows := computeSectionRows(fv.lines, cursorY)
 
 	// Map the cursor (source line) to a terminal body line (body-relative;
 	// the head is not part of the body).
@@ -496,7 +524,7 @@ func (m Model) renderFileBlame(width, height int) []string {
 		termScrollY = maxScroll
 	}
 
-	return renderDiffPanel(width, height, fv.path, 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, sectionRows, nil, splitView{}, true, head)
+	return renderDiffPanel(width, height, fv.path, 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, sectionRows, nil, splitView{}, true, head, &layout)
 }
 
 func lineDigits(n int) int {
@@ -506,6 +534,36 @@ func lineDigits(n int) int {
 		d++
 	}
 	return d
+}
+
+// fileViewContentH is the available terminal lines for the file view's
+// scrollable body: content height minus the title bar (1) and the sticky
+// blame header (3: label, info, divider).
+func fileViewContentH(m Model) int {
+	ch := m.contentHeight() - 4
+	if ch < 1 {
+		ch = 1
+	}
+	return ch
+}
+
+// computeSectionRows returns the set of line indices that belong to the same
+// blame section (contiguous run of the same ChangeID) as the cursor line.
+// Scans outward from cursorY instead of iterating the entire file, so cost
+// is proportional to the section size, not the file size.
+func computeSectionRows(lines []jj.AnnotateLine, cursorY int) map[int]bool {
+	if cursorY < 0 || cursorY >= len(lines) {
+		return nil
+	}
+	target := lines[cursorY].ChangeID
+	rows := map[int]bool{}
+	for i := cursorY; i >= 0 && lines[i].ChangeID == target; i-- {
+		rows[i] = true
+	}
+	for i := cursorY + 1; i < len(lines) && lines[i].ChangeID == target; i++ {
+		rows[i] = true
+	}
+	return rows
 }
 
 func (m Model) renderFileHistory(width, height int) []string {
