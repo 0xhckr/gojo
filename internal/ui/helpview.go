@@ -42,6 +42,7 @@ var helpSections = []helpSection{
 		{"R", "jj redo"},
 		{"r", "rebase mode"},
 		{"s", "squash mode"},
+		{"x", "jj absorb  (move changes into ancestors)"},
 	}},
 	{title: "Rebase Mode", color: colYellow, bindings: []helpBinding{
 		{"r", "pick up selected commit"},
@@ -69,11 +70,12 @@ var helpSections = []helpSection{
 		{"d", "edit description"},
 		{"D", "AI describe"},
 		{"n", "jj new  (create change on top)"},
-		{"x", "jj split  (interactive split mode)"},
+		{"s", "jj split  (interactive split mode)"},
+		{"x", "jj absorb  (move changes into ancestors)"},
 		{"enter / q", "close diff"},
 	}},
 	{title: "Split Mode", color: colYellow, bindings: []helpBinding{
-		{"x (in diff)", "enter split mode"},
+		{"s (in diff)", "enter split mode"},
 		{"space", "toggle file / line selection"},
 		{"c", "confirm split"},
 		{"esc / q", "cancel  (back to diff)"},

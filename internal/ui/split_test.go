@@ -28,18 +28,18 @@ func setupSplitModel() Model {
 	return m
 }
 
-// TestSplitEnterMode verifies that pressing `x` in the diff panel enters split
+// TestSplitEnterMode verifies that pressing `s` in the diff panel enters split
 // mode with an empty marked set.
 func TestSplitEnterMode(t *testing.T) {
 	m := setupSplitModel()
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
 	m = next.(Model)
 	if cmd != nil {
-		t.Fatal("x should not produce a command")
+		t.Fatal("s should not produce a command")
 	}
 	if !m.splitMode {
-		t.Fatal("split mode not active after x")
+		t.Fatal("split mode not active after s")
 	}
 	if m.splitMarked == nil {
 		t.Fatal("splitMarked is nil after entering split mode")

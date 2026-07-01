@@ -2060,13 +2060,23 @@ func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
 			m, tick := m.startBusy("creating change…")
 			return m, tea.Batch(tick, m.newOnRevCmd(rev))
 		}
-	case "x":
+	case "s":
 		if m.diffIsRevision && m.diffRev != "" && len(m.diffRows) > 0 {
 			m.splitMode = true
 			m.splitMarked = map[int]bool{}
 			m.errMsg = ""
 			m.message = ""
 			return m, nil
+		}
+	case "x":
+		if m.diffIsRevision && m.diffRev != "" {
+			rev := m.diffRev
+			r := m.runner
+			return m.busyActionCmd("absorbing "+rev+"…", actionSpec{
+				run:     func() error { return r.Absorb(rev) },
+				okMsg:   "absorbed " + rev,
+				elevate: func(flag string) func() error { return func() error { return r.Absorb(rev, flag) } },
+			})
 		}
 	}
 	return m, nil
@@ -2332,6 +2342,17 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			m.errMsg = ""
 			m.message = ""
 			m.recomputeOffset()
+		}
+		return m, nil
+	case "x":
+		if e := m.selectedEntry(); e != nil {
+			rev := e.ChangeID
+			r := m.runner
+			return m.busyActionCmd("absorbing "+rev+"…", actionSpec{
+				run:     func() error { return r.Absorb(rev) },
+				okMsg:   "absorbed " + rev,
+				elevate: func(flag string) func() error { return func() error { return r.Absorb(rev, flag) } },
+			})
 		}
 		return m, nil
 	}
@@ -3090,7 +3111,7 @@ func (m Model) blameScrollMargin() int {
 var defaultHelpBarItems = [][2]string{
 	{"⏎diff", "⏎"}, {"describe", "d"},
 	{"AI Desc", "D"}, {"bookmark", "b"}, {"git", "g"},
-	{"undo", "u"}, {"rebase", "r"}, {"squash", "s"}, {"edit", "e"}, {"new", "n"},
+	{"undo", "u"}, {"rebase", "r"}, {"squash", "s"}, {"absorb", "x"}, {"edit", "e"}, {"new", "n"},
 	{"abandon", "a"}, {"file", "f"}, {"?help", "?"}, {"quit", "q"},
 }
 
@@ -3110,8 +3131,8 @@ func (m Model) helpBarItems() [][2]string {
 		return [][2]string{
 			{"⏎ close", "⏎"}, {"↑/k chunk↑", "↑"}, {"↓/j chunk↓", "↓"},
 			{"g top", "g"}, {"G bot", "G"}, {"←/→ fold", "←"},
-			{"describe", "d"}, {"AI Desc", "D"}, {"new", "n"}, {"split", "x"},
-			{"q close", "q"},
+		{"describe", "d"}, {"AI Desc", "D"}, {"new", "n"}, {"split", "s"}, {"absorb", "x"},
+		{"q close", "q"},
 		}
 	case m.view == viewFile:
 		switch m.fileView.phase {

@@ -133,7 +133,7 @@ All jj operations go through `Runner.run(args...)`, which executes `jj` in the
 repo dir via `os/exec`, capturing stdout and surfacing stderr on error.
 
 Operations: Log, Status, Diff (`--git`), DiffSummary, FileShow, Describe, New,
-Edit, Abandon, Undo, Redo, Bookmark{Create,Delete,Forget,List,Move,Rename,Set,
+Edit, Abandon, Absorb, Undo, Redo, Bookmark{Create,Delete,Forget,List,Move,Rename,Set,
 Track,Untrack}, GitFetch, GitPush, Remote{Add,List,Remove,Rename,SetURL},
 AIDescribe.
 

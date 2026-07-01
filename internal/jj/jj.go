@@ -281,6 +281,20 @@ func (r *Runner) Abandon(rev string, extra ...string) error {
 	return err
 }
 
+// Absorb moves changes from a source revision into the closest mutable
+// ancestors where the corresponding lines were modified last. If from is
+// empty, jj defaults to the working copy (@). Extra flags are appended for
+// elevation retries.
+func (r *Runner) Absorb(from string, extra ...string) error {
+	args := []string{"absorb"}
+	if from != "" {
+		args = append(args, "--from", from)
+	}
+	args = appendExtra(args, extra)
+	_, err := r.run(args...)
+	return err
+}
+
 // Undo reverts the last operation.
 func (r *Runner) Undo() error {
 	_, err := r.run("undo")
