@@ -41,7 +41,7 @@ func padNum(n, digits int) string {
 }
 
 func lineNumText(r diffRow, digits int) string {
-	return padNum(r.oldNum, digits) + " " + padNum(r.newNum, digits) + " "
+	return " " + padNum(r.oldNum, digits) + " " + padNum(r.newNum, digits) + " "
 }
 
 var statusColors = map[jj.StatusKind]lipgloss.TerminalColor{
@@ -357,7 +357,7 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 			lineFg = diffContextFg
 		}
 
-		prefixW := 2*digits + 5 // leftBar + gutter + gap + sign
+		prefixW := 2*digits + 6 // leftBar + gutter(incl leading space) + gap + sign
 		bodyW := max(1, scrollW-prefixW)
 
 		// Build the wrapping body: the syntax-highlighted spans, all carrying
@@ -392,7 +392,7 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 		if sub == 0 {
 			gutterSeg = seg{text: lineNumText(r, digits), fg: diffLineNumber, bg: gutterBg}
 		} else {
-			gutterSeg = seg{text: strings.Repeat(" ", 2*digits+2), bg: gutterBg}
+			gutterSeg = seg{text: strings.Repeat(" ", 2*digits+3), bg: gutterBg}
 		}
 
 		// Sign: real sign on sub-line 0, blank after. A one-space gap separates
