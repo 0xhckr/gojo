@@ -64,6 +64,8 @@ var helpSections = []helpSection{
 		{"pgup/b", "scroll up half page"},
 		{"pgdn/f", "scroll down half page"},
 		{"g / G", "jump top / bottom"},
+		{"←/h or →/l", "collapse / expand file"},
+		{"click file", "toggle collapse"},
 		{"d", "edit description"},
 		{"D", "AI describe"},
 		{"n", "jj new  (create change on top)"},

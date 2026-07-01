@@ -71,6 +71,12 @@ type Model struct {
 	diffRaw        string
 	diffScrollY    int
 
+	// diffCollapsed tracks which file diffs are collapsed, keyed by file path.
+	// Collapsed files show only their header row (with a ▶ indicator); their
+	// hunk/content rows are excluded from the layout, rendering, and chunk
+	// cursor navigation.
+	diffCollapsed map[string]bool
+
 	// diffLayout is the wrapped-line layout of the diff body (the region below
 	// the description/status head). Recomputed on diff load, raw-list load and
 	// resize. When unset (e.g. in unit tests) the helpers below fall back to a
@@ -628,6 +634,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// a refresh (not a fresh open) so the user's cursor position survives —
 		// otherwise the 2s poll yanks navigation back to the first chunk.
 		isRefresh := m.diffIsRevision && msg.rev == m.diffRev && len(m.diffRows) > 0
+		if !isRefresh {
+			m.diffCollapsed = nil
+		}
 		// Update the description; keep the instant subject shown during loading
 		// when the fetch returned nothing (e.g. a transient jj failure).
 		if msg.desc != "" {
@@ -637,7 +646,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diffRows = msg.rows
 		m.diffDigits = maxLineDigits(msg.rows)
 		m.computeDiffLayout()
-		m.diffChunks = computeDiffChunks(msg.rows, m.diffHeadLen())
+		m.diffChunks = computeDiffChunks(msg.rows, m.diffHeadLen(), m.diffCollapsed)
 		if !isRefresh {
 			m.diffCurChunk = 0
 			m.diffCurLine = 0
@@ -969,7 +978,7 @@ func (m Model) rowCountTerm(rowIdx int) int {
 // body from the terminal size and content. Called on diff/raw load and on
 // resize so navigation and rendering agree on where wrapped lines land.
 func (m *Model) computeDiffLayout() {
-	m.diffLayout = computeDiffLayoutPure(m.width, m.contentHeight(), m.diffHeadLen(), m.diffRows, m.diffRaw, m.diffDigits)
+	m.diffLayout = computeDiffLayoutPure(m.width, m.contentHeight(), m.diffHeadLen(), m.diffRows, m.diffRaw, m.diffDigits, m.diffCollapsed)
 }
 
 // diffHeadLen is the number of body rows occupied by the description header,
@@ -1204,10 +1213,155 @@ func (m *Model) diffMoveBottom() {
 	m.diffFollowCursor()
 }
 
+// cursorOnFileHeader returns the row index of the file header the cursor is
+// currently on, or (-1, false) if the cursor is on a diff chunk (or there are
+// no navigable items).
+func (m Model) cursorOnFileHeader() (int, bool) {
+	if len(m.diffChunks) == 0 || m.diffCurChunk < 0 || m.diffCurChunk >= len(m.diffChunks) {
+		return 0, false
+	}
+	cur := m.diffChunks[m.diffCurChunk]
+	// File headers are single-element chunks.
+	if len(cur) != 1 {
+		return 0, false
+	}
+	headLen := m.diffHeadLen()
+	rowIdx := cur[0] - headLen
+	if rowIdx < 0 || rowIdx >= len(m.diffRows) {
+		return 0, false
+	}
+	if m.diffRows[rowIdx].kind != rowFileHeader {
+		return 0, false
+	}
+	return rowIdx, true
+}
+
+// cursorFileHeader returns the row index of the file header that owns the
+// cursor's current position, whether the cursor is on the file header itself
+// or on a code line within that file. Returns (-1, false) if the cursor is
+// not within any file's rows.
+func (m Model) cursorFileHeader() (int, bool) {
+	if len(m.diffChunks) == 0 || m.diffCurChunk < 0 || m.diffCurChunk >= len(m.diffChunks) {
+		return 0, false
+	}
+	cur := m.diffChunks[m.diffCurChunk]
+	if m.diffCurLine < 0 || m.diffCurLine >= len(cur) {
+		return 0, false
+	}
+	headLen := m.diffHeadLen()
+	rowIdx := cur[m.diffCurLine] - headLen
+	if rowIdx < 0 || rowIdx >= len(m.diffRows) {
+		return 0, false
+	}
+	hdrIdx := diffFileHeaderForRow(m.diffRows, rowIdx)
+	if hdrIdx < 0 {
+		return 0, false
+	}
+	return hdrIdx, true
+}
+
+// toggleDiffCollapse flips the collapsed state of the file at fileHeaderIdx,
+// then recomputes the layout and chunk cursor so navigation stays consistent.
+// The cursor is kept on the toggled file header.
+func (m *Model) toggleDiffCollapse(fileHeaderIdx int) {
+	if fileHeaderIdx < 0 || fileHeaderIdx >= len(m.diffRows) {
+		return
+	}
+	if m.diffRows[fileHeaderIdx].kind != rowFileHeader {
+		return
+	}
+	path := m.diffRows[fileHeaderIdx].path
+	if m.diffCollapsed == nil {
+		m.diffCollapsed = map[string]bool{}
+	}
+	m.diffCollapsed[path] = !m.diffCollapsed[path]
+	m.computeDiffLayout()
+	m.diffChunks = computeDiffChunks(m.diffRows, m.diffHeadLen(), m.diffCollapsed)
+
+	// Find the file header in the new chunk list and keep the cursor on it.
+	headLen := m.diffHeadLen()
+	targetRow := headLen + fileHeaderIdx
+	found := false
+	for i, chunk := range m.diffChunks {
+		if len(chunk) == 1 && chunk[0] == targetRow {
+			m.diffCurChunk = i
+			m.diffCurLine = 0
+			found = true
+			break
+		}
+	}
+	if !found {
+		if len(m.diffChunks) == 0 {
+			m.diffCurChunk = 0
+			m.diffCurLine = 0
+		} else {
+			if m.diffCurChunk >= len(m.diffChunks) {
+				m.diffCurChunk = len(m.diffChunks) - 1
+			}
+			if m.diffCurChunk < 0 {
+				m.diffCurChunk = 0
+			}
+			if m.diffCurLine >= len(m.diffChunks[m.diffCurChunk]) {
+				m.diffCurLine = len(m.diffChunks[m.diffCurChunk]) - 1
+			}
+			if m.diffCurLine < 0 {
+				m.diffCurLine = 0
+			}
+		}
+	}
+	m.diffClampMax()
+	m.diffFollowCursor()
+}
+
+// diffFileHeaderAtMouseY maps a terminal Y coordinate to a diff row index and
+// returns it if the row is a file header (suitable for click-to-toggle). The
+// Y is 0-based from the top of the terminal.
+func (m Model) diffFileHeaderAtMouseY(mouseY int) (int, bool) {
+	bodyStartY := contentTopBarHeight + 1 // top bar + diff title bar
+	bodyLine := mouseY - bodyStartY + m.diffScrollY
+	headLen := m.diffHeadLen()
+	if bodyLine < headLen {
+		return 0, false
+	}
+	diffBodyLine := bodyLine - headLen
+	if diffBodyLine < 0 || diffBodyLine >= m.diffBodyTotal() {
+		return 0, false
+	}
+	if len(m.diffLayout.starts) == 0 {
+		return 0, false
+	}
+	rowIdx, _ := m.diffLayout.rowAt(diffBodyLine)
+	if rowIdx < 0 || rowIdx >= len(m.diffRows) {
+		return 0, false
+	}
+	if m.diffRows[rowIdx].kind != rowFileHeader {
+		return 0, false
+	}
+	return rowIdx, true
+}
+
+// setDiffCursorToFileHeader moves the chunk cursor to the file header at
+// fileHeaderIdx (a row index into diffRows). Does nothing if the file header
+// is not found among the navigable chunks.
+func (m *Model) setDiffCursorToFileHeader(fileHeaderIdx int) {
+	headLen := m.diffHeadLen()
+	targetRow := headLen + fileHeaderIdx
+	for i, chunk := range m.diffChunks {
+		if len(chunk) == 1 && chunk[0] == targetRow {
+			m.diffCurChunk = i
+			m.diffCurLine = 0
+			return
+		}
+	}
+}
+
 // computeDiffChunks groups contiguous addition/deletion lines into chunks,
-// recording each line's body-row index. Any file header, hunk header, or
-// context line breaks a chunk.
-func computeDiffChunks(rows []diffRow, headLen int) [][]int {
+// recording each line's body-row index. File header rows are included as
+// single-element navigable chunks so the cursor can land on them (for
+// collapse/expand). Hunk headers and context lines break chunks. Rows inside
+// collapsed files are skipped (but the collapsed file's header is kept).
+func computeDiffChunks(rows []diffRow, headLen int, collapsed map[string]bool) [][]int {
+	hidden := collapsedRowSet(rows, collapsed)
 	var chunks [][]int
 	var cur []int
 	flush := func() {
@@ -1217,6 +1371,15 @@ func computeDiffChunks(rows []diffRow, headLen int) [][]int {
 		}
 	}
 	for i, r := range rows {
+		if hidden != nil && hidden[i] {
+			flush()
+			continue
+		}
+		if r.kind == rowFileHeader {
+			flush()
+			chunks = append(chunks, []int{headLen + i})
+			continue
+		}
 		if r.kind == rowLine && (r.lineKind == "addition" || r.lineKind == "deletion") {
 			cur = append(cur, headLen+i)
 		} else {
@@ -1354,6 +1517,18 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.scrollDragging = false
 		}
 		return m, nil
+	}
+
+	// Click on a diff file header moves the cursor to it and toggles its
+	// collapsed state. Only intercept clicks outside the scrollbar area.
+	if m.diffOpen && msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+		if msg.X < m.width-scrollbarWidth {
+			if fileIdx, ok := m.diffFileHeaderAtMouseY(msg.Y); ok {
+				m.setDiffCursorToFileHeader(fileIdx)
+				m.toggleDiffCollapse(fileIdx)
+				return m, nil
+			}
+		}
 	}
 
 	ch := m.contentHeight()
@@ -1795,6 +1970,20 @@ func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
 		m.diffMoveTop()
 	case "end", "G":
 		m.diffMoveBottom()
+	case "left", "h":
+		if fileIdx, ok := m.cursorFileHeader(); ok {
+			path := m.diffRows[fileIdx].path
+			if m.diffCollapsed == nil || !m.diffCollapsed[path] {
+				m.toggleDiffCollapse(fileIdx)
+			}
+		}
+	case "right", "l":
+		if fileIdx, ok := m.cursorFileHeader(); ok {
+			path := m.diffRows[fileIdx].path
+			if m.diffCollapsed != nil && m.diffCollapsed[path] {
+				m.toggleDiffCollapse(fileIdx)
+			}
+		}
 	case "d":
 		if m.diffIsRevision && m.diffRev != "" {
 			changeID := m.diffRev
@@ -2549,7 +2738,7 @@ func (m Model) View() string {
 	case m.view == viewHelp:
 		lines = append(lines, renderHelp(m.width, ch, m.helpScrollY)...)
 	case m.diffOpen:
-		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows())...)
+		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), m.diffCollapsed)...)
 	case m.view == viewFile:
 		lines = append(lines, m.renderFileView(m.width, ch)...)
 	default:
@@ -2811,8 +3000,8 @@ func (m Model) helpBarItems() [][2]string {
 	case m.diffOpen:
 		return [][2]string{
 			{"⏎ close", "⏎"}, {"↑/k chunk↑", "↑"}, {"↓/j chunk↓", "↓"},
-			{"g top", "g"}, {"G bot", "G"}, {"describe", "d"},
-			{"AI Desc", "D"}, {"new", "n"}, {"q close", "q"},
+			{"g top", "g"}, {"G bot", "G"}, {"←/→ fold", "←"},
+			{"describe", "d"}, {"AI Desc", "D"}, {"new", "n"}, {"q close", "q"},
 		}
 	case m.view == viewFile:
 		switch m.fileView.phase {

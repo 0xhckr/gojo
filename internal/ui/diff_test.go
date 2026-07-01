@@ -3,6 +3,9 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const sampleDiff = `diff --git a/foo.go b/foo.go
@@ -71,7 +74,7 @@ func TestRenderDiff(t *testing.T) {
 	}
 
 	// Ensure renderDiffPanel produces exactly the requested height.
-	out := renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, maxLineDigits(rows), nil, "", 0, -1, nil)
+	out := renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, maxLineDigits(rows), nil, "", 0, -1, nil, nil)
 	if len(out) != 24 {
 		t.Errorf("diff panel lines = %d, want 24", len(out))
 	}
@@ -85,14 +88,17 @@ func TestRenderDiffEmpty(t *testing.T) {
 
 func TestComputeDiffChunks(t *testing.T) {
 	rows := renderDiff(sampleDiff)
-	chunks := computeDiffChunks(rows, 0)
-	// foo.go: -Old/-return 1/+New/+comment/+return 2 is one contiguous chunk (5 lines),
-	// new.txt: +hello/+world is another (2 lines).
-	if len(chunks) != 2 {
-		t.Fatalf("chunks = %d, want 2", len(chunks))
+	chunks := computeDiffChunks(rows, 0, nil)
+	// File headers are navigable single-element chunks. Layout:
+	// [0] foo.go header (1), [1] foo.go changes (5),
+	// [2] new.txt header (1), [3] new.txt changes (2).
+	if len(chunks) != 4 {
+		t.Fatalf("chunks = %d, want 4 (2 file headers + 2 change chunks)", len(chunks))
 	}
-	if len(chunks[0]) != 5 || len(chunks[1]) != 2 {
-		t.Errorf("chunk sizes = %d, %d; want 5, 2", len(chunks[0]), len(chunks[1]))
+	if len(chunks[0]) != 1 || len(chunks[1]) != 5 ||
+		len(chunks[2]) != 1 || len(chunks[3]) != 2 {
+		t.Errorf("chunk sizes = %d, %d, %d, %d; want 1, 5, 1, 2",
+			len(chunks[0]), len(chunks[1]), len(chunks[2]), len(chunks[3]))
 	}
 }
 
@@ -240,28 +246,30 @@ func TestDiffCursorScroll(t *testing.T) {
 	m := Model{width: 80, height: 10, view: viewLog, diffOpen: true}
 	m.diffRows = renderDiff(raw)
 	m.diffStatus = nil
-	m.diffChunks = computeDiffChunks(m.diffRows, m.diffHeadLen())
-	m.diffCurChunk, m.diffCurLine = 0, 0
+	m.diffChunks = computeDiffChunks(m.diffRows, m.diffHeadLen(), nil)
+	// Chunks: [0] a header, [1] 10 additions, [2] b header, [3] 2 additions.
+	const addChunk = 1 // index of a's 10-line addition chunk
+	m.diffCurChunk, m.diffCurLine = addChunk, 0
 	bodyH := m.diffBodyHeight() // visible rows below title
 
-	// Entering chunk 0 from above reveals diffChunkContext lines of context
+	// Entering chunk from above reveals diffChunkContext lines of context
 	// before the chunk (clamped at 0), then as much of the chunk as fits.
 	m.diffEnterChunkDown()
-	wantTop := m.diffChunks[0][0] - diffChunkContext
+	wantTop := m.diffChunks[addChunk][0] - diffChunkContext
 	if wantTop < 0 {
 		wantTop = 0
 	}
 	if m.diffScrollY != wantTop {
-		t.Fatalf("enterChunkDown scrollY = %d, want %d (chunk0 start %d - ctx %d)",
-			m.diffScrollY, wantTop, m.diffChunks[0][0], diffChunkContext)
+		t.Fatalf("enterChunkDown scrollY = %d, want %d (chunk start %d - ctx %d)",
+			m.diffScrollY, wantTop, m.diffChunks[addChunk][0], diffChunkContext)
 	}
 
-	// Walk down chunk 0: cursor stays in view, and once it passes the bottom
-	// edge the viewport scrolls exactly one line per step (the reveal behavior).
-	for i := 1; i < len(m.diffChunks[0]); i++ {
+	// Walk down the addition chunk: cursor stays in view, and once it passes
+	// the bottom edge the viewport scrolls exactly one line per step.
+	for i := 1; i < len(m.diffChunks[addChunk]); i++ {
 		m.diffMoveDown()
-		if m.diffCursorBodyRow() != m.diffChunks[0][i] {
-			t.Fatalf("step %d: cursor = %d, want %d", i, m.diffCursorBodyRow(), m.diffChunks[0][i])
+		if m.diffCursorBodyRow() != m.diffChunks[addChunk][i] {
+			t.Fatalf("step %d: cursor = %d, want %d", i, m.diffCursorBodyRow(), m.diffChunks[addChunk][i])
 		}
 		row := m.diffCursorBodyRow()
 		if row < m.diffScrollY || row >= m.diffScrollY+bodyH {
@@ -269,23 +277,22 @@ func TestDiffCursorScroll(t *testing.T) {
 		}
 	}
 
-	// One more down: jump to chunk 1, line 0, with context shown above it.
+	// One more down: jump to the b file header (next navigable item).
 	m.diffMoveDown()
-	if m.diffCurChunk != 1 || m.diffCurLine != 0 {
-		t.Fatalf("after chunk0: chunk=%d line=%d, want 1,0", m.diffCurChunk, m.diffCurLine)
+	if m.diffCurChunk != addChunk+1 || m.diffCurLine != 0 {
+		t.Fatalf("after addition chunk: chunk=%d line=%d, want %d,0", m.diffCurChunk, m.diffCurLine, addChunk+1)
 	}
 	c1 := m.diffCursorBodyRow()
 	if c1 < m.diffScrollY || c1 >= m.diffScrollY+bodyH {
-		t.Errorf("chunk1 cursor %d out of view [%d,%d)", c1, m.diffScrollY, m.diffScrollY+bodyH)
+		t.Errorf("file header cursor %d out of view [%d,%d)", c1, m.diffScrollY, m.diffScrollY+bodyH)
 	}
 
-	// Walk back up into chunk 0: entering from below lands on chunk 0's last
-	// line, with diffChunkContext lines of context shown after it.
+	// Walk back up: re-enter the addition chunk from below (last line).
 	m.diffMoveUp()
-	if m.diffCurChunk != 0 || m.diffCurLine != len(m.diffChunks[0])-1 {
-		t.Fatalf("moveUp: chunk=%d line=%d, want 0,%d", m.diffCurChunk, m.diffCurLine, len(m.diffChunks[0])-1)
+	if m.diffCurChunk != addChunk || m.diffCurLine != len(m.diffChunks[addChunk])-1 {
+		t.Fatalf("moveUp: chunk=%d line=%d, want %d,%d", m.diffCurChunk, m.diffCurLine, addChunk, len(m.diffChunks[addChunk])-1)
 	}
-	last := m.diffChunks[0][len(m.diffChunks[0])-1]
+	last := m.diffChunks[addChunk][len(m.diffChunks[addChunk])-1]
 	wantUp := last + diffChunkContext - bodyH + 1
 	if wantUp < 0 {
 		wantUp = 0
@@ -294,7 +301,7 @@ func TestDiffCursorScroll(t *testing.T) {
 		wantUp = m.diffMaxScroll()
 	}
 	if m.diffScrollY != wantUp {
-		t.Errorf("chunk0 re-entry scrollY = %d, want %d", m.diffScrollY, wantUp)
+		t.Errorf("addition chunk re-entry scrollY = %d, want %d", m.diffScrollY, wantUp)
 	}
 }
 
@@ -308,7 +315,7 @@ func TestDiffCursorFreeScrollTop(t *testing.T) {
 	m.diffRows = rows
 	m.diffStatus = nil
 	m.diffDigits = maxLineDigits(rows)
-	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen())
+	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen(), nil)
 	m.diffCurChunk, m.diffCurLine = 0, 0
 	m.diffEnterChunkDown()
 	cursorRow := m.diffCursorBodyRow()
@@ -342,18 +349,19 @@ func TestDiffCursorRefresh(t *testing.T) {
 	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,1 +1,4 @@\n+p\n+q\n+r\n+s\n"
 	m := Model{width: 80, height: 24, view: viewLog, diffOpen: true, diffIsRevision: true, diffRev: "abc"}
 	rows := renderDiff(raw)
-	// Simulate a first load (no prior rows): cursor starts at chunk 0, line 0.
+	// Chunks: [0] a header, [1] 4 additions (p, q, r, s).
 	m.diffStatus = nil
 	m.diffRows = rows
 	m.diffDigits = maxLineDigits(rows)
-	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen())
+	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen(), nil)
 	m.diffCurChunk, m.diffCurLine = 0, 0
 
-	// Navigate to chunk 0, line 2.
-	m.diffMoveDown()
-	m.diffMoveDown()
-	if m.diffCurChunk != 0 || m.diffCurLine != 2 {
-		t.Fatalf("before refresh: chunk=%d line=%d, want 0,2", m.diffCurChunk, m.diffCurLine)
+	// Navigate to the addition chunk (1), line 2.
+	m.diffMoveDown() // file header → chunk 1, line 0
+	m.diffMoveDown() // line 1
+	m.diffMoveDown() // line 2
+	if m.diffCurChunk != 1 || m.diffCurLine != 2 {
+		t.Fatalf("before refresh: chunk=%d line=%d, want 1,2", m.diffCurChunk, m.diffCurLine)
 	}
 
 	// Simulate the poll refresh firing diffLoadedMsg for the same rev. The
@@ -362,13 +370,13 @@ func TestDiffCursorRefresh(t *testing.T) {
 	if !isRefresh {
 		t.Fatal("expected refresh detection")
 	}
-	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen()) // unchanged shape
+	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen(), nil) // unchanged shape
 	m.diffClampMax()                                        // refresh path preserves viewport; only clamps
 	if r := m.diffCursorBodyRow(); r >= 0 && (r < m.diffScrollY || r >= m.diffScrollY+m.diffBodyHeight()) {
 		m.diffFollowCursor()
 	}
-	if m.diffCurChunk != 0 || m.diffCurLine != 2 {
-		t.Errorf("after refresh: chunk=%d line=%d, want preserved 0,2", m.diffCurChunk, m.diffCurLine)
+	if m.diffCurChunk != 1 || m.diffCurLine != 2 {
+		t.Errorf("after refresh: chunk=%d line=%d, want preserved 1,2", m.diffCurChunk, m.diffCurLine)
 	}
 }
 
@@ -382,10 +390,12 @@ func TestDiffCursorShowsContext(t *testing.T) {
 	m.diffRows = rows
 	m.diffStatus = nil
 	m.diffDigits = maxLineDigits(rows)
-	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen())
-	m.diffCurChunk, m.diffCurLine = 0, 0
+	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen(), nil)
+	// Chunks: [0] a header, [1] -old/+new (2 elements).
+	const changeChunk = 1
+	m.diffCurChunk, m.diffCurLine = changeChunk, 0
 	head := m.diffHeadLen()
-	chunkFirst := m.diffChunks[0][0] // body row of -old
+	chunkFirst := m.diffChunks[changeChunk][0] // body row of -old
 
 	// Scroll so the chunk is near the bottom of the viewport, then step: the
 	// whole chunk must stay visible (scroll moves only to keep it so), proving
@@ -414,8 +424,9 @@ func TestDiffWrap(t *testing.T) {
 	m.diffRows = rows
 	m.diffStatus = nil
 	m.diffDigits = maxLineDigits(rows)
-	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen())
-	m.diffCurChunk, m.diffCurLine = 0, 0
+	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen(), nil)
+	// Chunks: [0] file header, [1] long addition line. Start on the addition.
+	m.diffCurChunk, m.diffCurLine = 1, 0
 	m.computeDiffLayout()
 
 	// The body must occupy more terminal lines than logical rows (wrapping
@@ -446,7 +457,7 @@ func TestDiffWrap(t *testing.T) {
 	}
 
 	// The panel must still emit exactly `height` lines at this width.
-	out := renderDiffPanel(m.width, m.height, m.diffRev, 0, false, false, 0, m.diffDesc, true, rows, m.diffDigits, m.diffStatus, "", m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows())
+	out := renderDiffPanel(m.width, m.height, m.diffRev, 0, false, false, 0, m.diffDesc, true, rows, m.diffDigits, m.diffStatus, "", m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), nil)
 	if len(out) != m.height {
 		t.Errorf("wrapped panel lines = %d, want %d", len(out), m.height)
 	}
@@ -488,4 +499,247 @@ func TestDiffWrapNoMisplace(t *testing.T) {
 		}
 	}
 	_ = headLen
+}
+
+func stripANSI(lines []string) string {
+	return ansi.Strip(strings.Join(lines, "\n"))
+}
+
+// TestCollapsedRowSet verifies that collapsedRowSet correctly identifies the
+// body rows hidden by collapsed file headers.
+func TestCollapsedRowSet(t *testing.T) {
+	rows := renderDiff(sampleDiff)
+	// File headers: foo.go at 0, new.txt at 10.
+	collapsed := map[string]bool{"foo.go": true}
+	hidden := collapsedRowSet(rows, collapsed)
+	if hidden == nil {
+		t.Fatal("expected non-nil hidden set")
+	}
+	// Rows 1-9 (hunk header + content) should be hidden; row 0 (header) and
+	// rows 10+ (new.txt) should not.
+	for i := 1; i <= 9; i++ {
+		if !hidden[i] {
+			t.Errorf("row %d should be hidden (inside collapsed foo.go)", i)
+		}
+	}
+	if hidden[0] {
+		t.Error("file header row 0 should not be hidden")
+	}
+	for i := 10; i < len(rows); i++ {
+		if hidden[i] {
+			t.Errorf("row %d should not be hidden (new.txt)", i)
+		}
+	}
+}
+
+// TestDiffFileHeaderForRow verifies that diffFileHeaderForRow finds the
+// correct file header for any given row index.
+func TestDiffFileHeaderForRow(t *testing.T) {
+	rows := renderDiff(sampleDiff)
+	// foo.go header is at 0, new.txt header is at 10.
+	if got := diffFileHeaderForRow(rows, 5); got != 0 {
+		t.Errorf("header for row 5 = %d, want 0 (foo.go)", got)
+	}
+	if got := diffFileHeaderForRow(rows, 12); got != 10 {
+		t.Errorf("header for row 12 = %d, want 10 (new.txt)", got)
+	}
+	if got := diffFileHeaderForRow(rows, 0); got != 0 {
+		t.Errorf("header for row 0 = %d, want 0", got)
+	}
+}
+
+// TestComputeDiffChunksCollapsed verifies that computeDiffChunks skips body
+// rows of collapsed files but keeps their file header as a navigable item.
+func TestComputeDiffChunksCollapsed(t *testing.T) {
+	rows := renderDiff(sampleDiff)
+	// Collapse foo.go: foo.go header (1) + new.txt header (1) + new.txt chunk (2).
+	chunks := computeDiffChunks(rows, 0, map[string]bool{"foo.go": true})
+	if len(chunks) != 3 {
+		t.Fatalf("chunks = %d, want 3 (foo.hdr, new.hdr, new.chunk)", len(chunks))
+	}
+	if len(chunks[0]) != 1 || len(chunks[1]) != 1 || len(chunks[2]) != 2 {
+		t.Errorf("chunk sizes = %d, %d, %d; want 1, 1, 2", len(chunks[0]), len(chunks[1]), len(chunks[2]))
+	}
+	// Collapse new.txt: foo.go header (1) + foo.go chunk (5) + new.txt header (1).
+	chunks = computeDiffChunks(rows, 0, map[string]bool{"new.txt": true})
+	if len(chunks) != 3 {
+		t.Fatalf("chunks = %d, want 3 (foo.hdr, foo.chunk, new.hdr)", len(chunks))
+	}
+	if len(chunks[0]) != 1 || len(chunks[1]) != 5 || len(chunks[2]) != 1 {
+		t.Errorf("chunk sizes = %d, %d, %d; want 1, 5, 1", len(chunks[0]), len(chunks[1]), len(chunks[2]))
+	}
+	// Collapse both: only file headers remain.
+	chunks = computeDiffChunks(rows, 0, map[string]bool{"foo.go": true, "new.txt": true})
+	if len(chunks) != 2 {
+		t.Errorf("chunks = %d, want 2 (both file headers)", len(chunks))
+	}
+}
+
+// TestDiffCollapseToggle verifies that toggleDiffCollapse correctly toggles
+// state, recomputes chunks, and keeps the cursor on the toggled file header.
+func TestDiffCollapseToggle(t *testing.T) {
+	raw := "diff --git a/a.go b/a.go\n+++ b/a.go\n@@ -1,3 +1,3 @@\n ctx\n-old\n+new\n" +
+		"diff --git a/b.go b/b.go\n+++ b/b.go\n@@ -1,1 +1,2 @@\n+x\n+y\n"
+	m := Model{width: 80, height: 24, view: viewLog, diffOpen: true}
+	rows := renderDiff(raw)
+	m.diffRows = rows
+	m.diffStatus = nil
+	m.diffDigits = maxLineDigits(rows)
+	m.computeDiffLayout()
+	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen(), nil)
+	// Chunks: [0] a.go header, [1] a.go chunk, [2] b.go header, [3] b.go chunk.
+	m.diffCurChunk, m.diffCurLine = 0, 0 // cursor on a.go header
+
+	// Cursor should be on a.go's file header.
+	fileIdx, ok := m.cursorOnFileHeader()
+	if !ok || fileIdx != 0 {
+		t.Fatalf("cursorOnFileHeader = (%d, %v), want (0, true) (a.go)", fileIdx, ok)
+	}
+	m.toggleDiffCollapse(fileIdx)
+	if !m.diffCollapsed["a.go"] {
+		t.Error("a.go should be collapsed after toggle")
+	}
+	// a.go's body chunk is gone; remaining chunks: [0] a.go header, [1] b.go
+	// header, [2] b.go chunk. Cursor should still be on a.go header (chunk 0).
+	if len(m.diffChunks) != 3 {
+		t.Fatalf("chunks after collapse = %d, want 3 (a.go hdr, b.go hdr, b.go chunk)", len(m.diffChunks))
+	}
+	if m.diffCurChunk != 0 {
+		t.Errorf("cursor chunk = %d, want 0 (a.go header)", m.diffCurChunk)
+	}
+
+	// Expand a.go.
+	m.toggleDiffCollapse(0)
+	if m.diffCollapsed["a.go"] {
+		t.Error("a.go should be expanded after second toggle")
+	}
+	if len(m.diffChunks) != 4 {
+		t.Errorf("chunks after expand = %d, want 4", len(m.diffChunks))
+	}
+}
+
+// TestDiffCollapseLayout verifies that the diff layout excludes collapsed
+// file bodies, reducing the total terminal line count.
+func TestDiffCollapseLayout(t *testing.T) {
+	m := Model{width: 80, height: 24, view: viewLog, diffOpen: true}
+	rows := renderDiff(sampleDiff)
+	m.diffRows = rows
+	m.diffStatus = nil
+	m.diffDigits = maxLineDigits(rows)
+	m.computeDiffLayout()
+	fullTotal := m.diffBodyTotal()
+
+	// Collapse foo.go (rows 1-9 hidden → 9 fewer terminal lines).
+	m.diffCollapsed = map[string]bool{"foo.go": true}
+	m.computeDiffLayout()
+	collapsedTotal := m.diffBodyTotal()
+	if collapsedTotal >= fullTotal {
+		t.Errorf("collapsed total %d >= full total %d", collapsedTotal, fullTotal)
+	}
+	// The file header row (0) should still have count 1.
+	if m.rowCountTerm(0) != 1 {
+		t.Errorf("file header count = %d, want 1", m.rowCountTerm(0))
+	}
+	// Hidden rows should have count 0.
+	for i := 1; i <= 9; i++ {
+		if m.rowCountTerm(i) != 0 {
+			t.Errorf("hidden row %d count = %d, want 0", i, m.rowCountTerm(i))
+		}
+	}
+}
+
+// TestDiffCollapseRendering verifies that renderDiffPanel still produces
+// exactly `height` lines when files are collapsed, and that the collapsed
+// file header shows the ▶ indicator.
+func TestDiffCollapseRendering(t *testing.T) {
+	rows := renderDiff(sampleDiff)
+	collapsed := map[string]bool{"foo.go": true}
+	out := renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, maxLineDigits(rows), nil, "", 0, -1, nil, collapsed)
+	if len(out) != 24 {
+		t.Errorf("collapsed panel lines = %d, want 24", len(out))
+	}
+	// The collapsed file header (foo.go) should show ▶, and the expanded one
+	// (new.txt) should show ▼.
+	plain := stripANSI(out)
+	if !strings.Contains(plain, "▶") {
+		t.Error("collapsed panel missing ▶ indicator for foo.go")
+	}
+	if !strings.Contains(plain, "▼") {
+		t.Error("collapsed panel missing ▼ indicator for new.txt")
+	}
+}
+
+// TestDiffCollapseKeyboard verifies that pressing left/h/right/l in the diff
+// panel toggles the collapse state only when the cursor is on a file header.
+func TestDiffCollapseKeyboard(t *testing.T) {
+	raw := "diff --git a/a.go b/a.go\n+++ b/a.go\n@@ -1,3 +1,3 @@\n ctx\n-old\n+new\n" +
+		"diff --git a/b.go b/b.go\n+++ b/b.go\n@@ -1,1 +1,2 @@\n+x\n+y\n"
+	m := Model{
+		ready:    true,
+		width:    100,
+		height:   30,
+		view:     viewLog,
+		diffOpen: true,
+	}
+	rows := renderDiff(raw)
+	m.diffRows = rows
+	m.diffStatus = nil
+	m.diffDigits = maxLineDigits(rows)
+	m.computeDiffLayout()
+	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen(), nil)
+	// Chunks: [0] a.go header, [1] a.go changes, [2] b.go header, [3] b.go changes.
+	// Cursor starts on a.go's file header (chunk 0).
+	m.diffCurChunk, m.diffCurLine = 0, 0
+
+	// Verify cursor is on a file header.
+	if _, ok := m.cursorOnFileHeader(); !ok {
+		t.Fatal("cursor should be on a.go file header at chunk 0")
+	}
+
+	// Press 'h' → should collapse a.go (cursor is on its header).
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	m = m2.(Model)
+	if !m.diffCollapsed["a.go"] {
+		t.Fatal("'h' did not collapse a.go when cursor was on its header")
+	}
+
+	// Press 'l' → should expand a.go (cursor still on its header).
+	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	m = m2.(Model)
+	if m.diffCollapsed["a.go"] {
+		t.Fatal("'l' did not expand a.go when cursor was on its header")
+	}
+
+	// Press left arrow → collapse again.
+	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m = m2.(Model)
+	if !m.diffCollapsed["a.go"] {
+		t.Fatal("left arrow did not collapse a.go")
+	}
+
+	// Press right arrow → expand.
+	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = m2.(Model)
+	if m.diffCollapsed["a.go"] {
+		t.Fatal("right arrow did not expand a.go")
+	}
+
+	// Move cursor to the change chunk (chunk 1). h/l should still work from
+	// within the code — they collapse/expand the file containing the cursor.
+	m.diffMoveDown() // file header → chunk 1, line 0
+	if _, ok := m.cursorOnFileHeader(); ok {
+		t.Fatal("cursor should NOT be on a file header after moving to chunk 1")
+	}
+	// 'h' from within the code collapses the owning file.
+	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	m = m2.(Model)
+	if !m.diffCollapsed["a.go"] {
+		t.Fatal("'h' should collapse a.go even when cursor is on a code line")
+	}
+	// 'l' from within the code expands the owning file.
+	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	m = m2.(Model)
+	if m.diffCollapsed["a.go"] {
+		t.Fatal("'l' should expand a.go even when cursor is on a code line")
+	}
 }

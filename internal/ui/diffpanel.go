@@ -105,15 +105,53 @@ func (l diffLayout) rowAt(bodyLine int) (rowIdx, sub int) {
 	return idx, bodyLine - l.starts[idx]
 }
 
+// collapsedRowSet returns the set of diff row indices that belong to collapsed
+// files (everything between a collapsed file header and the next file header).
+// Returns nil when no files are collapsed.
+func collapsedRowSet(rows []diffRow, collapsed map[string]bool) map[int]bool {
+	if len(collapsed) == 0 {
+		return nil
+	}
+	hidden := map[int]bool{}
+	for i, r := range rows {
+		if r.kind == rowFileHeader && collapsed[r.path] {
+			for j := i + 1; j < len(rows); j++ {
+				if rows[j].kind == rowFileHeader {
+					break
+				}
+				hidden[j] = true
+			}
+		}
+	}
+	return hidden
+}
+
+// diffFileHeaderForRow returns the index of the file header row that contains
+// the given row index, or -1 if none is found (e.g. rowIdx is before the first
+// file header).
+func diffFileHeaderForRow(rows []diffRow, rowIdx int) int {
+	for i := rowIdx; i >= 0; i-- {
+		if rows[i].kind == rowFileHeader {
+			return i
+		}
+	}
+	return -1
+}
+
 // diffRowWrapCount is the number of terminal lines a diff row occupies at
 // scrollW columns. File/hunk headers wrap their label; content lines wrap the
-// syntax-highlighted body after the line-number gutter.
-func diffRowWrapCount(scrollW, digits int, r diffRow) int {
+// syntax-highlighted body after the line-number gutter. fileCollapsed only
+// affects file header rows, adding a ▼/▶ indicator to the label.
+func diffRowWrapCount(scrollW, digits int, r diffRow, fileCollapsed bool) int {
 	switch r.kind {
 	case rowFileHeader:
-		label := r.path + "  (" + r.changeType + ")"
+		indicator := "▼ "
+		if fileCollapsed {
+			indicator = "▶ "
+		}
+		label := indicator + r.path + "  (" + r.changeType + ")"
 		if r.prevPath != "" {
-			label = r.prevPath + " → " + r.path + "  (" + r.changeType + ")"
+			label = indicator + r.prevPath + " → " + r.path + "  (" + r.changeType + ")"
 		}
 		return textWrapCount(label, max(1, scrollW-2))
 	case rowHunkHeader:
@@ -127,7 +165,7 @@ func diffRowWrapCount(scrollW, digits int, r diffRow) int {
 // scrollbar reservation depends on whether the body overflows the viewport,
 // which in turn depends on the wrap width, so it is resolved in two passes:
 // first at the full width, then (if overflow) at width minus the scrollbar.
-func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw string, digits int) diffLayout {
+func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw string, digits int, collapsed map[string]bool) diffLayout {
 	scrollW := width
 	if scrollW < 1 {
 		scrollW = 1
@@ -144,9 +182,15 @@ func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw str
 				counts[i] = textWrapCount(l, max(1, scrollW-1))
 			}
 		} else {
+			hidden := collapsedRowSet(rows, collapsed)
 			counts = make([]int, len(rows))
 			for i, r := range rows {
-				counts[i] = diffRowWrapCount(scrollW, digits, r)
+				if hidden != nil && hidden[i] {
+					counts[i] = 0
+					continue
+				}
+				isCollapsed := r.kind == rowFileHeader && collapsed != nil && collapsed[r.path]
+				counts[i] = diffRowWrapCount(scrollW, digits, r, isCollapsed)
 			}
 		}
 		total := 0
@@ -180,7 +224,7 @@ func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw str
 // (-1 if none); chunkRows is the set of body-row indices (headLen + rowIdx)
 // that belong to the focused chunk. A thin left-edge bar is drawn for those
 // rows: bright for the cursor line, dim for the rest of the chunk.
-func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, aiLoading bool, spinnerFrame int, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool) []string {
+func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, aiLoading bool, spinnerFrame int, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool, collapsed map[string]bool) []string {
 	// Title bar — the only sticky chrome; description + status + separator +
 	// diff all scroll together below it as one body. The revision ID uses the
 	// same two-tone highlighting as the log view: the shortest-unique prefix
@@ -215,7 +259,7 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 	head = append(head, buildChangesHead(width)...)
 	headLen := len(head)
 
-	layout := computeDiffLayoutPure(width, contentH, headLen, rows, rawContent, digits)
+	layout := computeDiffLayoutPure(width, contentH, headLen, rows, rawContent, digits, collapsed)
 	bodyTotal := headLen + layout.total
 
 	start, end := visibleRange(scrollY, contentH, bodyTotal)
@@ -256,8 +300,13 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 			r := rows[ri]
 			isCursor := ri == cursorRowIdx
 			inChunk := chunkRows != nil && chunkRows[headLen+ri]
-			str := renderDiffRowSubLine(scrollW, digits, r, sub, cursorBar(r, isCursor, inChunk))
-			content = append(content, renderRowWithBarFromString(scrollW, width, diffRowBg(r), hasBar, rowLine, thumbStart, thumbEnd, str))
+			isCollapsed := r.kind == rowFileHeader && collapsed != nil && collapsed[r.path]
+			str := renderDiffRowSubLine(scrollW, digits, r, sub, cursorBar(r, isCursor, inChunk), isCollapsed, isCursor)
+			rowBg := diffRowBg(r)
+			if r.kind == rowFileHeader && isCursor {
+				rowBg = diffFileHeaderFg
+			}
+			content = append(content, renderRowWithBarFromString(scrollW, width, rowBg, hasBar, rowLine, thumbStart, thumbEnd, str))
 		}
 	}
 
@@ -301,31 +350,43 @@ func renderRawSubLine(scrollW int, line string, sub int) string {
 // aligns under the original content while the gutter columns keep the row's
 // background. The left cursor bar (┃) is drawn on every sub-line so a focused
 // wrapped line stays visually marked end-to-end.
-func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipgloss.TerminalColor) string {
+func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipgloss.TerminalColor, fileCollapsed bool, isCursor bool) string {
 	switch r.kind {
 	case rowFileHeader:
-		label := r.path + "  (" + r.changeType + ")"
+		indicator := "▼ "
+		if fileCollapsed {
+			indicator = "▶ "
+		}
+		label := indicator + r.path + "  (" + r.changeType + ")"
 		if r.prevPath != "" {
-			label = r.prevPath + " → " + r.path + "  (" + r.changeType + ")"
+			label = indicator + r.prevPath + " → " + r.path + "  (" + r.changeType + ")"
+		}
+		labelFg, labelBg := diffFileHeaderFg, diffFileHeaderBg
+		if isCursor {
+			labelFg, labelBg = diffFileHeaderBg, diffFileHeaderFg
 		}
 		bodyW := max(1, scrollW-2)
-		wrapped := wrapSegs([]seg{{text: label, fg: diffFileHeaderFg, bold: true, bg: diffFileHeaderBg}}, bodyW)
+		wrapped := wrapSegs([]seg{{text: label, fg: labelFg, bold: true, bg: labelBg}}, bodyW)
 		var segs []seg
 		if sub == 0 {
+			barFg := diffFileHeaderFg
+			if barColor != nil {
+				barFg = barColor
+			}
 			segs = []seg{
-				{text: "┃", fg: diffFileHeaderFg, bold: true, bg: colPanel},
-				{text: " ", fg: diffFileHeaderFg, bold: true, bg: diffFileHeaderBg},
+				{text: "┃", fg: barFg, bold: true, bg: colPanel},
+				{text: " ", fg: labelFg, bold: true, bg: labelBg},
 			}
 		} else {
 			segs = []seg{
 				{text: " ", bg: colPanel},
-				{text: " ", bg: diffFileHeaderBg},
+				{text: " ", bg: labelBg},
 			}
 		}
 		if sub >= 0 && sub < len(wrapped) {
 			segs = append(segs, wrapped[sub]...)
 		}
-		return bgRow(scrollW, diffFileHeaderBg, segs...)
+		return bgRow(scrollW, labelBg, segs...)
 
 	case rowHunkHeader:
 		bodyW := max(1, scrollW-2)
@@ -509,10 +570,16 @@ func visibleRange(scrollY, count, total int) (int, int) {
 
 // cursorBar picks the foreground color for the ┃ cursor glyph on a content
 // row. The focused row gets a bright color; other rows in the same chunk get a
-// dim tint; everything else gets nothing. The bar is drawn on every wrapped
-// sub-line of the row, so it is evaluated per logical row (not per terminal
-// line).
+// dim tint; everything else gets nothing. File header rows get a yellow cursor
+// bar when focused. The bar is drawn on every wrapped sub-line of the row, so
+// it is evaluated per logical row (not per terminal line).
 func cursorBar(r diffRow, isCursor, inChunk bool) lipgloss.TerminalColor {
+	if r.kind == rowFileHeader {
+		if isCursor {
+			return colYellow
+		}
+		return nil
+	}
 	if r.kind != rowLine {
 		return nil
 	}
