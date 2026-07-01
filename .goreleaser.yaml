@@ -8,10 +8,7 @@ before:
     - go mod tidy
     # Single source of truth: the VERSION file must match the git tag
     # (minus the leading `v`). Fails the release if they drift.
-    - sh -c |
-        v="$(cat VERSION)"
-        tag="${GORELEASER_CURRENT_TAG#v}"
-        [ "$v" = "$tag" ] || { echo "VERSION file ($v) != tag ($tag)"; exit 1; }
+    - sh -c 'v="$(cat VERSION)"; tag="${GORELEASER_CURRENT_TAG#v}"; [ "$v" = "$tag" ] || { echo "VERSION file ($v) != tag ($tag)"; exit 1; }'
 
 builds:
   - id: gojo
