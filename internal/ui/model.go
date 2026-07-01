@@ -618,7 +618,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.message = "AI described " + msg.changeID + ": " + msg.message
-		return m, m.refreshCmd()
+		return m, tea.Batch(m.refreshFocusedCmds()...)
 
 	case describeFinishedMsg:
 		if msg.err != nil {
@@ -626,7 +626,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.message = "described " + msg.changeID
 		}
-		return m, m.refreshCmd()
+		return m, tea.Batch(m.refreshFocusedCmds()...)
 
 	case squashFinishedMsg:
 		if msg.err != nil {
@@ -799,7 +799,11 @@ func (m Model) diffHeadLen() int {
 	}
 	descLen := 0
 	if m.diffIsRevision {
-		descLen = descHeadLen(m.diffDesc)
+		if m.aiLoading[m.diffRev] {
+			descLen = 3 // label + spinner line + divider
+		} else {
+			descLen = descHeadLen(m.diffDesc)
+		}
 	}
 	return descLen + statusCount + 2
 }
@@ -1580,8 +1584,46 @@ func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
 		m.diffMoveTop()
 	case "end", "G":
 		m.diffMoveBottom()
+	case "d":
+		if m.diffIsRevision && m.diffRev != "" {
+			changeID := m.diffRev
+			if e := m.findEntryByChangeID(changeID); e != nil && e.IsImmutable {
+				m.pendingElev = &elevReq{
+					flag:   "--ignore-immutable",
+					reason: "target is immutable",
+					retry:  func() tea.Cmd { return m.describeCmd(changeID, "--ignore-immutable") },
+				}
+				return m, nil
+			}
+			return m, m.describeCmd(changeID)
+		}
+	case "D":
+		if m.diffIsRevision && m.diffRev != "" {
+			changeID := m.diffRev
+			m.aiLoading[changeID] = true
+			m.errMsg = ""
+			m.message = "AI generating message for " + changeID + "…"
+			cmds := []tea.Cmd{m.aiCmd(changeID)}
+			if !m.spinnerRunning {
+				m.spinnerRunning = true
+				cmds = append(cmds, spinnerTick())
+			}
+			return m, tea.Batch(cmds...)
+		}
 	}
 	return m, nil
+}
+
+// findEntryByChangeID returns the log entry matching the given change ID, or
+// nil if it isn't in the current log list (e.g. a revision opened from the
+// file-view blame/history that isn't among the visible log entries).
+func (m Model) findEntryByChangeID(changeID string) *jj.LogEntry {
+	for i := range m.entries {
+		if m.entries[i].ChangeID == changeID {
+			return &m.entries[i]
+		}
+	}
+	return nil
 }
 
 func (m Model) handleFileKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
@@ -2280,7 +2322,7 @@ func (m Model) View() string {
 	case m.view == viewHelp:
 		lines = append(lines, renderHelp(m.width, ch, m.helpScrollY)...)
 	case m.diffOpen:
-		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows())...)
+		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows())...)
 	case m.view == viewFile:
 		lines = append(lines, m.renderFileView(m.width, ch)...)
 	default:

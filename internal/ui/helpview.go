@@ -64,6 +64,8 @@ var helpSections = []helpSection{
 		{"pgup/b", "scroll up half page"},
 		{"pgdn/f", "scroll down half page"},
 		{"g / G", "jump top / bottom"},
+		{"d", "edit description"},
+		{"D", "AI describe"},
 		{"enter / q", "close diff"},
 	}},
 	{title: "File View", color: colMagenta, bindings: []helpBinding{

@@ -71,7 +71,7 @@ func statusSym(k jj.StatusKind) string {
 // chunkRows is the set of body-row indices that belong to the focused chunk.
 // A thin left-edge bar is drawn for those rows: bright for the cursor line,
 // dim for the rest of the chunk.
-func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool) []string {
+func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, aiLoading bool, spinnerFrame int, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool) []string {
 	// Title bar — the only sticky chrome; description + status + separator +
 	// diff all scroll together below it as one body. The revision ID uses the
 	// same two-tone highlighting as the log view: the shortest-unique prefix
@@ -99,7 +99,7 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 	// items + separators + diff.
 	var head []string
 	if showDesc {
-		head = append(head, buildDescHead(width, desc)...)
+		head = append(head, buildDescHead(width, desc, aiLoading, spinnerFrame)...)
 	}
 	head = append(head, buildStatusHead(width, status)...)
 	bodyTotal := len(head) + diffBodyLen(rows, rawContent)
@@ -155,16 +155,23 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 }
 
 // buildDescHead renders the description label, the description text (one row
+// buildDescHead renders the description label, the description text (one row
 // per line), and a horizontal divider — shown above the status section. When
 // the description is empty, a "(no description set)" placeholder is shown.
-func buildDescHead(width int, desc string) []string {
+// When aiLoading is true, a spinner replaces the description text.
+func buildDescHead(width int, desc string, aiLoading bool, spinnerFrame int) []string {
 	head := []string{bgRow(width, colPanel, seg{text: "┃ ", fg: colCyan, bold: true, bg: colPanel}, seg{text: "description", fg: colTextMuted, bg: colPanel})}
-	text := desc
-	if text == "" {
-		text = "(no description set)"
-	}
-	for _, line := range strings.Split(text, "\n") {
-		head = append(head, bgRow(width, colPanel, seg{text: "  " + line, fg: colText, bg: colPanel}))
+	if aiLoading {
+		frame := spinnerFrames[spinnerFrame%len(spinnerFrames)]
+		head = append(head, bgRow(width, colPanel, seg{text: "  " + frame + " generating…", fg: colMagenta, bold: true, bg: colPanel}))
+	} else {
+		text := desc
+		if text == "" {
+			text = "(no description set)"
+		}
+		for _, line := range strings.Split(text, "\n") {
+			head = append(head, bgRow(width, colPanel, seg{text: "  " + line, fg: colText, bg: colPanel}))
+		}
 	}
 	head = append(head, bgRow(width, colPanel, seg{text: strings.Repeat("─", width), fg: colBorder, bg: colPanel}))
 	return head
