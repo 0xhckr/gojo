@@ -41,7 +41,7 @@ func padNum(n, digits int) string {
 }
 
 func lineNumText(r diffRow, digits int) string {
-	return padNum(r.oldNum, digits) + " " + padNum(r.newNum, digits) + " " + r.sign
+	return padNum(r.oldNum, digits) + " " + padNum(r.newNum, digits) + " "
 }
 
 var statusColors = map[jj.StatusKind]lipgloss.TerminalColor{
@@ -201,7 +201,6 @@ func renderDiffRow(width, gutterWidth, digits int, r diffRow, barColor lipgloss.
 		return bgRow(width, diffHunkHeaderBg, seg{text: "  " + r.hunkText, fg: diffHunkHeaderFg})
 
 	default:
-		gutter := lineNumText(r, digits)
 		var lineFg, lineBg lipgloss.TerminalColor
 		switch r.lineKind {
 		case "addition":
@@ -212,15 +211,20 @@ func renderDiffRow(width, gutterWidth, digits int, r diffRow, barColor lipgloss.
 			lineFg = diffContextFg
 		}
 
-		// 1-column cursor gutter: a ┃ heavy vertical bar when the line is in
-		// the focused chunk (bright on the cursor line, dim on the rest), else a
-		// plain space so alignment stays consistent.
-		gutterSeg := seg{text: " "}
+		// Line numbers.
+		gutter := lineNumText(r, digits)
+
+		// Left cursor gutter: ┃ before line numbers. Bright on cursor, dim
+		// on chunk, panel-coloured (invisible) elsewhere.
+		leftBar := seg{text: "┃", fg: colPanel, bg: lineBg}
 		if barColor != nil {
-			gutterSeg = seg{text: "┃", fg: barColor}
+			leftBar = seg{text: "┃", fg: barColor, bg: lineBg}
 		}
-		segs := []seg{gutterSeg}
-		segs = append(segs, seg{text: gutter, fg: diffLineNumber})
+
+		// Right cursor gutter: ┃ after line numbers, always panel-coloured.
+		rightBar := seg{text: "┃", fg: colPanel, bg: lineBg}
+
+		segs := []seg{leftBar, {text: gutter, fg: diffLineNumber, bg: lineBg}, rightBar, {text: r.sign, fg: lineFg, bg: lineBg}}
 		for _, s := range r.spans {
 			// Syntax-highlight colors from chroma are truecolor hex; fall back
 			// to the line's kind color when a token has no color.
