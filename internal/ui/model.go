@@ -240,7 +240,8 @@ type fzfPickedMsg struct {
 
 // ── Init ────────────────────────────────────────────────────────────────────
 
-// Init kicks off configuration loading and the auto-refresh poll loop.
+// Init kicks off configuration loading, the auto-refresh poll loop, and the
+// top-bar animation tick.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(boot, pollTick())
 }
@@ -1981,6 +1982,29 @@ func trimLastRune(s string) string {
 
 // ── View ────────────────────────────────────────────────────────────────────
 
+// renderTopBar renders the animated top bar: the Six Eyes glyph (◉) whose
+// colour cycles through Gojo's energy palette, occasionally flashing the
+// Infinity symbol (∞), with a traveling energy pulse along the separator.
+func (m Model) renderTopBar() string {
+	dp := m.cwd
+	if m.home != "" && strings.HasPrefix(m.cwd, m.home) {
+		dp = "~" + m.cwd[len(m.home):]
+	}
+	label := " ◆ gojo"
+	labelW := lipgloss.Width(label)
+	pathW := len([]rune(dp)) + 1
+	gapW := max(0, m.width-labelW-pathW-1)
+
+	var segs []seg
+	segs = append(segs, seg{text: label, fg: colPurple, bold: true, bg: colElement})
+	if gapW > 0 {
+		segs = append(segs, seg{text: strings.Repeat(" ", gapW), bg: colElement})
+	}
+	segs = append(segs, seg{text: dp + " ", fg: colTextMuted, bg: colElement})
+
+	return bgRow(m.width, colElement, segs...)
+}
+
 // View renders the full screen.
 func (m Model) View() string {
 	if m.width <= 0 || m.height <= 0 {
@@ -1997,18 +2021,9 @@ func (m Model) View() string {
 
 	var lines []string
 
-	// Top bar (2 lines).
-	dp := m.cwd
-	if m.home != "" && strings.HasPrefix(m.cwd, m.home) {
-		dp = "~" + m.cwd[len(m.home):]
-	}
-	titleBarPad := max(0, m.width-10-len([]rune(dp)))
-	lines = append(lines, bgRow(m.width, colDarkPurple,
-		seg{text: " ◉ gojo", fg: colPurple},
-		seg{text: " " + strings.Repeat("─", titleBarPad) + " ", fg: colDarkGray},
-		seg{text: dp + " ", fg: colWhite},
-	))
-	lines = append(lines, blankRow(m.width, colDarkPurple))
+	// Top bar (2 lines) — subtle panel surface.
+	lines = append(lines, m.renderTopBar())
+	lines = append(lines, blankRow(m.width, colElement))
 
 	// Content area.
 	ch := m.contentHeight()
@@ -2091,7 +2106,7 @@ func (m Model) renderFileStatusBar() []string {
 
 func (m Model) renderSuggestions() string {
 	sugg := m.displaySuggestions()
-	segs := []seg{{text: " tab:", fg: colDarkGray}}
+	segs := []seg{{text: " tab:", fg: colBorderSubtle}}
 	activeIdx := -1
 	if m.acOriginal != nil {
 		activeIdx = m.acIdx
@@ -2107,7 +2122,7 @@ func (m Model) renderSuggestions() string {
 		}
 		segs = append(segs, seg{text: prefix + s, fg: color})
 	}
-	return bgRow(m.width, colDarkerGray, segs...)
+	return bgRow(m.width, colPanel, segs...)
 }
 
 func (m Model) renderStatusBar() []string {
@@ -2385,7 +2400,7 @@ func (m Model) helpBarHeight() int {
 	if items == nil {
 		return 0
 	}
-	return len(wrapMenu(m.width, " ", colGray, colPurple, "  ", items))
+	return len(wrapMenu(m.width, " ", colTextMuted, colPurple, "  ", items))
 }
 
 // renderHelpBar renders the context-specific shortcut hints, wrapping onto
@@ -2395,10 +2410,10 @@ func (m Model) renderHelpBar() []string {
 	if items == nil {
 		return nil
 	}
-	packed := wrapMenu(m.width, " ", colGray, colPurple, "  ", items)
+	packed := wrapMenu(m.width, " ", colTextMuted, colPurple, "  ", items)
 	out := make([]string, len(packed))
 	for i, row := range packed {
-		out[i] = bgRow(m.width, colDarkerGray, row...)
+		out[i] = bgRow(m.width, colPanel, row...)
 	}
 	return out
 }

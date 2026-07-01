@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 
 	"gojo/internal/jj"
@@ -62,14 +64,31 @@ func logWindow(entries []jj.LogEntry, cursor, offset, availableLines int) (int, 
 	return off, end
 }
 
-// renderLog produces up to height lines for the commit log.
+// scrollbarThumb computes the [start, end) range of the scrollbar thumb within
+// a track of `trackH` lines, given the total item count, the first visible
+// offset, and the number of visible lines. Returns (-1, -1) when no scrollbar
+// is needed (everything fits).
+func scrollbarThumb(total, off, visLines, trackH int) (int, int) {
+	if total <= visLines || total <= 0 || trackH <= 0 {
+		return -1, -1
+	}
+	thumb := trackH * visLines / total
+	if thumb < 1 {
+		thumb = 1
+	}
+	maxStart := trackH - thumb
+	start := maxStart * off / max(1, total-visLines)
+	return start, start + thumb
+}
+
+// renderLog produces up to height lines for the commit log. The content area
+// gets a subtle panel background, and a scrollbar indicator on the right edge
+// shows position when the log overflows.
 func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView, sq squashView) []string {
 	if len(entries) == 0 {
-		return padLines([]string{plainRow(width, seg{text: "  no revisions found", fg: colGray})}, height)
+		return padLines([]string{bgRow(width, colPanel, seg{text: "  no revisions found", fg: colTextMuted})}, height)
 	}
 
-	// In rebase / squash mode the destination indicator is the focused row that
-	// drives scrolling and carries the cursor highlight.
 	focus := cursor
 	if rb.active {
 		focus = rb.dest
@@ -81,66 +100,72 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 	availableLines := height - 1 // top padding
 	off, end := logWindow(entries, focus, offset, availableLines)
 
+	// Scrollbar: reserve 1 column on the right when content overflows.
+	scrollW := width
+	thumbStart, thumbEnd := scrollbarThumb(len(entries), off, end-off, availableLines)
+	hasBar := thumbStart >= 0
+	if hasBar {
+		scrollW--
+	}
+
 	var lines []string
-	lines = append(lines, "") // top padding
+	lines = append(lines, blankRow(width, colPanel)) // top padding
 
 	for i := off; i < end; i++ {
 		e := entries[i]
 		highlighted := i == focus
-		var bg lipgloss.TerminalColor
+		var bg lipgloss.TerminalColor = colPanel
 		if highlighted {
-			bg = colDarkPurple
+			bg = colElement
 		}
 
 		// Header line.
 		var hs []seg
-		hs = append(hs, seg{text: e.HeaderPrefix, fg: colDarkGray})
-		hs = append(hs, seg{text: " "})
+		hs = append(hs, seg{text: " ", bg: bg})
+		hs = append(hs, seg{text: e.HeaderPrefix, fg: colBorderSubtle, bg: bg})
+		hs = append(hs, seg{text: " ", bg: bg})
 		if e.ChangeIDPrefixLen > 0 && e.ChangeIDPrefixLen < len(e.ChangeID) {
-			hs = append(hs, seg{text: e.ChangeID[:e.ChangeIDPrefixLen], fg: colMagenta, bold: true})
-			hs = append(hs, seg{text: e.ChangeID[e.ChangeIDPrefixLen:], fg: colPurple, bold: true})
+			hs = append(hs, seg{text: e.ChangeID[:e.ChangeIDPrefixLen], fg: colMagenta, bold: true, bg: bg})
+			hs = append(hs, seg{text: e.ChangeID[e.ChangeIDPrefixLen:], fg: colPurple, bold: true, bg: bg})
 		} else {
-			hs = append(hs, seg{text: e.ChangeID, fg: colPurple, bold: true})
+			hs = append(hs, seg{text: e.ChangeID, fg: colPurple, bold: true, bg: bg})
 		}
-		hs = append(hs, seg{text: " "})
-		hs = append(hs, seg{text: e.Authors, fg: colBlue})
-		hs = append(hs, seg{text: " "})
-		hs = append(hs, seg{text: e.Date, fg: colGray})
-		hs = append(hs, seg{text: " "})
-		hs = append(hs, seg{text: e.CommitID, fg: colGray})
+		hs = append(hs, seg{text: " ", bg: bg})
+		hs = append(hs, seg{text: e.Authors, fg: colBlue, bg: bg})
+		hs = append(hs, seg{text: " ", bg: bg})
+		hs = append(hs, seg{text: e.Date, fg: colTextMuted, bg: bg})
+		hs = append(hs, seg{text: " ", bg: bg})
+		hs = append(hs, seg{text: e.CommitID, fg: colTextMuted, bg: bg})
 		for _, bm := range e.Bookmarks {
-			hs = append(hs, seg{text: " "})
-			hs = append(hs, seg{text: bm, fg: colGreen, bold: true})
+			hs = append(hs, seg{text: " ", bg: bg})
+			hs = append(hs, seg{text: bm, fg: colGreen, bold: true, bg: bg})
 		}
-		// Rebase-mode markers: source (the picked-up commit) and destination
-		// (where it will land, labelled with the current placement).
 		if rb.active && i == rb.source {
 			tag := "  ● moving"
 			if rb.subtree {
 				tag = "  ● moving +descendants"
 			}
-			hs = append(hs, seg{text: tag, fg: colMagenta, bold: true})
+			hs = append(hs, seg{text: tag, fg: colMagenta, bold: true, bg: bg})
 		}
 		if rb.active && i == rb.dest {
-			hs = append(hs, seg{text: "  ◀ " + rebasePlaceLabels[rb.place], fg: colYellow, bold: true})
+			hs = append(hs, seg{text: "  ◀ " + rebasePlaceLabels[rb.place], fg: colYellow, bold: true, bg: bg})
 		}
-		// Squash-mode markers: source (the commit being folded in) and
-		// destination (the commit it gets squashed into).
 		if sq.active && i == sq.source {
-			hs = append(hs, seg{text: "  ● squashing", fg: colMagenta, bold: true})
+			hs = append(hs, seg{text: "  ● squashing", fg: colMagenta, bold: true, bg: bg})
 		}
 		if sq.active && i == sq.dest {
-			hs = append(hs, seg{text: "  ◀ into", fg: colYellow, bold: true})
+			hs = append(hs, seg{text: "  ◀ into", fg: colYellow, bold: true, bg: bg})
 		}
-		lines = append(lines, renderRow(width, bg, hs))
+		lines = append(lines, renderRowWithBar(scrollW, width, bg, hasBar, 0, thumbStart, thumbEnd, hs))
 
 		// Body line.
 		var bs []seg
-		bs = append(bs, seg{text: e.BodyPrefix, fg: colDarkGray})
-		bs = append(bs, seg{text: " "})
+		bs = append(bs, seg{text: " ", bg: bg})
+		bs = append(bs, seg{text: e.BodyPrefix, fg: colBorderSubtle, bg: bg})
+		bs = append(bs, seg{text: " ", bg: bg})
 		if aiLoading[e.ChangeID] {
 			frame := spinnerFrames[spinnerFrame%len(spinnerFrames)]
-			bs = append(bs, seg{text: frame + " generating…", fg: colMagenta, bold: true})
+			bs = append(bs, seg{text: frame + " generating…", fg: colMagenta, bold: true, bg: bg})
 		} else {
 			subject := e.Subject
 			if subject == "" {
@@ -148,23 +173,52 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 			}
 			switch {
 			case e.IsWorkingCopy:
-				bs = append(bs, seg{text: subject, fg: colYellow, bold: true})
+				bs = append(bs, seg{text: subject, fg: colYellow, bold: true, bg: bg})
 			case e.IsImmutable:
-				bs = append(bs, seg{text: subject, faint: true})
+				bs = append(bs, seg{text: subject, fg: colTextMuted, faint: true, bg: bg})
 			default:
-				bs = append(bs, seg{text: subject, fg: colWhite})
+				bs = append(bs, seg{text: subject, fg: colText, bg: bg})
 			}
 		}
-		lines = append(lines, renderRow(width, bg, bs))
+		lines = append(lines, renderRowWithBar(scrollW, width, bg, hasBar, 1, thumbStart, thumbEnd, bs))
 
-		// Graph-only edge lines (merge connectors, elided "~" rows) trail the
-		// commit they belong to — jj always draws them below a node's text.
+		// Graph-only edge lines (merge connectors, elided "~" rows) always use
+		// the panel background, not the selection highlight.
+		edgeBg := colPanel
+		edgeIdx := 2
 		for _, edge := range e.EdgeLines {
-			lines = append(lines, plainRow(width, seg{text: edge, fg: colDarkGray}))
+			lines = append(lines, renderRowWithBar(scrollW, width, edgeBg, hasBar, edgeIdx, thumbStart, thumbEnd, []seg{{text: " ", bg: edgeBg}, {text: edge, fg: colBorderSubtle, bg: edgeBg}}))
+			edgeIdx++
 		}
 	}
 
 	return padLines(lines, height)
+}
+
+// renderRowWithBar renders a content row to scrollW columns, then appends a
+// scrollbar column (track or thumb) to fill the full width. lineIdx is the
+// 0-based index within the content area (excluding top padding), used to
+// determine thumb position.
+func renderRowWithBar(scrollW, fullW int, bg lipgloss.TerminalColor, hasBar bool, lineIdx, thumbStart, thumbEnd int, segs []seg) string {
+	row := renderRow(scrollW, bg, segs)
+	if !hasBar {
+		return bgRow(fullW, bg, segs...)
+	}
+	// Scrollbar column.
+	var sbSeg seg
+	if lineIdx >= thumbStart && lineIdx < thumbEnd {
+		sbSeg = seg{text: "┃", fg: colBorderActive, bg: bg}
+	} else {
+		sbSeg = seg{text: "│", fg: colBorderSubtle, bg: bg}
+	}
+	scrollbar := renderSegs([]seg{sbSeg})
+	// Pad row to scrollW if needed.
+	rw := lipgloss.Width(row)
+	if rw < scrollW {
+		row += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", scrollW-rw))
+	}
+	result := row + scrollbar
+	return clip(result, fullW)
 }
 
 // renderRow renders a row with an optional background fill.

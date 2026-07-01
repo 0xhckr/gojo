@@ -79,7 +79,7 @@ func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow
 		titleLine += "  loading…"
 	}
 	titleLine += "  (enter/q to close) "
-	out := []string{bgRow(width, colDarkPurple, seg{text: titleLine, fg: colWhite})}
+	out := []string{bgRow(width, colElement, seg{text: titleLine, fg: colText})}
 
 	contentH := height - len(out)
 	if contentH < 0 {
@@ -107,7 +107,7 @@ func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow
 		}
 		idx := i - len(head)
 		if rawLines != nil {
-			content = append(content, plainRow(width, seg{text: " ", fg: nil}, seg{text: rawLines[idx], fg: colWhite}))
+			content = append(content, plainRow(width, seg{text: " ", fg: nil}, seg{text: rawLines[idx], fg: colText}))
 		} else {
 			content = append(content, renderDiffRow(width, gutterWidth, digits, rows[idx], cursorBar(rows[idx], i, cursorBodyRow, chunkRows)))
 		}
@@ -121,7 +121,7 @@ func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow
 // buildStatusHead renders the status header, items, and separator — the small
 // fixed-size top of the scrollable body.
 func buildStatusHead(width int, status []jj.StatusEntry) []string {
-	head := []string{plainRow(width, seg{text: " status", fg: colGray})}
+	head := []string{plainRow(width, seg{text: "┃ ", fg: colCyan, bold: true}, seg{text: "status", fg: colGray})}
 	if len(status) == 0 {
 		head = append(head, plainRow(width, seg{text: "  (no changes)", fg: colGray}))
 	} else {
@@ -131,12 +131,13 @@ func buildStatusHead(width int, status []jj.StatusEntry) []string {
 				color = colGray
 			}
 			head = append(head, plainRow(width,
-				seg{text: "  " + statusSym(e.Status) + " ", fg: color},
+				seg{text: "┃ ", fg: color},
+				seg{text: statusSym(e.Status) + " ", fg: color},
 				seg{text: e.Path, fg: color},
 			))
 		}
 	}
-	head = append(head, plainRow(width, seg{text: strings.Repeat("─", width), fg: diffBorder}))
+	head = append(head, plainRow(width, seg{text: strings.Repeat("─", width), fg: colBorder}))
 	return head
 }
 
@@ -172,7 +173,7 @@ func renderDiffRow(width, gutterWidth, digits int, r diffRow, barColor lipgloss.
 		if r.prevPath != "" {
 			label = r.prevPath + " → " + r.path + "  (" + r.changeType + ")"
 		}
-		return bgRow(width, diffFileHeaderBg, seg{text: "  " + label, fg: diffFileHeaderFg, bold: true})
+		return bgRow(width, diffFileHeaderBg, seg{text: "┃ ", fg: diffFileHeaderFg, bold: true}, seg{text: label, fg: diffFileHeaderFg, bold: true})
 
 	case rowHunkHeader:
 		return bgRow(width, diffHunkHeaderBg, seg{text: "  " + r.hunkText, fg: diffHunkHeaderFg})
@@ -189,12 +190,12 @@ func renderDiffRow(width, gutterWidth, digits int, r diffRow, barColor lipgloss.
 			lineFg = diffContextFg
 		}
 
-		// 1-column cursor gutter: a ▌ left-half-block glyph when the line is in
+		// 1-column cursor gutter: a ┃ heavy vertical bar when the line is in
 		// the focused chunk (bright on the cursor line, dim on the rest), else a
 		// plain space so alignment stays consistent.
 		gutterSeg := seg{text: " "}
 		if barColor != nil {
-			gutterSeg = seg{text: "▌", fg: barColor}
+			gutterSeg = seg{text: "┃", fg: barColor}
 		}
 		segs := []seg{gutterSeg}
 		segs = append(segs, seg{text: gutter, fg: diffLineNumber})
@@ -209,13 +210,13 @@ func renderDiffRow(width, gutterWidth, digits int, r diffRow, barColor lipgloss.
 		}
 		_ = gutterWidth
 		if lineBg == nil {
-			return plainRow(width, segs...)
+			return bgRow(width, colPanel, segs...)
 		}
 		return bgRow(width, lineBg, segs...)
 	}
 }
 
-// cursorBar picks the foreground color for the ▌ cursor glyph on a given
+// cursorBar picks the foreground color for the ┃ cursor glyph on a given
 // content line. The focused line gets a bright color; other lines in the same
 // chunk get a dim tint; everything else gets nothing.
 func cursorBar(r diffRow, bodyRow, cursorBodyRow int, chunkRows map[int]bool) lipgloss.TerminalColor {

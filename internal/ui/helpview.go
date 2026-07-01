@@ -174,24 +174,24 @@ func renderHelp(width, height, scrollY int) []string {
 	titleLeft := " gojo help"
 	titleRight := fmt.Sprintf("(%d-%d/%d) ?/q close ", clampedY+1, min(clampedY+contentH, total), total)
 	titlePad := max(1, width-len(titleLeft)-len(titleRight))
-	title := bgRow(width, colDarkPurple, seg{text: titleLeft + strings.Repeat(" ", titlePad) + titleRight, fg: colPurple, bg: colDarkPurple})
+	title := bgRow(width, colElement, seg{text: titleLeft + strings.Repeat(" ", titlePad) + titleRight, fg: colPurple, bg: colElement})
 
 	out := []string{title}
 
 	for _, row := range sliced {
 		switch row.kind {
 		case helpBlank:
-			out = append(out, "")
+			out = append(out, blankRow(width, colPanel))
 		case helpTitle:
-			out = append(out, plainRow(width, seg{text: "  " + row.section.title, fg: row.section.color}))
+			out = append(out, bgRow(width, colPanel, seg{text: "┃ ", fg: row.section.color, bold: true, bg: colPanel}, seg{text: row.section.title, fg: row.section.color, bg: colPanel}))
 		case helpSep:
 			sep := "  " + strings.Repeat("─", min(width-4, 30))
-			out = append(out, plainRow(width, seg{text: sep, fg: colDarkGray}))
+			out = append(out, bgRow(width, colPanel, seg{text: sep, fg: colBorder, bg: colPanel}))
 		case helpBindingRow:
 			b := row.binding
 			keyPad := max(0, helpKeyCol-len([]rune(b.key)))
 			line := "    " + b.key + strings.Repeat(" ", keyPad) + b.desc
-			out = append(out, plainRow(width, seg{text: line, fg: colGray}))
+			out = append(out, bgRow(width, colPanel, seg{text: line, fg: colTextMuted, bg: colPanel}))
 		}
 	}
 

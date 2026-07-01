@@ -36,7 +36,7 @@
             # Hash of the downloaded Go modules. When go.sum changes, run
             # `nix build` once and replace this with the "got:" value.
             # Stable across systems thanks to proxyVendor above.
-            vendorHash = "sha256-Ln1ztajyLuXmMJet53FOAfFIMi0t1Qmp/9oAK2TAo+0=";
+            vendorHash = "sha256-K81au2jpYoRcKvGIGwnwXkXLpPK7NBfuLxb9PinC6VM=";
 
             # gojo shells out to `jj` at runtime; keep it on PATH.
             nativeBuildInputs = [ pkgs.makeWrapper ];
