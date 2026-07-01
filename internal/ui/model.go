@@ -1342,24 +1342,29 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	ch := m.contentHeight()
-	trackStartY := contentTopBarHeight + 1 // +1 for the view's title/padding row
-	trackH := ch - 1
-
-	// Check if the mouse is in the scrollbar column range.
-	if msg.X < m.width-scrollbarWidth || msg.X >= m.width {
-		// Not on the scrollbar. Release any active drag.
-		if msg.Action == tea.MouseActionRelease {
+	// Once a drag is in progress, keep tracking the mouse Y regardless of X
+	// so the user can drift left/right without the drag slipping off the
+	// narrow scrollbar column. applyScrollBarDrag clamps Y to the track.
+	// Only a release ends the drag.
+	if m.scrollDragging {
+		switch msg.Action {
+		case tea.MouseActionMotion:
+			return m.applyScrollBarDrag(msg.Y)
+		case tea.MouseActionRelease:
 			m.scrollDragging = false
 		}
 		return m, nil
 	}
 
-	// Check if the mouse is in the scrollbar track row range.
+	ch := m.contentHeight()
+	trackStartY := contentTopBarHeight + 1 // +1 for the view's title/padding row
+	trackH := ch - 1
+
+	// Not dragging: a press must land inside the scrollbar to start one.
+	if msg.X < m.width-scrollbarWidth || msg.X >= m.width {
+		return m, nil
+	}
 	if msg.Y < trackStartY || msg.Y >= trackStartY+trackH || trackH < 1 {
-		if msg.Action == tea.MouseActionRelease {
-			m.scrollDragging = false
-		}
 		return m, nil
 	}
 
@@ -1367,10 +1372,6 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case tea.MouseActionPress:
 		if msg.Button == tea.MouseButtonLeft {
 			m.scrollDragging = true
-			return m.applyScrollBarDrag(msg.Y)
-		}
-	case tea.MouseActionMotion:
-		if m.scrollDragging {
 			return m.applyScrollBarDrag(msg.Y)
 		}
 	case tea.MouseActionRelease:
