@@ -20,7 +20,7 @@ A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), b
 - **Diff panel** — file status summary + syntax-highlighted diff for any commit
 - **Bookmark management** — create, delete, move, rename, set, track, untrack, and list bookmarks
 - **Git integration** — fetch, push, and remote management from within the TUI
-- **AI commit messages** — generate a description from a commit's diff via OpenRouter
+- **AI commit messages** — generate a description from a commit's diff via any OpenAI-compatible API
 - **Undo / redo** — one-key `jj undo` / `jj redo`
 - **Graph rendering** — native jj graph output with styled nodes (@/○/◆) and edges
 
@@ -68,11 +68,15 @@ may also be placed under a `[tools.gojo]` section in `~/.config/jj/config.toml`
 (the standalone gojo file takes precedence).
 
 ```toml
-# OpenRouter API key for AI-generated commit messages (optional)
-openrouter_api_key = "sk-or-..."
+# API key for AI-generated commit messages (optional)
+ai_api_key = "sk-or-..."
+
+# Base URL of an OpenAI-compatible chat-completions endpoint
+# (defaults to https://openrouter.ai/api/v1)
+ai_base_url = "https://openrouter.ai/api/v1"
 
 # Model to use
-openrouter_model = "anthropic/claude-sonnet-4"
+ai_model = "anthropic/claude-sonnet-4"
 
 # Custom prompt template for AI commit messages (optional)
 commit_prompt = "You are a software developer. Write a clear, concise commit message given the diff: "
@@ -163,7 +167,7 @@ internal/
   jj/
     jj.go               jj CLI wrapper + log/status parsers
     config.go           config + TOML loader
-    ai.go               OpenRouter commit-message generation
+    ai.go               AI commit-message generation (OpenAI-compatible API)
   ui/
     model.go            Bubble Tea model: state, update, view, keybindings
     render.go           styled-line rendering helpers (Lip Gloss)
@@ -184,7 +188,7 @@ Everything is pure Go — no native FFI, no Node runtime:
 - [lipgloss](https://github.com/charmbracelet/lipgloss) — styling/layout
 - [chroma](https://github.com/alecthomas/chroma) — diff syntax highlighting
 
-The TOML config parser, unified-diff parser, and OpenRouter client are
+The TOML config parser, unified-diff parser, and AI client are
 implemented in-tree with the standard library.
 
 ## License

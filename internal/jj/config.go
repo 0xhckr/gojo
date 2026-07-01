@@ -11,17 +11,28 @@ import (
 
 // Config holds resolved runtime configuration.
 type Config struct {
-	JJPath           string
-	RepoRoot         string
-	OpenRouterAPIKey string
-	OpenRouterModel  string
-	CommitPrompt     string
+	JJPath   string
+	RepoRoot string
+
+	// AI configuration — any OpenAI-compatible chat-completions endpoint.
+	// AIAPIKey is the bearer token, AIBaseURL is the API root (defaults to
+	// OpenRouter), AIModel is the model name.
+	AIAPIKey     string
+	AIBaseURL    string
+	AIModel      string
+	CommitPrompt string
 
 	// BlameScrollMargin is the minimum number of lines kept between the
 	// cursor and the bottom of the file-view blame viewport. 0 lets the
 	// cursor reach the last visible line; the default is 8.
 	BlameScrollMargin int
 }
+
+// DefaultAIBaseURL is used when ai_base_url / openrouter_base_url is unset.
+const DefaultAIBaseURL = "https://openrouter.ai/api/v1"
+
+// DefaultAIModel is used when ai_model / openrouter_model is unset.
+const DefaultAIModel = "anthropic/claude-sonnet-4"
 
 // DefaultBlameScrollMargin is used when blame_scroll_margin is unset.
 const DefaultBlameScrollMargin = 8
@@ -62,10 +73,12 @@ func applyTOMLConfig(cfg *Config, raw string, section string) {
 		}
 
 		switch key {
-		case "openrouter_api_key":
-			cfg.OpenRouterAPIKey = val
-		case "openrouter_model":
-			cfg.OpenRouterModel = val
+		case "ai_api_key", "openrouter_api_key":
+			cfg.AIAPIKey = val
+		case "ai_base_url", "openrouter_base_url":
+			cfg.AIBaseURL = val
+		case "ai_model", "openrouter_model":
+			cfg.AIModel = val
 		case "commit_prompt":
 			cfg.CommitPrompt = val
 		case "blame_scroll_margin":

@@ -15,7 +15,7 @@ internal/
   jj/
     jj.go               — Runner: runs jj CLI commands, parses log/status output
     config.go           — Config struct, repo-root discovery, minimal TOML loader
-    ai.go               — AIDescribe: OpenRouter chat-completions client (net/http)
+    ai.go               — AIDescribe: OpenAI-compatible chat-completions client (net/http)
   ui/
     model.go            — Bubble Tea Model: state, Update (msgs + keys), View, commands
     render.go           — seg/renderSegs/clip/bgRow: styled-line composition helpers
