@@ -65,10 +65,10 @@ func logWindow(entries []jj.LogEntry, cursor, offset, availableLines int) (int, 
 }
 
 // scrollbarThumb computes the [start, end) range of the scrollbar thumb within
-// a track of `trackH` lines, given the total item count, the first visible
-// offset, and the number of visible lines. Returns (-1, -1) when no scrollbar
-// is needed (everything fits).
-func scrollbarThumb(total, off, visLines, trackH int) (int, int) {
+// a track of `trackH` lines, given the total content lines, the first visible
+// line offset, and the number of visible lines. Returns (-1, -1) when no
+// scrollbar is needed (everything fits).
+func scrollbarThumb(total, firstVis, visLines, trackH int) (int, int) {
 	if total <= visLines || total <= 0 || trackH <= 0 {
 		return -1, -1
 	}
@@ -77,7 +77,7 @@ func scrollbarThumb(total, off, visLines, trackH int) (int, int) {
 		thumb = 1
 	}
 	maxStart := trackH - thumb
-	start := maxStart * off / max(1, total-visLines)
+	start := maxStart * firstVis / max(1, total-visLines)
 	return start, start + thumb
 }
 
@@ -100,9 +100,25 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 	availableLines := height - 1 // top padding
 	off, end := logWindow(entries, focus, offset, availableLines)
 
+	// Compute total and visible line counts for scrollbar proportioning
+	// (commits have variable height — 2 + edge lines each). Also compute
+	// the line offset of the first visible entry so the thumb position
+	// reflects scroll position accurately.
+	var totalLines, visLines, firstVisLine int
+	for i := range entries {
+		cl := commitLines(entries[i])
+		if i < off {
+			firstVisLine += cl
+		}
+		if i >= off && i < end {
+			visLines += cl
+		}
+		totalLines += cl
+	}
+
 	// Scrollbar: reserve 1 column on the right when content overflows.
 	scrollW := width
-	thumbStart, thumbEnd := scrollbarThumb(len(entries), off, end-off, availableLines)
+	thumbStart, thumbEnd := scrollbarThumb(totalLines, firstVisLine, visLines, availableLines)
 	hasBar := thumbStart >= 0
 	if hasBar {
 		scrollW--
@@ -110,6 +126,8 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 
 	var lines []string
 	lines = append(lines, blankRow(width, colPanel)) // top padding
+
+	contentLine := 0 // 0-based line index within the content area (below top padding)
 
 	for i := off; i < end; i++ {
 		e := entries[i]
@@ -156,7 +174,8 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 		if sq.active && i == sq.dest {
 			hs = append(hs, seg{text: "  ◀ into", fg: colYellow, bold: true, bg: bg})
 		}
-		lines = append(lines, renderRowWithBar(scrollW, width, bg, hasBar, 0, thumbStart, thumbEnd, hs))
+		lines = append(lines, renderRowWithBar(scrollW, width, bg, hasBar, contentLine, thumbStart, thumbEnd, hs))
+		contentLine++
 
 		// Body line.
 		var bs []seg
@@ -180,15 +199,15 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 				bs = append(bs, seg{text: subject, fg: colText, bg: bg})
 			}
 		}
-		lines = append(lines, renderRowWithBar(scrollW, width, bg, hasBar, 1, thumbStart, thumbEnd, bs))
+		lines = append(lines, renderRowWithBar(scrollW, width, bg, hasBar, contentLine, thumbStart, thumbEnd, bs))
+		contentLine++
 
 		// Graph-only edge lines (merge connectors, elided "~" rows) always use
 		// the panel background, not the selection highlight.
 		edgeBg := colPanel
-		edgeIdx := 2
 		for _, edge := range e.EdgeLines {
-			lines = append(lines, renderRowWithBar(scrollW, width, edgeBg, hasBar, edgeIdx, thumbStart, thumbEnd, []seg{{text: " ", bg: edgeBg}, {text: edge, fg: colBorderSubtle, bg: edgeBg}}))
-			edgeIdx++
+			lines = append(lines, renderRowWithBar(scrollW, width, edgeBg, hasBar, contentLine, thumbStart, thumbEnd, []seg{{text: " ", bg: edgeBg}, {text: edge, fg: colBorderSubtle, bg: edgeBg}}))
+			contentLine++
 		}
 	}
 
@@ -215,10 +234,40 @@ func renderRowWithBar(scrollW, fullW int, bg lipgloss.TerminalColor, hasBar bool
 	// Pad row to scrollW if needed.
 	rw := lipgloss.Width(row)
 	if rw < scrollW {
-		row += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", scrollW-rw))
+		if bg != nil {
+			row += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", scrollW-rw))
+		} else {
+			row += strings.Repeat(" ", scrollW-rw)
+		}
 	}
 	result := row + scrollbar
 	return clip(result, fullW)
+}
+
+// renderRowWithBarFromString is like renderRowWithBar but takes a pre-rendered
+// string instead of []seg. Used by the diff panel where rows are already
+// styled with their own backgrounds.
+func renderRowWithBarFromString(scrollW, fullW int, bg lipgloss.TerminalColor, hasBar bool, lineIdx, thumbStart, thumbEnd int, row string) string {
+	if !hasBar {
+		return clip(row, fullW)
+	}
+	row = clip(row, scrollW)
+	var sbSeg seg
+	if lineIdx >= thumbStart && lineIdx < thumbEnd {
+		sbSeg = seg{text: "┃", fg: colBorderActive, bg: bg}
+	} else {
+		sbSeg = seg{text: "│", fg: colBorderSubtle, bg: bg}
+	}
+	scrollbar := renderSegs([]seg{sbSeg})
+	rw := lipgloss.Width(row)
+	if rw < scrollW {
+		if bg != nil {
+			row += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", scrollW-rw))
+		} else {
+			row += strings.Repeat(" ", scrollW-rw)
+		}
+	}
+	return clip(row+scrollbar, fullW)
 }
 
 // renderRow renders a row with an optional background fill.

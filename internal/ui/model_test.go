@@ -151,7 +151,7 @@ func TestViewBootAndLayout(t *testing.T) {
 	}
 
 	plain := ansi.Strip(view)
-	if !strings.Contains(plain, "◉ gojo") {
+	if !strings.Contains(plain, "◆ gojo") {
 		t.Error("top bar missing app name")
 	}
 	// Help bar keybinds present.

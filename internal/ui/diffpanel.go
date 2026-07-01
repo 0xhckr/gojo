@@ -87,12 +87,19 @@ func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow
 	}
 
 	// The scrollable body is: status header + status items + separator + diff.
-	// The status block is small and built in full; diff rows (potentially huge)
-	// are styled only for the visible window, so scroll cost stays constant.
 	head := buildStatusHead(width, status)
 	bodyTotal := len(head) + diffBodyLen(rows, rawContent)
 
 	start, end := visibleRange(scrollY, contentH, bodyTotal)
+
+	// Scrollbar: reserve 1 column on the right when content overflows.
+	scrollW := width
+	thumbStart, thumbEnd := scrollbarThumb(bodyTotal, start, end-start, contentH)
+	hasBar := thumbStart >= 0
+	if hasBar {
+		scrollW--
+	}
+
 	gutterWidth := digits*2 + 4
 	var rawLines []string
 	if len(rows) == 0 && rawContent != "" {
@@ -101,15 +108,30 @@ func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow
 
 	var content []string
 	for i := start; i < end; i++ {
+		rowLine := i - start // 0-based index within the visible window
 		if i < len(head) {
-			content = append(content, head[i])
+			content = append(content, renderRowWithBarFromString(scrollW, width, colPanel, hasBar, rowLine, thumbStart, thumbEnd, head[i]))
 			continue
 		}
 		idx := i - len(head)
 		if rawLines != nil {
-			content = append(content, plainRow(width, seg{text: " ", fg: nil}, seg{text: rawLines[idx], fg: colText}))
+			rowStr := plainRow(width, seg{text: " ", fg: nil}, seg{text: rawLines[idx], fg: colText})
+			content = append(content, renderRowWithBarFromString(scrollW, width, colPanel, hasBar, rowLine, thumbStart, thumbEnd, rowStr))
 		} else {
-			content = append(content, renderDiffRow(width, gutterWidth, digits, rows[idx], cursorBar(rows[idx], i, cursorBodyRow, chunkRows)))
+			r := rows[idx]
+			var rowBg lipgloss.TerminalColor = colPanel
+			switch {
+			case r.kind == rowFileHeader:
+				rowBg = diffFileHeaderBg
+			case r.kind == rowHunkHeader:
+				rowBg = diffHunkHeaderBg
+			case r.lineKind == "addition":
+				rowBg = diffAddedBg
+			case r.lineKind == "deletion":
+				rowBg = diffRemovedBg
+			}
+			diffRowStr := renderDiffRow(width, gutterWidth, digits, r, cursorBar(r, i, cursorBodyRow, chunkRows))
+			content = append(content, renderRowWithBarFromString(scrollW, width, rowBg, hasBar, rowLine, thumbStart, thumbEnd, diffRowStr))
 		}
 	}
 
@@ -121,23 +143,23 @@ func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow
 // buildStatusHead renders the status header, items, and separator — the small
 // fixed-size top of the scrollable body.
 func buildStatusHead(width int, status []jj.StatusEntry) []string {
-	head := []string{plainRow(width, seg{text: "┃ ", fg: colCyan, bold: true}, seg{text: "status", fg: colGray})}
+	head := []string{bgRow(width, colPanel, seg{text: "┃ ", fg: colCyan, bold: true, bg: colPanel}, seg{text: "status", fg: colTextMuted, bg: colPanel})}
 	if len(status) == 0 {
-		head = append(head, plainRow(width, seg{text: "  (no changes)", fg: colGray}))
+		head = append(head, bgRow(width, colPanel, seg{text: "  (no changes)", fg: colTextMuted, bg: colPanel}))
 	} else {
 		for _, e := range status {
 			color := statusColors[e.Status]
 			if color == nil {
-				color = colGray
+				color = colTextMuted
 			}
-			head = append(head, plainRow(width,
-				seg{text: "┃ ", fg: color},
-				seg{text: statusSym(e.Status) + " ", fg: color},
-				seg{text: e.Path, fg: color},
+			head = append(head, bgRow(width, colPanel,
+				seg{text: "┃ ", fg: color, bg: colPanel},
+				seg{text: statusSym(e.Status) + " ", fg: color, bg: colPanel},
+				seg{text: e.Path, fg: color, bg: colPanel},
 			))
 		}
 	}
-	head = append(head, plainRow(width, seg{text: strings.Repeat("─", width), fg: colBorder}))
+	head = append(head, bgRow(width, colPanel, seg{text: strings.Repeat("─", width), fg: colBorder, bg: colPanel}))
 	return head
 }
 
