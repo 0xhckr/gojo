@@ -137,6 +137,16 @@ func (r *Runner) DiffSummary(rev string) ([]StatusEntry, error) {
 	return parseStatus(out), nil
 }
 
+// Description returns the full commit-message text for a revision (may be
+// empty). The rev is any valid revset (change ID, commit ID, "@", …).
+func (r *Runner) Description(rev string) (string, error) {
+	out, err := r.run("log", "-r", rev, "--no-graph", "-T", "description", "--color", "never")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(out, "\n"), nil
+}
+
 // FileShow returns the contents of a file at a revision.
 func (r *Runner) FileShow(rev, path string) (string, error) {
 	return r.run("file", "show", "-r", rev, path)

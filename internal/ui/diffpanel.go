@@ -71,9 +71,9 @@ func statusSym(k jj.StatusKind) string {
 // chunkRows is the set of body-row indices that belong to the focused chunk.
 // A thin left-edge bar is drawn for those rows: bright for the cursor line,
 // dim for the rest of the chunk.
-func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool) []string {
-	// Title bar — the only sticky chrome; status + separator + diff all scroll
-	// together below it as one body.
+func renderDiffPanel(width, height int, rev string, loading bool, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool) []string {
+	// Title bar — the only sticky chrome; description + status + separator +
+	// diff all scroll together below it as one body.
 	titleLine := " " + rev
 	if loading {
 		titleLine += "  loading…"
@@ -86,8 +86,13 @@ func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow
 		contentH = 0
 	}
 
-	// The scrollable body is: status header + status items + separator + diff.
-	head := buildStatusHead(width, status)
+	// The scrollable body is: description header + status header + status
+	// items + separators + diff.
+	var head []string
+	if showDesc {
+		head = append(head, buildDescHead(width, desc)...)
+	}
+	head = append(head, buildStatusHead(width, status)...)
 	bodyTotal := len(head) + diffBodyLen(rows, rawContent)
 
 	start, end := visibleRange(scrollY, contentH, bodyTotal)
@@ -138,6 +143,32 @@ func renderDiffPanel(width, height int, rev string, loading bool, rows []diffRow
 	content = padLines(content, contentH)
 	out = append(out, content...)
 	return padLines(out, height)
+}
+
+// buildDescHead renders the description label, the description text (one row
+// per line), and a horizontal divider — shown above the status section. When
+// the description is empty, a "(no description set)" placeholder is shown.
+func buildDescHead(width int, desc string) []string {
+	head := []string{bgRow(width, colPanel, seg{text: "┃ ", fg: colCyan, bold: true, bg: colPanel}, seg{text: "description", fg: colTextMuted, bg: colPanel})}
+	text := desc
+	if text == "" {
+		text = "(no description set)"
+	}
+	for _, line := range strings.Split(text, "\n") {
+		head = append(head, bgRow(width, colPanel, seg{text: "  " + line, fg: colText, bg: colPanel}))
+	}
+	head = append(head, bgRow(width, colPanel, seg{text: strings.Repeat("─", width), fg: colBorder, bg: colPanel}))
+	return head
+}
+
+// descHeadLen is the number of body rows a description header occupies: the
+// label, one row per description line (at least one), and the divider.
+func descHeadLen(desc string) int {
+	lines := 1
+	if desc != "" {
+		lines = strings.Count(desc, "\n") + 1
+	}
+	return 1 + lines + 1
 }
 
 // buildStatusHead renders the status header, items, and separator — the small

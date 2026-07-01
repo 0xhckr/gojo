@@ -63,6 +63,7 @@ type Model struct {
 	diffRev        string
 	diffIsRevision bool // true: showing a revision diff (reloadable); false: a list view
 	diffLoading    bool
+	diffDesc       string // revision description shown above the status section
 	diffStatus     []jj.StatusEntry
 	diffRows       []diffRow
 	diffDigits     int // gutter width, computed once when the diff loads
@@ -163,6 +164,7 @@ type refreshMsg struct {
 
 type diffLoadedMsg struct {
 	rev    string
+	desc   string
 	status []jj.StatusEntry
 	rows   []diffRow
 	err    error
@@ -285,7 +287,8 @@ func (m Model) openDiffCmd(commitID, changeID string) tea.Cmd {
 		if err != nil {
 			return diffLoadedMsg{rev: changeID, err: err}
 		}
-		return diffLoadedMsg{rev: changeID, status: status, rows: renderDiff(diff)}
+		desc, _ := r.Description(commitID)
+		return diffLoadedMsg{rev: changeID, desc: desc, status: status, rows: renderDiff(diff)}
 	}
 }
 
@@ -535,6 +538,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// a refresh (not a fresh open) so the user's cursor position survives —
 		// otherwise the 2s poll yanks navigation back to the first chunk.
 		isRefresh := m.diffIsRevision && msg.rev == m.diffRev && len(m.diffRows) > 0
+		// Update the description; keep the instant subject shown during loading
+		// when the fetch returned nothing (e.g. a transient jj failure).
+		if msg.desc != "" {
+			m.diffDesc = msg.desc
+		}
 		m.diffStatus = msg.status
 		m.diffRows = msg.rows
 		m.diffDigits = maxLineDigits(msg.rows)
@@ -591,6 +599,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diffRows = nil
 		m.diffStatus = nil
 		m.diffChunks = nil
+		m.diffDesc = ""
 		m.diffLoading = false
 		m.diffScrollY = 0
 		return m, nil
@@ -771,26 +780,26 @@ func (m Model) statusBarHeight() int {
 }
 
 // diffMaxScroll is the furthest scroll offset that still keeps the last
-// screenful of the (status + diff) body in view.
+// screenful of the (description + status + diff) body in view.
 func (m Model) diffMaxScroll() int {
-	statusCount := len(m.diffStatus)
-	if statusCount == 0 {
-		statusCount = 1
-	}
-	headLen := statusCount + 2 // status header + items + separator
-	bodyTotal := headLen + diffBodyLen(m.diffRows, m.diffRaw)
+	bodyTotal := m.diffHeadLen() + diffBodyLen(m.diffRows, m.diffRaw)
 	bodyH := m.contentHeight() - 1 // minus the sticky title bar
 	return max(0, bodyTotal-bodyH)
 }
 
-// diffHeadLen is the number of body rows occupied by the status header, items,
-// and separator — everything above the first diff/raw line.
+// diffHeadLen is the number of body rows occupied by the description header,
+// status header, items, and separators — everything above the first diff/raw
+// line. The description section only appears for revision diffs.
 func (m Model) diffHeadLen() int {
 	statusCount := len(m.diffStatus)
 	if statusCount == 0 {
 		statusCount = 1 // "(no changes)" row
 	}
-	return statusCount + 2
+	descLen := 0
+	if m.diffIsRevision {
+		descLen = descHeadLen(m.diffDesc)
+	}
+	return descLen + statusCount + 2
 }
 
 // diffBodyHeight is the number of visible rows below the sticky diff title.
@@ -1476,6 +1485,7 @@ func (m Model) handleFileBlameKey(k string) (tea.Model, tea.Cmd) {
 			m.diffIsRevision = true
 			m.diffLoading = true
 			m.diffScrollY = 0
+			m.diffDesc = line.Description
 			m.diffRaw = ""
 			m.diffRows = nil
 			m.diffStatus = nil
@@ -1522,6 +1532,7 @@ func (m Model) handleFileHistoryKey(k string) (tea.Model, tea.Cmd) {
 			m.diffIsRevision = true
 			m.diffLoading = true
 			m.diffScrollY = 0
+			m.diffDesc = e.Subject
 			m.diffRaw = ""
 			m.diffRows = nil
 			m.diffStatus = nil
@@ -1613,6 +1624,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			m.diffIsRevision = true
 			m.diffLoading = true
 			m.diffScrollY = 0
+			m.diffDesc = e.Subject
 			m.diffRaw = ""
 			m.diffRows = nil
 			m.diffStatus = nil
@@ -2263,7 +2275,7 @@ func (m Model) View() string {
 	case m.view == viewHelp:
 		lines = append(lines, renderHelp(m.width, ch, m.helpScrollY)...)
 	case m.diffOpen:
-		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffLoading, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows())...)
+		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffLoading, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows())...)
 	case m.view == viewFile:
 		lines = append(lines, m.renderFileView(m.width, ch)...)
 	default:
