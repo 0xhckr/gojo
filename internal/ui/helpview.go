@@ -230,7 +230,7 @@ func renderHelp(width, height, scrollY int) []string {
 
 	// Pad to full height.
 	for len(out) < height {
-		out = append(out, "")
+		out = append(out, blankRow(width, colPanel))
 	}
 	if len(out) > height {
 		out = out[:height]

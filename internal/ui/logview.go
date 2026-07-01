@@ -109,7 +109,7 @@ func scrollbarThumb(total, firstVis, visLines, trackH int) (int, int) {
 // shows position when the log overflows.
 func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView, sq squashView) []string {
 	if len(entries) == 0 {
-		return padLines([]string{bgRow(width, colPanel, seg{text: "  no revisions found", fg: colTextMuted})}, height)
+		return padLines([]string{bgRow(width, colPanel, seg{text: "  no revisions found", fg: colTextMuted})}, height, width)
 	}
 
 	focus := cursor
@@ -234,7 +234,7 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 		}
 	}
 
-	return padLines(lines, height)
+	return padLines(lines, height, width)
 }
 
 // renderRowWithBar renders a content row to scrollW columns, then appends a
@@ -301,10 +301,11 @@ func renderRow(width int, bg lipgloss.TerminalColor, segs []seg) string {
 	return bgRow(width, bg, segs...)
 }
 
-// padLines pads (or truncates) a slice to exactly n lines.
-func padLines(lines []string, n int) []string {
+// padLines pads (or truncates) a slice to exactly n lines. Padding rows are
+// filled with colPanel so no transparent gaps show through.
+func padLines(lines []string, n, width int) []string {
 	for len(lines) < n {
-		lines = append(lines, "")
+		lines = append(lines, blankRow(width, colPanel))
 	}
 	if len(lines) > n {
 		lines = lines[:n]

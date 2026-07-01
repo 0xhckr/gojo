@@ -366,9 +366,9 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 		}
 	}
 
-	content = padLines(content, contentH)
+	content = padLines(content, contentH, width)
 	out = append(out, content...)
-	return padLines(out, height)
+	return padLines(out, height, width)
 }
 
 // diffRowBg is the background colour for a diff row's terminal lines.

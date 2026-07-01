@@ -322,10 +322,10 @@ func (m Model) renderFilePicker(width, height int) []string {
 	}
 
 	if fv.err != "" {
-		return padLines(append(out, plainRow(width, seg{text: " ✖ " + fv.err, fg: colRed})), height)
+		return padLines(append(out, bgRow(width, colPanel, seg{text: " ✖ " + fv.err, fg: colRed})), height, width)
 	}
 	if len(fv.rows) == 0 {
-		return padLines(append(out, plainRow(width, seg{text: "  (no tracked files)", fg: colGray})), height)
+		return padLines(append(out, bgRow(width, colPanel, seg{text: "  (no tracked files)", fg: colGray})), height, width)
 	}
 
 	start, end := fv.pickerVisibleRange(contentH)
@@ -334,9 +334,9 @@ func (m Model) renderFilePicker(width, height int) []string {
 		row := fv.rows[i]
 		content = append(content, renderTreeRowString(width, row, i == fv.cursor))
 	}
-	content = padLines(content, contentH)
+	content = padLines(content, contentH, width)
 	out = append(out, content...)
-	return padLines(out, height)
+	return padLines(out, height, width)
 }
 
 func renderTreeRowString(width int, row treeRow, selected bool) string {
@@ -455,10 +455,10 @@ func (m Model) renderFileBlame(width, height int) []string {
 	title := bgRow(width, colPanel, titleSegs...)
 
 	if fv.err != "" {
-		return padLines([]string{title, plainRow(width, seg{text: " ✖ " + fv.err, fg: colRed})}, height)
+		return padLines([]string{title, bgRow(width, colPanel, seg{text: " ✖ " + fv.err, fg: colRed})}, height, width)
 	}
 	if len(fv.lines) == 0 {
-		return padLines([]string{title, plainRow(width, seg{text: "  (empty file)", fg: colGray})}, height)
+		return padLines([]string{title, bgRow(width, colPanel, seg{text: "  (empty file)", fg: colGray})}, height, width)
 	}
 
 	// Build the blame head from the cursor's current line. This is rendered
@@ -578,12 +578,12 @@ func (m Model) renderFileHistory(width, height int) []string {
 	)
 
 	if fv.err != "" {
-		return padLines([]string{title, plainRow(width, seg{text: " ✖ " + fv.err, fg: colRed})}, height)
+		return padLines([]string{title, bgRow(width, colPanel, seg{text: " ✖ " + fv.err, fg: colRed})}, height, width)
 	}
 	if len(fv.hist) == 0 {
-		return padLines([]string{title, plainRow(width, seg{text: "  (no commits touched this file)", fg: colGray})}, height)
+		return padLines([]string{title, bgRow(width, colPanel, seg{text: "  (no commits touched this file)", fg: colGray})}, height, width)
 	}
 
 	body := renderLog(width, height-1, fv.hist, fv.histCur, fv.histOff, nil, 0, rebaseView{}, squashView{})
-	return padLines(append([]string{title}, body...), height)
+	return padLines(append([]string{title}, body...), height, width)
 }

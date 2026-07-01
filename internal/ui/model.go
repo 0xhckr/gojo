@@ -2868,15 +2868,15 @@ func (m Model) View() string {
 	}
 	if m.bootErr != "" {
 		lines := []string{
-			plainRow(m.width, seg{text: " error: " + m.bootErr + " ", fg: colRed}),
-			"",
-			plainRow(m.width, seg{text: " press q or ctrl+c to quit", fg: colGray}),
+			bgRow(m.width, colPanel, seg{text: " error: " + m.bootErr + " ", fg: colRed}),
+			blankRow(m.width, colPanel),
+			bgRow(m.width, colPanel, seg{text: " press q or ctrl+c to quit", fg: colGray}),
 		}
-		return strings.Join(padLines(lines, m.height), "\n")
+		return strings.Join(padLines(lines, m.height, m.width), "\n")
 	}
 	if !m.ready || (len(m.entries) == 0 && m.errMsg == "") {
-		lines := []string{plainRow(m.width, seg{text: " loading…", fg: colGray})}
-		return strings.Join(padLines(lines, m.height), "\n")
+		lines := []string{bgRow(m.width, colPanel, seg{text: " loading…", fg: colGray})}
+		return strings.Join(padLines(lines, m.height, m.width), "\n")
 	}
 
 	var lines []string
@@ -2921,7 +2921,7 @@ func (m Model) View() string {
 	lines = append(lines, m.renderHelpBar()...)
 	lines = append(lines, blankRow(m.width, colPanel))
 
-	return strings.Join(padLines(lines, m.height), "\n")
+	return strings.Join(padLines(lines, m.height, m.width), "\n")
 }
 
 // renderFileStatusBar renders the file-view status bar. In blame phase it
