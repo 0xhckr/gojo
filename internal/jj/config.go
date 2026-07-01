@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -21,11 +20,6 @@ type Config struct {
 	AIBaseURL    string
 	AIModel      string
 	CommitPrompt string
-
-	// BlameScrollMargin is the minimum number of lines kept between the
-	// cursor and the bottom of the file-view blame viewport. 0 lets the
-	// cursor reach the last visible line; the default is 8.
-	BlameScrollMargin int
 }
 
 // DefaultAIBaseURL is used when ai_base_url / openrouter_base_url is unset.
@@ -33,9 +27,6 @@ const DefaultAIBaseURL = "https://openrouter.ai/api/v1"
 
 // DefaultAIModel is used when ai_model / openrouter_model is unset.
 const DefaultAIModel = "anthropic/claude-sonnet-4"
-
-// DefaultBlameScrollMargin is used when blame_scroll_margin is unset.
-const DefaultBlameScrollMargin = 8
 
 // applyTOMLConfig parses a minimal subset of TOML, optionally restricted to a
 // single section (e.g. "tools.gojo"). Only the keys gojo cares about are read.
@@ -93,10 +84,6 @@ func applyTOMLConfig(cfg *Config, raw string, section string) {
 			cfg.AIModel = val
 		case "commit_prompt":
 			cfg.CommitPrompt = val
-		case "blame_scroll_margin":
-			if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil && n >= 0 {
-				cfg.BlameScrollMargin = n
-			}
 		}
 	}
 }

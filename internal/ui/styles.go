@@ -47,13 +47,6 @@ var (
 	colDarkerGray = colPanel   // status / help bars
 )
 
-// Blame-view section backgrounds — alternating tints per blame hunk so
-// contiguous runs of the same commit stand out.
-var (
-	blameSectionBgA lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#f2f2f6", Dark: "#181820"}
-	blameSectionBgB lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#e8e8ee", Dark: "#1e1e28"}
-)
-
 // Diff panel colors — subtle tinted backgrounds, refined foregrounds.
 var (
 	diffAddedSign    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#3d9a57", Dark: "#7fd88f"}
@@ -62,7 +55,6 @@ var (
 	diffHunkHeaderFg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#7086b5", Dark: "#828bb8"}
 	diffFileHeaderFg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#b0851f", Dark: "#f5a742"}
 	diffLineNumber   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#595959", Dark: "#8f8f8f"}
-	diffBorder       lipgloss.TerminalColor = colBorder
 
 	diffAddedBg      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d8edd8", Dark: "#1a2a22"}
 	diffRemovedBg    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#f0d8dc", Dark: "#2a1a22"}

@@ -52,10 +52,8 @@ type fileViewState struct {
 	// blame (file open)
 	path       string
 	lines      []jj.AnnotateLine
-	lineParity []int // absolute section parity per line (0/1), stable across scroll
 	highlights [][]span // per-line syntax-highlighted spans (chroma); nil until computed
 	cursorY    int      // absolute line index under the cursor
-	scrollY    int      // top visible line index
 
 	// history
 	hist    []jj.LogEntry
@@ -153,32 +151,6 @@ func (fv *fileViewState) reflow() {
 	}
 }
 
-// ensureSections computes the absolute per-line section parity (0/1) from
-// the top of the file, so blame section bands stay stable as the viewport
-// scrolls. Idempotent: recomputes only when the line count changes.
-func (fv *fileViewState) ensureSections() {
-	if len(fv.lineParity) == len(fv.lines) {
-		return
-	}
-	if len(fv.lines) == 0 {
-		fv.lineParity = nil
-		return
-	}
-	parity := make([]int, len(fv.lines))
-	for i, l := range fv.lines {
-		if i == 0 {
-			parity[i] = 1
-			continue
-		}
-		if l.ChangeID == fv.lines[i-1].ChangeID {
-			parity[i] = parity[i-1]
-		} else {
-			parity[i] = parity[i-1] ^ 1
-		}
-	}
-	fv.lineParity = parity
-}
-
 // ensureHighlights lazily syntax-highlights the open file's source lines
 // via chroma, caching the per-line spans. Falls back to nil (plain text)
 // when no lexer matches the file. Idempotent across renders.
@@ -198,24 +170,6 @@ func (fv *fileViewState) ensureHighlights() {
 	if fv.highlights == nil {
 		fv.highlights = [][]span{} // sentinel: tried, no lexer
 	}
-}
-
-// cursorSection returns the [start, end) source-line range of the section
-// (contiguous run of one change id) that contains the cursor.
-func (fv *fileViewState) cursorSection() (int, int) {
-	if len(fv.lines) == 0 {
-		return 0, 0
-	}
-	c := min(fv.cursorY, len(fv.lines)-1)
-	start := c
-	for start > 0 && fv.lines[start-1].ChangeID == fv.lines[c].ChangeID {
-		start--
-	}
-	end := c + 1
-	for end < len(fv.lines) && fv.lines[end].ChangeID == fv.lines[c].ChangeID {
-		end++
-	}
-	return start, end
 }
 
 // curRow returns the row under the picker cursor, or nil.
@@ -248,54 +202,6 @@ func (fv *fileViewState) pickerVisibleRange(height int) (int, int) {
 	}
 	fv.offset = off
 	return off, end
-}
-
-// blameVisibleRange keeps the cursor inside the viewport, scrolling
-// minimally. scrollMargin is the minimum number of lines kept between the
-// cursor and the bottom of the content area (0 lets the cursor reach the
-// last visible line).
-func (fv *fileViewState) blameVisibleRange(height, scrollMargin int) (int, int) {
-	total := len(fv.lines)
-	if height <= 0 {
-		return 0, 0
-	}
-	if scrollMargin < 0 {
-		scrollMargin = 0
-	}
-	// The margin is a bottom reserve; the cursor may not enter the last
-	// `scrollMargin` rows of the viewport (clamped so it never exceeds the
-	// available height).
-	margin := scrollMargin
-	if margin >= height {
-		margin = height - 1
-		if margin < 0 {
-			margin = 0
-		}
-	}
-	bottomLimit := height - margin // cursor must stay above this row index
-	if bottomLimit < 1 {
-		bottomLimit = 1
-	}
-	if fv.cursorY < fv.scrollY {
-		fv.scrollY = fv.cursorY
-	}
-	if fv.cursorY >= fv.scrollY+bottomLimit {
-		fv.scrollY = fv.cursorY - bottomLimit + 1
-	}
-	if fv.scrollY < 0 {
-		fv.scrollY = 0
-	}
-	if fv.scrollY > total-height && total >= height {
-		fv.scrollY = total - height
-	}
-	if fv.scrollY < 0 {
-		fv.scrollY = 0
-	}
-	end := fv.scrollY + height
-	if end > total {
-		end = total
-	}
-	return fv.scrollY, end
 }
 
 // ── Commands ────────────────────────────────────────────────────────────────
@@ -443,155 +349,131 @@ func renderTreeRowString(width int, row treeRow, selected bool) string {
 	return renderRow(width, bg, segs)
 }
 
-func (m Model) renderFileBlame(width, height int) []string {
-	fv := &m.fileView
-	titleLeft := " " + fv.path + "  (blame)"
-	titleRight := " h: history · ⏎ open commit · esc/q back "
-	pad := max(1, width-len(titleLeft)-len(titleRight))
-	out := []string{bgRow(width, colDarkPurple,
-		seg{text: titleLeft, fg: colWhite, bg: colDarkPurple},
-		seg{text: strings.Repeat(" ", pad), bg: colDarkPurple},
-		seg{text: titleRight, fg: colGray, bg: colDarkPurple},
-	)}
-
-	contentH := height - 1
-	if contentH < 0 {
-		contentH = 0
+// annotateToDiffRows converts annotated file lines into diffRow format for
+// rendering via renderDiffPanel in file viewer mode. All lines become context
+// lines (no +/- signs, no diff backgrounds) with a single line number in
+// newNum. Tabs are expanded to 4 spaces to match the previous blame renderer.
+func annotateToDiffRows(lines []jj.AnnotateLine, highlights [][]span) []diffRow {
+	if len(lines) == 0 {
+		return nil
 	}
-
-	if fv.err != "" {
-		return padLines(append(out, plainRow(width, seg{text: " ✖ " + fv.err, fg: colRed})), height)
-	}
-	if len(fv.lines) == 0 {
-		return padLines(append(out, plainRow(width, seg{text: "  (empty file)", fg: colGray})), height)
-	}
-
-	// Line-number gutter width.
-	digits := lineDigits(len(fv.lines))
-	// Blame column: change id (8) + space + author, capped.
-	blameW := min(30, width/3)
-	if blameW < 12 {
-		blameW = 12
-	}
-
-	start, end := fv.blameVisibleRange(contentH, m.blameScrollMargin())
-	fv.ensureSections()
-	fv.ensureHighlights()
-	// Only the cursor's current section shows its blame text; every other
-	// section is silent (just its background tint), so the view stays calm as
-	// you scroll. The blame block is two rows: email on the section's first
-	// visible line, description on the line below it.
-	secStart, secEnd := fv.cursorSection()
-	hasDesc := strings.TrimSpace(fv.lines[min(fv.cursorY, len(fv.lines)-1)].Description) != ""
-	cursorDesc := strings.TrimSpace(fv.lines[min(fv.cursorY, len(fv.lines)-1)].Description)
-	singleLine := secEnd-secStart == 1
-	// If the section start is scrolled off the top, anchor the email on the
-	// first visible line of the section so blame is always shown.
-	emailLine := secStart
-	if emailLine < start {
-		emailLine = start
-	}
-	descLine := emailLine + 1
-	// A single-line section expands: its description is shown on the line
-	// below (which belongs to the next section), and that line is treated as
-	// part of the selection.
-	expanded := singleLine && hasDesc
-
-	var content []string
-	for i := start; i < end; i++ {
-		l := fv.lines[i]
-		kind := blameNone
-		switch {
-		case i == emailLine:
-			kind = blameEmail
-		case hasDesc && i == descLine:
-			kind = blameDesc
+	rows := make([]diffRow, len(lines))
+	for i, l := range lines {
+		var sp []span
+		if highlights != nil && i < len(highlights) && len(highlights[i]) > 0 {
+			for _, s := range highlights[i] {
+				sp = append(sp, span{text: strings.ReplaceAll(s.text, "\t", "    "), fg: s.fg})
+			}
+		} else if l.Text != "" {
+			sp = []span{{text: strings.ReplaceAll(l.Text, "\t", "    ")}}
+		} else {
+			sp = []span{}
 		}
-		selected := i == fv.cursorY || (expanded && i == descLine)
-		sectionBg := blameSectionBgA
-		if fv.lineParity[i]%2 == 1 {
-			sectionBg = blameSectionBgB
+		rows[i] = diffRow{
+			kind:     rowLine,
+			lineKind: "context",
+			newNum:   l.LineNo,
+			spans:    sp,
 		}
-		var lineSpans []span
-		if fv.highlights != nil && i < len(fv.highlights) {
-			lineSpans = fv.highlights[i]
-		}
-		content = append(content, renderBlameLine(width, digits, blameW, l, kind, selected, sectionBg, cursorDesc, lineSpans))
 	}
-	content = padLines(content, contentH)
-	out = append(out, content...)
-	return padLines(out, height)
+	return rows
 }
 
-// blameKind selects what (if anything) the blame column shows on a row.
-type blameKind int
+// buildBlameHead renders the blame header — the commit that last touched the
+// cursor's current section — in the same labelled style as the diff panel's
+// description/status headers. It scrolls with the content as a head section.
+func buildBlameHead(width int, cid, author, desc string) []string {
+	head := []string{bgRow(width, colPanel, seg{text: "┃ ", fg: colCyan, bold: true, bg: colPanel}, seg{text: "blame", fg: colTextMuted, bg: colPanel})}
 
-const (
-	blameNone blameKind = iota
-	blameEmail
-	blameDesc
-)
+	var infoSegs []seg
+	infoSegs = append(infoSegs, seg{text: "  ", bg: colPanel})
+	if cid != "" {
+		infoSegs = append(infoSegs, seg{text: cid, fg: colPurple, bold: true, bg: colPanel})
+	}
+	if author != "" {
+		infoSegs = append(infoSegs, seg{text: " ", bg: colPanel})
+		infoSegs = append(infoSegs, seg{text: author, fg: colBlue, bg: colPanel})
+	}
+	if desc != "" {
+		infoSegs = append(infoSegs, seg{text: " — " + desc, fg: colGray, bg: colPanel})
+	}
+	head = append(head, bgRow(width, colPanel, infoSegs...))
+	head = append(head, bgRow(width, colPanel, seg{text: strings.Repeat("─", width), fg: colBorder, bg: colPanel}))
+	return head
+}
 
-func renderBlameLine(width, digits, blameW int, l jj.AnnotateLine, kind blameKind, selected bool, sectionBg lipgloss.TerminalColor, descText string, lineSpans []span) string {
-	bg := sectionBg
-	if selected {
-		bg = colDarkPurple
+func (m Model) renderFileBlame(width, height int) []string {
+	fv := &m.fileView
+
+	// Early-return cases (error, empty) use the same panel-style title bar
+	// as the diff panel's file mode, but render a simple message instead of
+	// delegating to renderDiffPanel.
+	titleSegs := []seg{
+		{text: " ", fg: colText, bg: colPanel},
+		{text: fv.path, fg: colText, bold: true, bg: colPanel},
+		{text: "  (esc/q to back) ", fg: colTextMuted, bg: colPanel},
+	}
+	title := bgRow(width, colPanel, titleSegs...)
+
+	if fv.err != "" {
+		return padLines([]string{title, plainRow(width, seg{text: " ✖ " + fv.err, fg: colRed})}, height)
+	}
+	if len(fv.lines) == 0 {
+		return padLines([]string{title, plainRow(width, seg{text: "  (empty file)", fg: colGray})}, height)
 	}
 
-	cid := l.ChangeID
+	fv.ensureHighlights()
+	rows := annotateToDiffRows(fv.lines, fv.highlights)
+	digits := lineDigits(len(fv.lines))
+
+	// Build the blame head from the cursor's current line.
+	cursorY := min(fv.cursorY, len(fv.lines)-1)
+	cur := fv.lines[cursorY]
+	cid := cur.ChangeID
 	if len(cid) > 8 {
 		cid = cid[:8]
 	}
-	email := l.Author // full email address
+	desc := strings.TrimSpace(cur.Description)
+	head := buildBlameHead(width, cid, cur.Author, desc)
+	headLen := len(head)
 
-	num := padNum(l.LineNo, digits)
-
-	// The blame cell is a fixed total width so the `┃` separator (and thus
-	// the source code) stays aligned across every row kind.
-	//   cellW = 1 (lead) + 8 (cid) + 1 (gap) + authorW
-	authorW := blameW - 9
-	if authorW < 1 {
-		authorW = 1
+	contentH := height - 1 // minus the title bar
+	if contentH < 1 {
+		contentH = 1
 	}
 
-	segs := []seg{{text: " ", bg: bg}} // lead
-	switch kind {
-	case blameEmail:
-		cidPad := cid + strings.Repeat(" ", 8-len([]rune(cid)))
-		if len([]rune(email)) > authorW {
-			email = string([]rune(email)[:authorW])
-		}
-		emailPad := email + strings.Repeat(" ", authorW-len([]rune(email)))
-		segs = append(segs, seg{text: cidPad, fg: colPurple, bg: bg, bold: true})
-		segs = append(segs, seg{text: " ", bg: bg})
-		segs = append(segs, seg{text: emailPad, fg: colBlue, bg: bg})
-	case blameDesc:
-		// Description spans the cid + gap + author region so the separator
-		// stays at the same column as on other rows.
-		descW := 8 + 1 + authorW
-		desc := strings.TrimSpace(descText)
-		if len([]rune(desc)) > descW {
-			desc = string([]rune(desc)[:descW])
-		}
-		segs = append(segs, seg{text: desc + strings.Repeat(" ", descW-len([]rune(desc))), fg: colGray, bg: bg})
-	default:
-		segs = append(segs, seg{text: strings.Repeat(" ", 8+1+authorW), bg: bg})
+	// Compute the layout to map between source-line indices (which the file
+	// view's cursor/scroll use) and terminal-line indices (which
+	// renderDiffPanel expects). renderDiffPanel recomputes this internally
+	// with the same parameters, so the values stay in sync.
+	layout := computeDiffLayoutPure(width, contentH, headLen, rows, "", digits, nil, false, true)
+
+	// Map the cursor (source line) to a terminal body line (including head).
+	cursorBodyRow := -1
+	if cursorY >= 0 && cursorY < len(layout.starts) {
+		cursorBodyRow = headLen + layout.starts[cursorY]
 	}
-	segs = append(segs, seg{text: "┃ ", fg: diffBorder, bg: bg})
-	segs = append(segs, seg{text: num + " ", fg: colGray, bg: bg})
-	if len(lineSpans) > 0 {
-		for _, s := range lineSpans {
-			var fg lipgloss.TerminalColor
-			if s.fg != "" {
-				fg = lipgloss.Color(s.fg)
-			}
-			segs = append(segs, seg{text: strings.ReplaceAll(s.text, "\t", "    "), fg: fg, bg: bg})
-		}
-	} else {
-		text := strings.ReplaceAll(l.Text, "\t", "    ")
-		segs = append(segs, seg{text: text, fg: colWhite, bg: bg})
+
+	// Center the cursor: aim to place it at the vertical middle of the
+	// viewport. Near the top and bottom of the file the scroll clamps so we
+	// don't scroll past the boundaries — the cursor drifts from center only
+	// at the extremes.
+	half := contentH / 2
+	termScrollY := 0
+	if cursorBodyRow >= 0 {
+		termScrollY = cursorBodyRow - half
 	}
-	return renderRow(width, bg, segs)
+
+	bodyTotal := headLen + layout.total
+	maxScroll := max(0, bodyTotal-contentH)
+	if termScrollY < 0 {
+		termScrollY = 0
+	}
+	if termScrollY > maxScroll {
+		termScrollY = maxScroll
+	}
+
+	return renderDiffPanel(width, height, fv.path, 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, nil, nil, splitView{}, true, head)
 }
 
 func lineDigits(n int) int {

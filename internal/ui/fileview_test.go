@@ -9,131 +9,100 @@ import (
 	"gojo/internal/jj"
 )
 
-// TestBlameLineAlignment verifies the `│` separator (and thus the source
-// code) lands at the same column regardless of row kind (email / desc /
-// none), so the description row no longer indents the code.
-func TestBlameLineAlignment(t *testing.T) {
-	l := jj.AnnotateLine{ChangeID: "mwqwmwpp", CommitID: "b", Author: "hackr@hackr.sh", LineNo: 1, Description: "Rewrite gojo", Text: "x"}
-	const width, digits, blameW = 80, 3, 21
-
-	sepCol := func(kind blameKind, desc string) int {
-		s := ansi.Strip(renderBlameLine(width, digits, blameW, l, kind, false, blameSectionBgA, desc, nil))
-		return strings.Index(s, "┃")
+// TestAnnotateToDiffRows verifies that annotate lines are converted to
+// context-style diff rows with single line numbers and tab expansion.
+func TestAnnotateToDiffRows(t *testing.T) {
+	lines := []jj.AnnotateLine{
+		{ChangeID: "abc", LineNo: 1, Text: "package main"},
+		{ChangeID: "abc", LineNo: 2, Text: ""},
+		{ChangeID: "def", LineNo: 3, Text: "\tfunc main() {}"},
 	}
-	emailCol := sepCol(blameEmail, l.Description)
-	descCol := sepCol(blameDesc, l.Description)
-	noneCol := sepCol(blameNone, "")
-	if emailCol < 0 || descCol < 0 || noneCol < 0 {
-		t.Fatalf("missing separator: email=%d desc=%d none=%d", emailCol, descCol, noneCol)
+	rows := annotateToDiffRows(lines, nil)
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(rows))
 	}
-	if emailCol != descCol || descCol != noneCol {
-		t.Fatalf("separator misaligned: email=%d desc=%d none=%d", emailCol, descCol, noneCol)
+	for i, r := range rows {
+		if r.kind != rowLine {
+			t.Errorf("row %d: kind = %v, want rowLine", i, r.kind)
+		}
+		if r.lineKind != "context" {
+			t.Errorf("row %d: lineKind = %q, want context", i, r.lineKind)
+		}
+		if r.newNum != lines[i].LineNo {
+			t.Errorf("row %d: newNum = %d, want %d", i, r.newNum, lines[i].LineNo)
+		}
+		if r.oldNum != 0 {
+			t.Errorf("row %d: oldNum = %d, want 0", i, r.oldNum)
+		}
 	}
-}
-
-// TestBlameVisibleRangeMargin checks that the configured bottom margin is
-// respected: the cursor stays at least `margin` rows above the viewport
-// bottom, and clamps gracefully when the margin exceeds the height.
-func TestBlameVisibleRangeMargin(t *testing.T) {
-	lines := make([]jj.AnnotateLine, 100)
-	for i := range lines {
-		lines[i] = jj.AnnotateLine{LineNo: i + 1, ChangeID: "a"}
-	}
-
-	cases := []struct {
-		name    string
-		height  int
-		margin  int
-		cursor  int
-		wantTop int
-	}{
-		// margin 0: cursor can reach the last visible line (height=10).
-		{"margin0", 10, 0, 25, 16},
-		// margin 8 (default): cursor needs >=8 spare rows below.
-		{"margin8", 10, 8, 25, 24},
-		// margin >= height: clamps to keeping one row below the cursor.
-		{"margin_clamped", 10, 50, 25, 25},
-		// cursor near the top: viewport scrolls just enough to honor the
-		// margin (line 0 may leave the top).
-		{"near_top", 10, 8, 2, 1},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			fv := fileViewState{lines: lines, cursorY: tc.cursor, scrollY: 0}
-			top, end := fv.blameVisibleRange(tc.height, tc.margin)
-			if top != tc.wantTop {
-				t.Fatalf("got top=%d want %d", top, tc.wantTop)
-			}
-			if end-top > tc.height {
-				t.Fatalf("window %d taller than height %d", end-top, tc.height)
-			}
-			// The cursor must be within [top, end) and at least `margin` above
-			// the bottom (unless clamped).
-			if tc.cursor < top || tc.cursor >= end {
-				t.Fatalf("cursor %d outside [%d,%d)", tc.cursor, top, end)
-			}
-			wantMinMargin := tc.margin
-			if wantMinMargin >= tc.height {
-				wantMinMargin = tc.height - 1
-			}
-			if end-1-tc.cursor < wantMinMargin {
-				t.Fatalf("margin not respected: %d spare rows, want >= %d", end-1-tc.cursor, wantMinMargin)
-			}
-		})
+	// Tab expansion in the non-highlighted fallback.
+	if txt := spansText(rows[2].spans); !strings.Contains(txt, "    func main() {}") {
+		t.Errorf("row 2: tabs not expanded, got %q", txt)
 	}
 }
 
-// TestEnsureSectionsNoPanic guards against the index-out-of-range [-1] panic
-// that occurred when the first line fell into the `else` branch and indexed
-// parity[i-1].
-func TestEnsureSectionsNoPanic(t *testing.T) {
-	cases := []struct {
-		name  string
-		lines []jj.AnnotateLine
-	}{
-		{"empty", nil},
-		{"single", []jj.AnnotateLine{{ChangeID: "a", LineNo: 1}}},
-		{
-			"mixed",
-			[]jj.AnnotateLine{
-				{ChangeID: "a", LineNo: 1},
-				{ChangeID: "a", LineNo: 2},
-				{ChangeID: "b", LineNo: 3},
-				{ChangeID: "a", LineNo: 4},
-			},
-		},
+// TestFileModeRendering verifies that renderDiffPanel in file mode shows the
+// file path title, the blame head with commit info, line numbers, and source
+// content — and produces exactly the requested height.
+func TestFileModeRendering(t *testing.T) {
+	lines := []jj.AnnotateLine{
+		{ChangeID: "mwqwmwpp", CommitID: "b2fe214a", Author: "hackr@hackr.sh", LineNo: 1, Description: "Rewrite gojo", Text: "package main"},
+		{ChangeID: "mwqwmwpp", CommitID: "b2fe214a", Author: "hackr@hackr.sh", LineNo: 2, Description: "Rewrite gojo", Text: ""},
+		{ChangeID: "kxmyusxx", CommitID: "aa0100ff", Author: "al@ice.gg", LineNo: 3, Description: "add main", Text: "func main() {}"},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			fv := fileViewState{lines: tc.lines}
-			defer func() {
-				if r := recover(); r != nil {
-					t.Fatalf("ensureSections panicked: %v", r)
-				}
-			}()
-			fv.ensureSections()
-			if len(fv.lineParity) != len(tc.lines) {
-				t.Fatalf("expected %d parities, got %d", len(tc.lines), len(fv.lineParity))
-			}
-			// Parity must flip exactly when the change id changes.
-			for i := 1; i < len(tc.lines); i++ {
-				changed := tc.lines[i].ChangeID != tc.lines[i-1].ChangeID
-				flipped := fv.lineParity[i] != fv.lineParity[i-1]
-				if changed != flipped {
-					t.Errorf("line %d: changed=%v but parity flipped=%v", i, changed, flipped)
-				}
-			}
-			// Idempotent: a second call is a no-op.
-			before := append([]int(nil), fv.lineParity...)
-			fv.ensureSections()
-			if len(fv.lineParity) != len(before) {
-				t.Fatalf("second call changed parity length")
-			}
-			for i := range before {
-				if fv.lineParity[i] != before[i] {
-					t.Fatalf("second call mutated parity at %d", i)
-				}
-			}
-		})
+	rows := annotateToDiffRows(lines, nil)
+	digits := lineDigits(len(lines))
+	head := buildBlameHead(80, "mwqwmwpp", "hackr@hackr.sh", "Rewrite gojo")
+
+	out := renderDiffPanel(80, 24, "main.go", 0, false, false, 0, "", false, rows, digits, nil, "", 0, -1, nil, nil, splitView{}, true, head)
+	if len(out) != 24 {
+		t.Fatalf("panel lines = %d, want 24", len(out))
+	}
+
+	view := ansi.Strip(strings.Join(out, "\n"))
+	// Title shows the file path.
+	if !strings.Contains(view, "main.go") {
+		t.Errorf("missing file path in title: %s", view)
+	}
+	// Blame head shows commit info.
+	if !strings.Contains(view, "hackr@hackr.sh") {
+		t.Errorf("missing author in blame head: %s", view)
+	}
+	if !strings.Contains(view, "Rewrite gojo") {
+		t.Errorf("missing description in blame head: %s", view)
+	}
+	// Source content is visible.
+	if !strings.Contains(view, "package main") {
+		t.Errorf("missing source content: %s", view)
+	}
+	if !strings.Contains(view, "func main() {}") {
+		t.Errorf("missing source content: %s", view)
+	}
+}
+
+// TestFileModeCursorBar verifies that the cursor bar (┃) is highlighted in
+// yellow on the cursor line and invisible (panel-coloured) on other lines.
+func TestFileModeCursorBar(t *testing.T) {
+	lines := []jj.AnnotateLine{
+		{ChangeID: "a", LineNo: 1, Text: "line1"},
+		{ChangeID: "a", LineNo: 2, Text: "line2"},
+		{ChangeID: "a", LineNo: 3, Text: "line3"},
+	}
+	rows := annotateToDiffRows(lines, nil)
+	digits := lineDigits(len(lines))
+	head := buildBlameHead(80, "a", "x@y.z", "test")
+	headLen := len(head)
+
+	layout := computeDiffLayoutPure(80, 20, headLen, rows, "", digits, nil, false, true)
+	cursorBodyRow := headLen + layout.starts[1] // cursor on line 2
+
+	out := renderDiffPanel(80, 24, "f.go", 0, false, false, 0, "", false, rows, digits, nil, "", 0, cursorBodyRow, nil, nil, splitView{}, true, head)
+	if len(out) != 24 {
+		t.Fatalf("panel lines = %d, want 24", len(out))
+	}
+	// The output should contain the ┃ bar on at least one line.
+	view := ansi.Strip(strings.Join(out, "\n"))
+	if !strings.Contains(view, "┃") {
+		t.Errorf("missing cursor bar: %s", view)
 	}
 }

@@ -886,7 +886,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fileView.lines = msg.lines
 		m.fileView.highlights = nil // recompute lazily for the new file
 		m.fileView.cursorY = 0
-		m.fileView.scrollY = 0
 		m.fileView.phase = fileBlame
 		return m, nil
 
@@ -1019,7 +1018,7 @@ func (m Model) rowCountTerm(rowIdx int) int {
 // body from the terminal size and content. Called on diff/raw load and on
 // resize so navigation and rendering agree on where wrapped lines land.
 func (m *Model) computeDiffLayout() {
-	m.diffLayout = computeDiffLayoutPure(m.width, m.contentHeight(), m.diffHeadLen(), m.diffRows, m.diffRaw, m.diffDigits, m.diffCollapsed, m.splitMode)
+	m.diffLayout = computeDiffLayoutPure(m.width, m.contentHeight(), m.diffHeadLen(), m.diffRows, m.diffRaw, m.diffDigits, m.diffCollapsed, m.splitMode, false)
 }
 
 // diffHeadLen is the number of body rows occupied by the description header,
@@ -1657,8 +1656,38 @@ func (m Model) applyScrollBarDrag(mouseY int) (tea.Model, tea.Cmd) {
 		fv.histOff = idx
 		m.recomputeFileHistOffset()
 
-	case m.view == viewFile:
-		// Picker and blame views don't have scrollbars.
+	case m.view == viewFile && m.fileView.phase == fileBlame:
+		fv := &m.fileView
+		if len(fv.lines) == 0 {
+			return m, nil
+		}
+		fv.ensureHighlights()
+		rows := annotateToDiffRows(fv.lines, fv.highlights)
+		digits := lineDigits(len(fv.lines))
+		headLen := 3 // buildBlameHead: label + info + divider
+		layout := computeDiffLayoutPure(m.width, trackH, headLen, rows, "", digits, nil, false, true)
+		bodyTotal := headLen + layout.total
+		if bodyTotal <= trackH {
+			return m, nil
+		}
+		maxScroll := bodyTotal - trackH
+		targetTermScroll := trackY * maxScroll / max(1, trackH-1)
+		// Move the cursor to the source line at the drag position so the
+		// centering logic in renderFileBlame doesn't override the scroll.
+		relScroll := targetTermScroll - headLen
+		if relScroll < 0 {
+			relScroll = 0
+		}
+		fv.cursorY = 0
+		for i, s := range layout.starts {
+			if s <= relScroll {
+				fv.cursorY = i
+			} else {
+				break
+			}
+		}
+
+	case m.view == viewFile && m.fileView.phase == filePicker:
 		return m, nil
 
 	default:
@@ -2862,7 +2891,7 @@ func (m Model) View() string {
 		lines = append(lines, renderHelp(m.width, ch, m.helpScrollY)...)
 	case m.diffOpen:
 		sv := splitView{active: m.splitMode, marked: m.splitMarked}
-		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), m.diffCollapsed, sv)...)
+		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), m.diffCollapsed, sv, false, nil)...)
 	case m.view == viewFile:
 		lines = append(lines, m.renderFileView(m.width, ch)...)
 	default:
@@ -3102,15 +3131,6 @@ func (m Model) selChangeID() string {
 		return e.ChangeID
 	}
 	return ""
-}
-
-// blameScrollMargin returns the configured minimum spacing between the blame
-// cursor and the bottom of the content area, defaulting to 8 when unset.
-func (m Model) blameScrollMargin() int {
-	if m.cfg.BlameScrollMargin > 0 {
-		return m.cfg.BlameScrollMargin
-	}
-	return jj.DefaultBlameScrollMargin
 }
 
 // defaultHelpBarItems is the ordered list of global shortcut hints shown in
