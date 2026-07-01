@@ -108,10 +108,15 @@ type Model struct {
 	squashSource int // index into entries of the commit being squashed
 	squashDest   int // index into entries of the target (moves with j/k)
 
-	// AI describe.
-	aiLoading      map[string]bool
-	spinnerFrame   int
-	spinnerRunning bool
+	// AI describe. Generation (HTTP, read-only) runs concurrently; the jj
+	// describe apply step is serialized via aiDescribeQueue so only one
+	// mutating subprocess is in flight at a time — concurrent describes on
+	// the same repo can corrupt the op log.
+	aiLoading         map[string]bool
+	aiDescribeQueue   []aiPendingDescribe
+	aiDescribeRunning bool
+	spinnerFrame      int
+	spinnerRunning    bool
 
 	// busy holds labels for in-flight background actions (e.g. "pushing…"),
 	// shown as a prominent spinner in the status bar until each completes.
@@ -145,7 +150,8 @@ func NewModel() Model {
 		// FocusMsg, so the poll loop (started in Init) runs from the start.
 		focused:   true,
 		polling:   true,
-		aiLoading: map[string]bool{},
+		aiLoading:       map[string]bool{},
+		aiDescribeQueue: []aiPendingDescribe{},
 	}
 }
 
@@ -193,7 +199,24 @@ type elevReq struct {
 	retry  func() tea.Cmd // re-run the operation with the flag added
 }
 
-type aiDoneMsg struct {
+// aiPendingDescribe holds a generated AI message waiting to be applied via
+// jj describe. Items are queued so describes run one at a time.
+type aiPendingDescribe struct {
+	changeID string
+	message  string
+}
+
+// aiGeneratedMsg is returned when the AI has generated a commit message but
+// before it has been applied to the repo. The apply step is serialized via
+// aiDescribeQueue to prevent concurrent jj describe operations.
+type aiGeneratedMsg struct {
+	changeID string
+	message  string
+	err      error
+}
+
+// aiAppliedMsg is returned after jj describe has been applied (or failed).
+type aiAppliedMsg struct {
 	changeID string
 	message  string
 	err      error
@@ -365,34 +388,54 @@ func (m Model) busySimpleCmd(label string, fn func() error, okMsg string) (tea.M
 	return m, tea.Batch(tick, m.simpleCmd(fn, okMsg))
 }
 
-func (m Model) aiCmd(changeID string) tea.Cmd {
+// aiGenerateCmd calls the AI API to generate a commit message for changeID.
+// This is safe to run concurrently with other generations (read-only: it
+// fetches the diff and calls OpenRouter but does not mutate the repo).
+func (m Model) aiGenerateCmd(changeID string) tea.Cmd {
 	r := m.runner
 	return func() tea.Msg {
 		msg, err := r.AIDescribe(changeID)
-		if err != nil {
-			return aiDoneMsg{changeID: changeID, err: err}
-		}
-		if err := r.Describe(changeID, msg); err != nil {
-			// The AI message was generated but applying it failed. If the cause
-			// is elevatable (e.g. immutable commit), offer to reapply the
-			// already-generated message with the flag, avoiding a second AI call.
+		return aiGeneratedMsg{changeID: changeID, message: msg, err: err}
+	}
+}
+
+// aiApplyCmd runs jj describe with the AI-generated message. This must be
+// serialized — only one describe should be in flight at a time to avoid
+// concurrent mutating operations on the same repo.
+func (m Model) aiApplyCmd(changeID, message string) tea.Cmd {
+	r := m.runner
+	return func() tea.Msg {
+		if err := r.Describe(changeID, message); err != nil {
 			if flag, reason := jj.DetectElevation(err.Error()); flag != "" {
-				return aiDoneMsg{
+				return aiAppliedMsg{
 					changeID: changeID,
 					err:      err,
 					elev: &elevReq{
 						flag:   flag,
 						reason: reason,
 						retry: func() tea.Cmd {
-							return m.syncFnCmd(func() error { return r.Describe(changeID, msg, flag) }, "AI described "+changeID)
+							return m.syncFnCmd(func() error { return r.Describe(changeID, message, flag) }, "AI described "+changeID)
 						},
 					},
 				}
 			}
-			return aiDoneMsg{changeID: changeID, err: err}
+			return aiAppliedMsg{changeID: changeID, err: err}
 		}
-		return aiDoneMsg{changeID: changeID, message: msg}
+		return aiAppliedMsg{changeID: changeID, message: message}
 	}
+}
+
+// startNextAIDescribe pops the next pending AI describe from the queue and
+// fires aiApplyCmd for it. Returns nil cmd if the queue is empty.
+func (m Model) startNextAIDescribe() (Model, tea.Cmd) {
+	if len(m.aiDescribeQueue) == 0 {
+		m.aiDescribeRunning = false
+		return m, nil
+	}
+	next := m.aiDescribeQueue[0]
+	m.aiDescribeQueue = m.aiDescribeQueue[1:]
+	m.aiDescribeRunning = true
+	return m, m.aiApplyCmd(next.changeID, next.message)
 }
 
 // describeCmd runs `jj describe -r <changeID>` (suspending the TUI for
@@ -606,19 +649,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diffScrollY = 0
 		return m, nil
 
-	case aiDoneMsg:
+	case aiGeneratedMsg:
+		if msg.err != nil {
+			delete(m.aiLoading, msg.changeID)
+			m.errMsg = msg.err.Error()
+			return m, nil
+		}
+		// Queue the describe; run immediately if nothing is in flight.
+		if m.aiDescribeRunning {
+			m.aiDescribeQueue = append(m.aiDescribeQueue, aiPendingDescribe{
+				changeID: msg.changeID,
+				message:  msg.message,
+			})
+			return m, nil
+		}
+		m.aiDescribeRunning = true
+		return m, m.aiApplyCmd(msg.changeID, msg.message)
+
+	case aiAppliedMsg:
 		delete(m.aiLoading, msg.changeID)
 		if msg.err != nil {
 			if msg.elev != nil {
 				m.pendingElev = msg.elev
 				m.errMsg = ""
-				return m, nil
+				m, next := m.startNextAIDescribe()
+				return m, next
 			}
 			m.errMsg = msg.err.Error()
-			return m, nil
+			m, next := m.startNextAIDescribe()
+			if next != nil {
+				return m, tea.Batch(append([]tea.Cmd{next}, m.refreshFocusedCmds()...)...)
+			}
+			return m, tea.Batch(m.refreshFocusedCmds()...)
 		}
 		m.message = "AI described " + msg.changeID + ": " + msg.message
-		return m, tea.Batch(m.refreshFocusedCmds()...)
+		cmds := m.refreshFocusedCmds()
+		m, next := m.startNextAIDescribe()
+		if next != nil {
+			cmds = append(cmds, next)
+		}
+		return m, tea.Batch(cmds...)
 
 	case describeFinishedMsg:
 		if msg.err != nil {
@@ -1600,10 +1670,13 @@ func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
 	case "D":
 		if m.diffIsRevision && m.diffRev != "" {
 			changeID := m.diffRev
+			if m.aiLoading[changeID] {
+				return m, nil
+			}
 			m.aiLoading[changeID] = true
 			m.errMsg = ""
 			m.message = "AI generating message for " + changeID + "…"
-			cmds := []tea.Cmd{m.aiCmd(changeID)}
+			cmds := []tea.Cmd{m.aiGenerateCmd(changeID)}
 			if !m.spinnerRunning {
 				m.spinnerRunning = true
 				cmds = append(cmds, spinnerTick())
@@ -1699,10 +1772,13 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "D":
 		if e := m.selectedEntry(); e != nil {
+			if m.aiLoading[e.ChangeID] {
+				return m, nil
+			}
 			m.aiLoading[e.ChangeID] = true
 			m.errMsg = ""
 			m.message = "AI generating message for " + e.ChangeID + "…"
-			cmds := []tea.Cmd{m.aiCmd(e.ChangeID)}
+			cmds := []tea.Cmd{m.aiGenerateCmd(e.ChangeID)}
 			if !m.spinnerRunning {
 				m.spinnerRunning = true
 				cmds = append(cmds, spinnerTick())

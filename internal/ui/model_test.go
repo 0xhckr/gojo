@@ -434,3 +434,221 @@ func TestDescribeImmutablePromptsElevation(t *testing.T) {
 	// was issued. The change id is baked into describeCmd, not inspectable here.
 	_ = changeID
 }
+
+// aiTestModel returns a minimal model ready for AI-describe message tests.
+// No jj repo or runner is needed — we only exercise message handlers and
+// inspect the returned model/cmd without executing the commands.
+func aiTestModel() Model {
+	return Model{
+		ready:           true,
+		width:           100,
+		height:          30,
+		view:            viewLog,
+		aiLoading:       map[string]bool{},
+		aiDescribeQueue: []aiPendingDescribe{},
+		entries: []jj.LogEntry{
+			{ChangeID: "abc12345", CommitID: "deadbeef", Subject: "test commit"},
+		},
+	}
+}
+
+// TestAIDescribeDedup verifies that pressing D twice on the same commit
+// only dispatches one generation command; the second press is a no-op.
+func TestAIDescribeDedup(t *testing.T) {
+	m := aiTestModel()
+
+	// First D press: should set aiLoading and return a command.
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	m = m2.(Model)
+	if !m.aiLoading["abc12345"] {
+		t.Fatal("first D did not set aiLoading")
+	}
+	if cmd == nil {
+		t.Fatal("first D did not produce a command")
+	}
+
+	// Second D press on the same commit: should be a no-op.
+	m2, cmd2 := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	m = m2.(Model)
+	if cmd2 != nil {
+		t.Error("second D on same commit should be a no-op, got a command")
+	}
+}
+
+// TestAIDescribeQueueSerialization verifies that multiple aiGeneratedMsg
+// messages are queued rather than launching concurrent describe applies.
+func TestAIDescribeQueueSerialization(t *testing.T) {
+	m := aiTestModel()
+
+	// First generation completes: should start apply immediately.
+	m.aiLoading["aaa"] = true
+	m.aiLoading["bbb"] = true
+	m2, cmd := m.Update(aiGeneratedMsg{changeID: "aaa", message: "msg-a"})
+	m = m2.(Model)
+	if !m.aiDescribeRunning {
+		t.Error("first aiGeneratedMsg did not set aiDescribeRunning")
+	}
+	if len(m.aiDescribeQueue) != 0 {
+		t.Errorf("queue should be empty, got %d items", len(m.aiDescribeQueue))
+	}
+	if cmd == nil {
+		t.Fatal("first aiGeneratedMsg did not produce an apply command")
+	}
+
+	// Second generation completes while first is still running: should queue.
+	m2, cmd2 := m.Update(aiGeneratedMsg{changeID: "bbb", message: "msg-b"})
+	m = m2.(Model)
+	if !m.aiDescribeRunning {
+		t.Error("aiDescribeRunning should still be true")
+	}
+	if len(m.aiDescribeQueue) != 1 {
+		t.Errorf("queue should have 1 item, got %d", len(m.aiDescribeQueue))
+	}
+	if m.aiDescribeQueue[0].changeID != "bbb" || m.aiDescribeQueue[0].message != "msg-b" {
+		t.Errorf("queued item = %+v, want {bbb, msg-b}", m.aiDescribeQueue[0])
+	}
+	if cmd2 != nil {
+		t.Error("second aiGeneratedMsg while apply running should not produce a command")
+	}
+}
+
+// TestAIDescribeGenerateError verifies that a failed generation clears
+// aiLoading and sets errMsg without touching the apply queue.
+func TestAIDescribeGenerateError(t *testing.T) {
+	m := aiTestModel()
+	m.aiLoading["bad"] = true
+	m.aiDescribeRunning = false
+
+	m2, cmd := m.Update(aiGeneratedMsg{changeID: "bad", err: errors.New("API error")})
+	m = m2.(Model)
+	if m.aiLoading["bad"] {
+		t.Error("aiLoading not cleared after generation error")
+	}
+	if m.errMsg == "" {
+		t.Error("errMsg not set after generation error")
+	}
+	if cmd != nil {
+		t.Error("generation error should not produce a command")
+	}
+}
+
+// TestAIDescribeApplySuccess verifies that a successful apply clears
+// aiLoading, sets the success message, and drains the next queue item.
+func TestAIDescribeApplySuccess(t *testing.T) {
+	m := aiTestModel()
+	m.aiLoading["aaa"] = true
+	m.aiDescribeRunning = true
+	// Pre-load a second item in the queue.
+	m.aiDescribeQueue = []aiPendingDescribe{{changeID: "bbb", message: "msg-b"}}
+
+	m2, cmd := m.Update(aiAppliedMsg{changeID: "aaa", message: "msg-a"})
+	m = m2.(Model)
+	if m.aiLoading["aaa"] {
+		t.Error("aiLoading not cleared after successful apply")
+	}
+	if !strings.Contains(m.message, "aaa") || !strings.Contains(m.message, "msg-a") {
+		t.Errorf("message = %q, want it to contain 'aaa' and 'msg-a'", m.message)
+	}
+	// Queue should be drained; next apply should fire.
+	if len(m.aiDescribeQueue) != 0 {
+		t.Errorf("queue should be empty after drain, got %d", len(m.aiDescribeQueue))
+	}
+	if !m.aiDescribeRunning {
+		t.Error("aiDescribeRunning should be true after draining next item")
+	}
+	if cmd == nil {
+		t.Error("apply success with queued items should produce a command (next apply + refresh)")
+	}
+}
+
+// TestAIDescribeApplySuccessEmptyQueue verifies that a successful apply with
+// an empty queue clears aiDescribeRunning.
+func TestAIDescribeApplySuccessEmptyQueue(t *testing.T) {
+	m := aiTestModel()
+	m.aiLoading["aaa"] = true
+	m.aiDescribeRunning = true
+
+	m2, _ := m.Update(aiAppliedMsg{changeID: "aaa", message: "msg-a"})
+	m = m2.(Model)
+	if m.aiDescribeRunning {
+		t.Error("aiDescribeRunning should be false when queue is empty")
+	}
+	if m.aiLoading["aaa"] {
+		t.Error("aiLoading not cleared")
+	}
+}
+
+// TestAIDescribeApplyError verifies that a failed apply clears aiLoading,
+// sets errMsg, and drains the next queue item.
+func TestAIDescribeApplyError(t *testing.T) {
+	m := aiTestModel()
+	m.aiLoading["aaa"] = true
+	m.aiDescribeRunning = true
+	m.aiDescribeQueue = []aiPendingDescribe{{changeID: "bbb", message: "msg-b"}}
+
+	m2, _ := m.Update(aiAppliedMsg{changeID: "aaa", err: errors.New("describe failed")})
+	m = m2.(Model)
+	if m.aiLoading["aaa"] {
+		t.Error("aiLoading not cleared after apply error")
+	}
+	if m.errMsg == "" {
+		t.Error("errMsg not set after apply error")
+	}
+	// Queue should be drained for next item.
+	if len(m.aiDescribeQueue) != 0 {
+		t.Errorf("queue should be empty after drain, got %d", len(m.aiDescribeQueue))
+	}
+	if !m.aiDescribeRunning {
+		t.Error("aiDescribeRunning should be true after draining next item on error")
+	}
+}
+
+// TestAIDescribeApplyElevation verifies that an elevatable apply error sets
+// pendingElev and still drains the queue.
+func TestAIDescribeApplyElevation(t *testing.T) {
+	m := aiTestModel()
+	m.aiLoading["imm"] = true
+	m.aiDescribeRunning = true
+	m.aiDescribeQueue = []aiPendingDescribe{{changeID: "bbb", message: "msg-b"}}
+
+	m2, _ := m.Update(aiAppliedMsg{
+		changeID: "imm",
+		err:      errors.New("is immutable"),
+		elev: &elevReq{
+			flag:   "--ignore-immutable",
+			reason: "target is immutable",
+			retry:  func() tea.Cmd { return nil },
+		},
+	})
+	m = m2.(Model)
+	if m.pendingElev == nil {
+		t.Fatal("elevation error did not set pendingElev")
+	}
+	if m.pendingElev.flag != "--ignore-immutable" {
+		t.Errorf("elev flag = %q, want --ignore-immutable", m.pendingElev.flag)
+	}
+	// Queue should still drain.
+	if len(m.aiDescribeQueue) != 0 {
+		t.Errorf("queue should be empty after drain, got %d", len(m.aiDescribeQueue))
+	}
+	if !m.aiDescribeRunning {
+		t.Error("aiDescribeRunning should be true after draining next item")
+	}
+}
+
+// TestAIDescribeStartNextEmptyQueue verifies that startNextAIDescribe clears
+// aiDescribeRunning when the queue is empty.
+func TestAIDescribeStartNextEmptyQueue(t *testing.T) {
+	m := aiTestModel()
+	m.aiDescribeRunning = true
+	m.aiDescribeQueue = nil
+
+	m2, cmd := m.startNextAIDescribe()
+	m = m2
+	if m.aiDescribeRunning {
+		t.Error("aiDescribeRunning should be false when queue is empty")
+	}
+	if cmd != nil {
+		t.Error("startNextAIDescribe with empty queue should return nil cmd")
+	}
+}
