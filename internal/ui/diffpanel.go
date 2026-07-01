@@ -71,15 +71,24 @@ func statusSym(k jj.StatusKind) string {
 // chunkRows is the set of body-row indices that belong to the focused chunk.
 // A thin left-edge bar is drawn for those rows: bright for the cursor line,
 // dim for the rest of the chunk.
-func renderDiffPanel(width, height int, rev string, loading bool, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool) []string {
+func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool) []string {
 	// Title bar — the only sticky chrome; description + status + separator +
-	// diff all scroll together below it as one body.
-	titleLine := " " + rev
-	if loading {
-		titleLine += "  loading…"
+	// diff all scroll together below it as one body. The revision ID uses the
+	// same two-tone highlighting as the log view: the shortest-unique prefix
+	// in magenta, the rest in purple.
+	var titleSegs []seg
+	titleSegs = append(titleSegs, seg{text: " ", fg: colText, bg: colPanel})
+	if revPrefixLen > 0 && revPrefixLen < len(rev) {
+		titleSegs = append(titleSegs, seg{text: rev[:revPrefixLen], fg: colMagenta, bold: true, bg: colPanel})
+		titleSegs = append(titleSegs, seg{text: rev[revPrefixLen:], fg: colTextMuted, bg: colPanel})
+	} else {
+		titleSegs = append(titleSegs, seg{text: rev, fg: colMagenta, bold: true, bg: colPanel})
 	}
-	titleLine += "  (enter/q to close) "
-	out := []string{bgRow(width, colElement, seg{text: titleLine, fg: colText})}
+	if loading {
+		titleSegs = append(titleSegs, seg{text: "  loading…", fg: colText, bg: colPanel})
+	}
+	titleSegs = append(titleSegs, seg{text: "  (enter/q to close) ", fg: colText, bg: colPanel})
+	out := []string{bgRow(width, colPanel, titleSegs...)}
 
 	contentH := height - len(out)
 	if contentH < 0 {

@@ -61,6 +61,7 @@ type Model struct {
 	// Diff panel.
 	diffOpen       bool
 	diffRev        string
+	diffRevPrefix  int // shortest-unique-prefix length for diffRev (0 = none)
 	diffIsRevision bool // true: showing a revision diff (reloadable); false: a list view
 	diffLoading    bool
 	diffDesc       string // revision description shown above the status section
@@ -594,6 +595,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.diffOpen = true
 		m.diffRev = msg.title
+		m.diffRevPrefix = 0
 		m.diffIsRevision = false
 		m.diffRaw = msg.content
 		m.diffRows = nil
@@ -1482,6 +1484,7 @@ func (m Model) handleFileBlameKey(k string) (tea.Model, tea.Cmd) {
 			line := fv.lines[fv.cursorY]
 			m.diffOpen = true
 			m.diffRev = line.ChangeID
+			m.diffRevPrefix = 0
 			m.diffIsRevision = true
 			m.diffLoading = true
 			m.diffScrollY = 0
@@ -1529,6 +1532,7 @@ func (m Model) handleFileHistoryKey(k string) (tea.Model, tea.Cmd) {
 			e := fv.hist[fv.histCur]
 			m.diffOpen = true
 			m.diffRev = e.ChangeID
+			m.diffRevPrefix = e.ChangeIDPrefixLen
 			m.diffIsRevision = true
 			m.diffLoading = true
 			m.diffScrollY = 0
@@ -1621,6 +1625,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		if e := m.selectedEntry(); e != nil {
 			m.diffOpen = true
 			m.diffRev = e.ChangeID
+			m.diffRevPrefix = e.ChangeIDPrefixLen
 			m.diffIsRevision = true
 			m.diffLoading = true
 			m.diffScrollY = 0
@@ -2275,7 +2280,7 @@ func (m Model) View() string {
 	case m.view == viewHelp:
 		lines = append(lines, renderHelp(m.width, ch, m.helpScrollY)...)
 	case m.diffOpen:
-		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffLoading, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows())...)
+		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows())...)
 	case m.view == viewFile:
 		lines = append(lines, m.renderFileView(m.width, ch)...)
 	default:

@@ -167,9 +167,9 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 		hs = append(hs, seg{text: " ", bg: bg})
 		if e.ChangeIDPrefixLen > 0 && e.ChangeIDPrefixLen < len(e.ChangeID) {
 			hs = append(hs, seg{text: e.ChangeID[:e.ChangeIDPrefixLen], fg: colMagenta, bold: true, bg: bg})
-			hs = append(hs, seg{text: e.ChangeID[e.ChangeIDPrefixLen:], fg: colPurple, bold: true, bg: bg})
+			hs = append(hs, seg{text: e.ChangeID[e.ChangeIDPrefixLen:], fg: colTextMuted, bg: bg})
 		} else {
-			hs = append(hs, seg{text: e.ChangeID, fg: colPurple, bold: true, bg: bg})
+			hs = append(hs, seg{text: e.ChangeID, fg: colMagenta, bold: true, bg: bg})
 		}
 		hs = append(hs, seg{text: " ", bg: bg})
 		hs = append(hs, seg{text: e.Authors, fg: colBlue, bg: bg})

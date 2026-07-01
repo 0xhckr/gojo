@@ -68,7 +68,7 @@ func TestRenderDiff(t *testing.T) {
 	}
 
 	// Ensure renderDiffPanel produces exactly the requested height.
-	out := renderDiffPanel(80, 24, "abcd", false, "", false, rows, maxLineDigits(rows), nil, "", 0, -1, nil)
+	out := renderDiffPanel(80, 24, "abcd", 0, false, "", false, rows, maxLineDigits(rows), nil, "", 0, -1, nil)
 	if len(out) != 24 {
 		t.Errorf("diff panel lines = %d, want 24", len(out))
 	}
