@@ -291,11 +291,6 @@ type fileHistoryMsg struct {
 	err     error
 }
 
-type fzfPickedMsg struct {
-	path string
-	err  error
-}
-
 // ── Init ────────────────────────────────────────────────────────────────────
 
 // Init kicks off configuration loading, the auto-refresh poll loop, and the
@@ -905,15 +900,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fileView.histOff = 0
 		m.fileView.phase = fileHistory
 		return m, nil
-
-	case fzfPickedMsg:
-		if msg.err != nil || msg.path == "" {
-			// fzf cancelled (esc) — stay in the picker.
-			return m, nil
-		}
-		m.fileView.err = ""
-		m, tick := m.startBusy("annotating " + msg.path + "…")
-		return m, tea.Batch(tick, m.loadAnnotateCmd(msg.path))
 
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
@@ -1833,10 +1819,13 @@ func (m Model) handleHelpKey(k string) Model {
 }
 
 // handleFilePickerKey drives the tree-style file browser. Any typed
-// character launches fzf (pre-filled with that character) as the secondary
-// fuzzy picker; navigation keys move/expand the tree.
+// character launches the inline fuzzy finder (pre-filled with that
+// character) as a telescoped overlay; navigation keys move/expand the tree.
 func (m Model) handleFilePickerKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 	fv := &m.fileView
+	if fv.fzfActive {
+		return m.handleFzfKey(msg, k)
+	}
 	switch k {
 	case "esc", "q":
 		// Leave the file view entirely.
@@ -1901,10 +1890,75 @@ func (m Model) handleFilePickerKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd
 		return m, nil
 	}
 
-	// Any typed character launches fzf as the secondary fuzzy picker,
-	// pre-seeded with that character.
+	// Any typed character activates the inline fuzzy finder, pre-seeded
+	// with that character.
 	if s, ok := typed(msg); ok && s != "" {
-		return m, m.fzfPickCmd(s)
+		if len(fv.files) == 0 {
+			return m, nil
+		}
+		fv.fzfActive = true
+		fv.fzfQuery = s
+		fv.fzfCursor = 0
+		fv.fzfOffset = 0
+		fv.fzfFilter()
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleFzfKey drives the inline fuzzy finder overlay. Typed characters
+// append to the query; backspace removes the last character; enter opens
+// the selected file; esc returns to the tree.
+func (m Model) handleFzfKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+	fv := &m.fileView
+	switch k {
+	case "esc":
+		fv.fzfActive = false
+		return m, nil
+	case "enter":
+		if fv.fzfCursor < len(fv.fzfResults) {
+			path := fv.fzfResults[fv.fzfCursor].path
+			fv.fzfActive = false
+			m, tick := m.startBusy("annotating " + path + "…")
+			return m, tea.Batch(tick, m.loadAnnotateCmd(path))
+		}
+		return m, nil
+	case "up", "k":
+		if fv.fzfCursor > 0 {
+			fv.fzfCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if fv.fzfCursor < len(fv.fzfResults)-1 {
+			fv.fzfCursor++
+		}
+		return m, nil
+	case "home", "g":
+		fv.fzfCursor = 0
+		return m, nil
+	case "end", "G":
+		fv.fzfCursor = max(0, len(fv.fzfResults)-1)
+		return m, nil
+	case "pgup":
+		fv.fzfCursor = max(0, fv.fzfCursor-10)
+		return m, nil
+	case "pgdown":
+		fv.fzfCursor = min(max(0, len(fv.fzfResults)-1), fv.fzfCursor+10)
+		return m, nil
+	case "backspace":
+		fv.fzfQuery = trimLastRune(fv.fzfQuery)
+		fv.fzfFilter()
+		return m, nil
+	case "ctrl+u":
+		fv.fzfQuery = ""
+		fv.fzfFilter()
+		return m, nil
+	}
+	// Typed characters append to the query and re-filter.
+	if s, ok := typed(msg); ok && s != "" {
+		fv.fzfQuery += s
+		fv.fzfFilter()
+		return m, nil
 	}
 	return m, nil
 }
@@ -2931,6 +2985,10 @@ func (m Model) renderFileStatusBar() []string {
 	fv := &m.fileView
 	switch fv.phase {
 	case filePicker:
+		if fv.fzfActive {
+			text := fmt.Sprintf(" fzf · %d/%d files", len(fv.fzfResults), len(fv.files))
+			return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: colGray})}
+		}
 		text := fmt.Sprintf(" file browser · %d files · type to fzf", len(fv.files))
 		if fv.err != "" {
 			text = " ✖ " + fv.err
@@ -3174,11 +3232,17 @@ func (m Model) helpBarItems() [][2]string {
 				{"↑/k", "↑"}, {"↓/j", "↓"}, {"open commit", "⏎"},
 				{"back", "esc/q"},
 			}
-		default:
+	default:
+		if m.fileView.fzfActive {
 			return [][2]string{
-				{"↑/k", "↑"}, {"↓/j", "↓"}, {"⏎/l open", "⏎"}, {"h collapse", "h"},
-				{"type→fzf", "f"}, {"quit", "q"},
+				{"type", "filter"}, {"⌫ del", "backspace"}, {"⏎ open", "⏎"},
+				{"↑/k ↓/j", "nav"}, {"esc back", "esc"},
 			}
+		}
+		return [][2]string{
+			{"↑/k", "↑"}, {"↓/j", "↓"}, {"⏎/l open", "⏎"}, {"h collapse", "h"},
+			{"type→fzf", "f"}, {"quit", "q"},
+		}
 		}
 	case m.view == viewHelp:
 		return [][2]string{

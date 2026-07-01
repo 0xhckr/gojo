@@ -1,10 +1,10 @@
 package ui
 
 import (
-	"bytes"
-	"os/exec"
+	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -36,6 +36,58 @@ type treeRow struct {
 	depth int
 }
 
+// fzfResult is one matched file from the inline fuzzy finder.
+type fzfResult struct {
+	path    string
+	score   int
+	matched []bool // per-rune: did this position match the query
+}
+
+// isWordBoundary reports whether r precedes a word boundary (for fuzzy
+// match scoring bonuses).
+func isWordBoundary(r rune) bool {
+	switch r {
+	case '/', '_', '-', '.', ' ', '\t':
+		return true
+	}
+	return false
+}
+
+// fuzzyMatch performs case-insensitive subsequence matching of query against
+// path. It returns a score (higher is better), a per-rune matched mask for
+// highlighting, and ok=false when the query is not a subsequence.
+func fuzzyMatch(query, path string) (fzfResult, bool) {
+	if query == "" {
+		return fzfResult{path: path}, true
+	}
+	qr := []rune(query)
+	sr := []rune(path)
+	matched := make([]bool, len(sr))
+	qi := 0
+	score := 0
+	prevMatch := -10
+	for si := 0; si < len(sr) && qi < len(qr); si++ {
+		if unicode.ToLower(sr[si]) == unicode.ToLower(qr[qi]) {
+			matched[si] = true
+			if si == prevMatch+1 {
+				score += 15 // consecutive match bonus
+			} else {
+				score += 1
+			}
+			if si == 0 || isWordBoundary(sr[si-1]) {
+				score += 20 // word boundary bonus
+			}
+			prevMatch = si
+			qi++
+		}
+	}
+	if qi < len(qr) {
+		return fzfResult{}, false
+	}
+	score -= len(sr) / 10 // mild preference for shorter paths
+	return fzfResult{path: path, score: score, matched: matched}, true
+}
+
 // fileViewState holds all state for the file view: the picker tree, the open
 // file's blame, and the file's history list.
 type fileViewState struct {
@@ -48,6 +100,13 @@ type fileViewState struct {
 	rows   []treeRow   // flattened visible rows
 	cursor int         // index into rows
 	offset int
+
+	// inline fuzzy finder (overlay within the picker)
+	fzfActive  bool
+	fzfQuery   string
+	fzfResults []fzfResult
+	fzfCursor  int
+	fzfOffset  int
 
 	// blame (file open)
 	path       string
@@ -234,6 +293,50 @@ func (fv *fileViewState) pickerVisibleRange(height int) (int, int) {
 	return off, end
 }
 
+// fzfFilter re-computes the fuzzy match results for the current query,
+// sorted by score (descending) then alphabetically. The cursor is clamped
+// to the new result set.
+func (fv *fileViewState) fzfFilter() {
+	var results []fzfResult
+	for _, f := range fv.files {
+		if r, ok := fuzzyMatch(fv.fzfQuery, f); ok {
+			results = append(results, r)
+		}
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].score != results[j].score {
+			return results[i].score > results[j].score
+		}
+		return results[i].path < results[j].path
+	})
+	fv.fzfResults = results
+	if fv.fzfCursor >= len(results) {
+		fv.fzfCursor = max(0, len(results)-1)
+	}
+}
+
+// fzfVisibleRange computes the [start, end) row window for the fzf cursor,
+// updating fzfOffset for scroll tracking.
+func (fv *fileViewState) fzfVisibleRange(height int) (int, int) {
+	total := len(fv.fzfResults)
+	off := fv.fzfOffset
+	if fv.fzfCursor < off {
+		off = fv.fzfCursor
+	}
+	end := off
+	used := 0
+	for end < total && used < height {
+		used++
+		end++
+	}
+	if fv.fzfCursor >= end {
+		off = max(0, fv.fzfCursor-height+1)
+		end = fv.fzfCursor + 1
+	}
+	fv.fzfOffset = off
+	return off, end
+}
+
 // ── Commands ────────────────────────────────────────────────────────────────
 
 func (m Model) loadFileListCmd() tea.Cmd {
@@ -260,37 +363,6 @@ func (m Model) loadFileHistoryCmd(path string) tea.Cmd {
 	}
 }
 
-// fzfPickCmd suspends the TUI and runs fzf over the tracked-file list. fzf
-// renders its finder to stderr (the terminal) and prints the selection to
-// stdout, which we capture by pre-setting cmd.Stdout — tea.ExecProcess only
-// overrides stdout when it's nil, so our buffer survives.
-func (m Model) fzfPickCmd(initial string) tea.Cmd {
-	files := m.fileView.files
-	if len(files) == 0 {
-		return nil
-	}
-	var buf bytes.Buffer
-	args := []string{
-		"--prompt", "gojo file> ",
-		"--ansi",
-		"--delimiter", "/",
-		"--preview", "jj file show -r @ {} 2>/dev/null | head -80",
-		"--preview-window", "right:50%:wrap:hidden",
-		"--height", "60%",
-		"--layout", "reverse",
-		"--info", "inline",
-	}
-	if initial != "" {
-		args = append(args, "--query", initial)
-	}
-	c := exec.Command("fzf", args...)
-	c.Stdin = strings.NewReader(strings.Join(files, "\n"))
-	c.Stdout = &buf
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		return fzfPickedMsg{path: strings.TrimSpace(buf.String()), err: err}
-	})
-}
-
 // ── Rendering ───────────────────────────────────────────────────────────────
 
 // renderFileView dispatches to the active phase's renderer.
@@ -307,6 +379,9 @@ func (m Model) renderFileView(width, height int) []string {
 
 func (m Model) renderFilePicker(width, height int) []string {
 	fv := &m.fileView
+	if fv.fzfActive {
+		return m.renderFzf(width, height)
+	}
 	titleLeft := " file browser"
 	titleRight := " f: fzf · ⏎ open · l/→ expand · h/← collapse · esc/q leave "
 	pad := max(1, width-len(titleLeft)-len(titleRight))
@@ -336,6 +411,114 @@ func (m Model) renderFilePicker(width, height int) []string {
 	}
 	content = padLines(content, contentH, width)
 	out = append(out, content...)
+	return padLines(out, height, width)
+}
+
+// renderFzf renders the inline fuzzy finder as an overlay within the file
+// picker content area. A prompt bar with the live query and match count sits
+// above a divider and the filtered result list. Matched characters are
+// highlighted in yellow; the cursor row uses colElement with a yellow ┃ bar,
+// matching the diff panel's cursor style.
+func (m Model) renderFzf(width, height int) []string {
+	fv := &m.fileView
+
+	// Title bar.
+	titleLeft := " file browser"
+	titleRight := " esc back · ⏎ open · type to filter "
+	pad := max(1, width-len(titleLeft)-len(titleRight))
+	out := []string{bgRow(width, colDarkPurple,
+		seg{text: titleLeft, fg: colPurple, bg: colDarkPurple},
+		seg{text: strings.Repeat(" ", pad), bg: colDarkPurple},
+		seg{text: titleRight, fg: colGray, bg: colDarkPurple},
+	)}
+
+	// Prompt bar — ┃ fzf  query█  …  N matches
+	queryStr := fv.fzfQuery + "█"
+	var matchStr string
+	if len(fv.fzfResults) == 0 {
+		matchStr = "no matches"
+	} else {
+		matchStr = fmt.Sprintf("%d matches", len(fv.fzfResults))
+	}
+	leftW := lipgloss.Width("┃ fzf  ") + lipgloss.Width(queryStr)
+	rightW := lipgloss.Width(matchStr) + 1
+	promptPad := max(0, width-leftW-rightW)
+	prompt := bgRow(width, colPanel,
+		seg{text: "┃ ", fg: colCyan, bold: true, bg: colPanel},
+		seg{text: "fzf  ", fg: colTextMuted, bg: colPanel},
+		seg{text: queryStr, fg: colYellow, bold: true, bg: colPanel},
+		seg{text: strings.Repeat(" ", promptPad), bg: colPanel},
+		seg{text: matchStr, fg: colTextMuted, bg: colPanel},
+		seg{text: " ", bg: colPanel},
+	)
+	out = append(out, prompt)
+
+	// Divider.
+	out = append(out, bgRow(width, colPanel, seg{text: strings.Repeat("─", width), fg: colBorder, bg: colPanel}))
+
+	// Results.
+	contentH := height - 3 // title + prompt + divider
+	if contentH < 0 {
+		contentH = 0
+	}
+
+	if len(fv.fzfResults) == 0 {
+		out = append(out, bgRow(width, colPanel, seg{text: "  (no matches)", fg: colTextMuted, bg: colPanel}))
+		return padLines(out, height, width)
+	}
+
+	start, end := fv.fzfVisibleRange(contentH)
+	for i := start; i < end; i++ {
+		r := fv.fzfResults[i]
+		selected := i == fv.fzfCursor
+		bg := colPanel
+		if selected {
+			bg = colElement
+		}
+		barFg := bg
+		if selected {
+			barFg = colYellow
+		}
+
+		segs := []seg{
+			{text: "┃", fg: barFg, bold: true, bg: bg},
+			{text: " ", bg: bg},
+		}
+
+		// Render path with matched chars highlighted, grouping consecutive
+		// matched / non-matched runs into single segments.
+		sr := []rune(r.path)
+		var buf strings.Builder
+		bufMatched := false
+		for si, ch := range sr {
+			isMatch := r.matched != nil && si < len(r.matched) && r.matched[si]
+			if si == 0 {
+				bufMatched = isMatch
+			}
+			if isMatch != bufMatched {
+				if buf.Len() > 0 {
+					fg := colText
+					if bufMatched {
+						fg = colYellow
+					}
+					segs = append(segs, seg{text: buf.String(), fg: fg, bold: bufMatched, bg: bg})
+					buf.Reset()
+				}
+				bufMatched = isMatch
+			}
+			buf.WriteRune(ch)
+		}
+		if buf.Len() > 0 {
+			fg := colText
+			if bufMatched {
+				fg = colYellow
+			}
+			segs = append(segs, seg{text: buf.String(), fg: fg, bold: bufMatched, bg: bg})
+		}
+
+		out = append(out, bgRow(width, bg, segs...))
+	}
+
 	return padLines(out, height, width)
 }
 

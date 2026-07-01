@@ -92,7 +92,7 @@ var helpSections = []helpSection{
 		{"l / →", "expand directory"},
 		{"h / ←", "collapse directory / up"},
 		{"⏎ / space", "open file  (or toggle dir)"},
-		{"type any char", "launch fzf fuzzy picker"},
+		{"type any char", "launch inline fuzzy picker"},
 		{"h", "file history  (all())"},
 		{"⏎", "open the line's commit"},
 		{"g / G", "jump top / bottom"},
