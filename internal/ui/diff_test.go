@@ -96,6 +96,135 @@ func TestComputeDiffChunks(t *testing.T) {
 	}
 }
 
+// TestWordDiff verifies that word-level diff highlighting is applied to
+// modified lines (paired deletion+addition) but not to pure additions or
+// pure deletions.
+func TestWordDiff(t *testing.T) {
+	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,3 +1,3 @@\n context\n-old line\n+new line\n+pure addition\n"
+	rows := renderDiff(raw)
+
+	var ctxRow, delRow, modRow, pureRow *diffRow
+	for i := range rows {
+		r := &rows[i]
+		if r.kind != rowLine {
+			continue
+		}
+		switch {
+		case r.lineKind == "context":
+			ctxRow = r
+		case r.lineKind == "deletion":
+			delRow = r
+		case r.lineKind == "addition" && pureRow == nil && modRow != nil:
+			pureRow = r
+		case r.lineKind == "addition" && modRow == nil:
+			modRow = r
+		}
+	}
+	if delRow == nil || modRow == nil || pureRow == nil {
+		t.Fatal("missing expected rows")
+	}
+
+	// The modified addition line ("new line") should have at least one span
+	// with a bg highlight (the changed word "new").
+	hasBg := false
+	for _, s := range modRow.spans {
+		if s.bg != "" {
+			hasBg = true
+			break
+		}
+	}
+	if !hasBg {
+		t.Error("modified addition line has no highlighted spans; want word-diff bg on changed token")
+	}
+
+	// The deletion line ("old line") should also have a highlighted span.
+	hasBg = false
+	for _, s := range delRow.spans {
+		if s.bg != "" {
+			hasBg = true
+			break
+		}
+	}
+	if !hasBg {
+		t.Error("deletion line has no highlighted spans; want word-diff bg on changed token")
+	}
+
+	// The pure addition line ("pure addition") should NOT have any bg
+	// highlight — it has no paired deletion.
+	for _, s := range pureRow.spans {
+		if s.bg != "" {
+			t.Error("pure addition line has highlighted spans; want none (no paired deletion)")
+			break
+		}
+	}
+
+	// The context line should never have bg highlights.
+	for _, s := range ctxRow.spans {
+		if s.bg != "" {
+			t.Error("context line has highlighted spans; want none")
+			break
+		}
+	}
+}
+
+// TestWordDiffSplitSpans verifies that splitSpansByRanges correctly splits
+// spans at highlight boundaries and preserves text content.
+func TestWordDiffSplitSpans(t *testing.T) {
+	spans := []span{
+		{text: "func", fg: "#kw"},
+		{text: " Old", fg: "#fn"},
+		{text: "() int {}", fg: "#plain"},
+	}
+	ranges := [][2]int{{5, 9}} // "Old(" in byte positions
+	result := splitSpansByRanges(spans, ranges, "#highlight")
+
+	// Reconstruct text to verify nothing was lost.
+	got := spansText(result)
+	want := "func Old() int {}"
+	if got != want {
+		t.Errorf("text = %q, want %q", got, want)
+	}
+
+	// At least one span should have the highlight bg.
+	hasHighlight := false
+	for _, s := range result {
+		if s.bg == "#highlight" {
+			hasHighlight = true
+			break
+		}
+	}
+	if !hasHighlight {
+		t.Error("no span has highlight bg")
+	}
+}
+
+// TestWordDiffCompute verifies the LCS-based word diff classification.
+func TestWordDiffCompute(t *testing.T) {
+	oldClass, newClass := computeWordDiff("hello world", "hello earth")
+
+	// Old: "hello"(common) " "(common) "world"(removed)
+	if len(oldClass) != 3 {
+		t.Fatalf("old classes = %d, want 3", len(oldClass))
+	}
+	if oldClass[0] != wordCommon || oldClass[1] != wordCommon {
+		t.Errorf("old[0:1] = %d,%d; want wordCommon,wordCommon", oldClass[0], oldClass[1])
+	}
+	if oldClass[2] != wordRemoved {
+		t.Errorf("old[2] = %d, want wordRemoved", oldClass[2])
+	}
+
+	// New: "hello"(common) " "(common) "earth"(added)
+	if len(newClass) != 3 {
+		t.Fatalf("new classes = %d, want 3", len(newClass))
+	}
+	if newClass[0] != wordCommon || newClass[1] != wordCommon {
+		t.Errorf("new[0:1] = %d,%d; want wordCommon,wordCommon", newClass[0], newClass[1])
+	}
+	if newClass[2] != wordAdded {
+		t.Errorf("new[2] = %d, want wordAdded", newClass[2])
+	}
+}
+
 // TestDiffCursorScroll verifies the "reveal one line at a time" behavior for a
 // long chunk: stepping down through a chunk taller than the viewport scrolls a
 // line at a time, and stepping past the end jumps to the next chunk. It also

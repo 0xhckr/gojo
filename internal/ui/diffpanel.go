@@ -363,13 +363,18 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 
 		// Build the wrapping body: the syntax-highlighted spans, all carrying
 		// the line background so continuation lines stay colour-continuous.
+		// Spans with a per-token word-diff bg override use that instead.
 		var bodySegs []seg
 		for _, s := range r.spans {
 			var fg lipgloss.TerminalColor = lineFg
 			if s.fg != "" {
 				fg = lipgloss.Color(s.fg)
 			}
-			bodySegs = append(bodySegs, seg{text: s.text, fg: fg, bg: lineBg})
+			bg := lineBg
+			if s.bg != "" {
+				bg = lipgloss.Color(s.bg)
+			}
+			bodySegs = append(bodySegs, seg{text: s.text, fg: fg, bg: bg})
 		}
 		wrapped := wrapSegs(bodySegs, bodyW)
 
