@@ -101,6 +101,11 @@ type Model struct {
 	acOriginal     *string
 	acIdx          int
 
+	// Tag mode.
+	tagMode   bool
+	tagAction string // "" | s m d l p
+	tagInput  string
+
 	// Git / remote mode.
 	gitMode      bool
 	remoteMode   bool
@@ -959,6 +964,8 @@ func (m Model) statusBarHeight() int {
 	switch {
 	case m.bookmarkMode && m.bookmarkAction == "":
 		return len(wrapMenu(m.width, " [bookmark mode] ", colCyan, colPurple, " ", bookmarkMenuItems))
+	case m.tagMode && m.tagAction == "":
+		return len(wrapMenu(m.width, " [tag mode] ", colTeal, colPurple, " ", tagMenuItems))
 	case m.gitMode && m.remoteMode && m.remoteAction == "":
 		return len(wrapMenu(m.width, " [git > remote] ", colPink, colPurple, " ", remoteMenuItems))
 	case m.gitMode && !m.remoteMode:
@@ -1453,6 +1460,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.bookmarkMode {
 		return m.handleBookmarkKey(msg, k)
+	}
+
+	if m.tagMode {
+		return m.handleTagKey(msg, k)
 	}
 
 	if m.gitMode {
@@ -2374,6 +2385,15 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		m.errMsg = ""
 		m.message = ""
 		return m, nil
+	case "t":
+		m.tagMode = true
+		m.tagAction = ""
+		m.tagInput = ""
+		m.acOriginal = nil
+		m.acIdx = 0
+		m.errMsg = ""
+		m.message = ""
+		return m, nil
 	case "f":
 		// File view: browse tracked files, open one with blame, inspect history.
 		m.view = viewFile
@@ -2772,6 +2792,133 @@ func (m Model) execBookmark(action, input string) tea.Cmd {
 	}
 }
 
+func (m Model) handleTagKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+	if m.tagAction != "" {
+		switch k {
+		case "esc":
+			if m.acOriginal != nil {
+				m.tagInput = *m.acOriginal
+				m.acOriginal = nil
+				m.acIdx = 0
+				return m, nil
+			}
+			m.tagAction = ""
+			m.tagInput = ""
+			m.acOriginal = nil
+			m.acIdx = 0
+			return m, nil
+		case "enter":
+			action := m.tagAction
+			input := m.tagInput
+			m.acOriginal = nil
+			m.acIdx = 0
+			m.tagMode = false
+			m.tagAction = ""
+			m.tagInput = ""
+			if action == "p" {
+				r := m.runner
+				return m.busySimpleCmd("pushing tags…", func() error { return r.GitPushTags() }, "pushed tags")
+			}
+			m, tick := m.startBusy("tag " + action + "…")
+			return m, tea.Batch(tick, m.execTag(action, input))
+		case "tab":
+			prefix := m.tagInput
+			if m.acOriginal != nil {
+				prefix = *m.acOriginal
+			}
+			filtered := filterPrefix(m.candidates(), prefix)
+			if len(filtered) > 0 {
+				if m.acOriginal == nil {
+					orig := m.tagInput
+					m.acOriginal = &orig
+					m.acIdx = 0
+					m.tagInput = filtered[0]
+				} else {
+					m.acIdx = (m.acIdx + 1) % len(filtered)
+					m.tagInput = filtered[m.acIdx]
+				}
+			}
+			return m, nil
+		case "backspace", "delete":
+			m.tagInput = trimLastRune(m.tagInput)
+			m.acOriginal = nil
+			m.acIdx = 0
+			return m, nil
+		}
+		if s, ok := typed(msg); ok {
+			m.tagInput += s
+			m.acOriginal = nil
+			m.acIdx = 0
+		}
+		return m, nil
+	}
+
+	// Tag menu.
+	switch k {
+	case "esc", "q":
+		m.tagMode = false
+		m.acOriginal = nil
+		m.acIdx = 0
+		return m, nil
+	case "s", "m", "d":
+		m.tagAction = k
+		m.tagInput = ""
+		m.acOriginal = nil
+		m.acIdx = 0
+		return m, nil
+	case "l":
+		m.tagMode = false
+		m, tick := m.startBusy("loading tags…")
+		return m, tea.Batch(tick, m.execTag("l", ""))
+	case "p":
+		m.tagMode = false
+		r := m.runner
+		return m.busySimpleCmd("pushing tags…", func() error { return r.GitPushTags() }, "pushed tags")
+	}
+	return m, nil
+}
+
+func (m Model) execTag(action, input string) tea.Cmd {
+	r := m.runner
+	rev := ""
+	if e := m.selectedEntry(); e != nil {
+		rev = e.ChangeID
+	}
+	if action == "l" {
+		return listCmd(r.TagList, "tag list")
+	}
+	// run performs the tag action; runElevated re-runs it with an extra
+	// trailing flag for elevation retries.
+	run := func(extra string) error {
+		switch action {
+		case "s":
+			return r.TagSet(input, rev, extra)
+		case "m":
+			return r.TagSet(input, rev, "--allow-move", extra)
+		case "d":
+			return r.TagDelete(input, extra)
+		}
+		return nil
+	}
+	okMsg := "tag " + action + ": " + input
+	return func() tea.Msg {
+		if err := run(""); err != nil {
+			if flag, reason := jj.DetectElevation(err.Error()); flag != "" {
+				return actionDoneMsg{
+					err: err,
+					elev: &elevReq{
+						flag:   flag,
+						reason: reason,
+						retry:  func() tea.Cmd { return m.syncFnCmd(func() error { return run(flag) }, okMsg) },
+					},
+				}
+			}
+			return actionDoneMsg{err: err}
+		}
+		return actionDoneMsg{message: okMsg, refresh: true}
+	}
+}
+
 func (m Model) execRemote(action, input string) tea.Cmd {
 	r := m.runner
 	if action == "l" {
@@ -2828,6 +2975,11 @@ func (m Model) candidates() []string {
 				add(bm)
 			}
 		}
+		for _, tg := range e.Tags {
+			if tg != "" && !strings.Contains(tg, "@") {
+				add(tg)
+			}
+		}
 		add(e.ChangeID)
 		add(e.CommitID)
 	}
@@ -2848,13 +3000,18 @@ func filterPrefix(cands []string, prefix string) []string {
 }
 
 func (m Model) displaySuggestions() []string {
-	if m.bookmarkAction == "" {
+	if m.bookmarkAction == "" && m.tagAction == "" {
 		return nil
 	}
 	if m.bookmarkAction == "r" && strings.Contains(m.bookmarkInput, " ") {
 		return nil
 	}
-	prefix := m.bookmarkInput
+	var prefix string
+	if m.tagAction != "" {
+		prefix = m.tagInput
+	} else {
+		prefix = m.bookmarkInput
+	}
 	if m.acOriginal != nil {
 		prefix = *m.acOriginal
 	}
@@ -2866,7 +3023,7 @@ func (m Model) displaySuggestions() []string {
 }
 
 func (m Model) suggestionsVisible() bool {
-	return m.bookmarkAction != "" && len(m.displaySuggestions()) > 0
+	return (m.bookmarkAction != "" || m.tagAction != "") && len(m.displaySuggestions()) > 0
 }
 
 func typed(msg tea.KeyMsg) (string, bool) {
@@ -3089,6 +3246,18 @@ func (m Model) renderStatusBar() []string {
 		}
 		return m.renderMenuRows(" [bookmark mode] ", colCyan, colPurple, bookmarkMenuItems)
 
+	case m.tagMode:
+		if m.tagAction != "" {
+			prompts := map[string]string{
+				"s": "set to " + m.selChangeID() + ": ",
+				"m": "move to " + m.selChangeID() + ": ",
+				"d": "delete: ",
+			}
+			text := " [tag] " + prompts[m.tagAction] + m.tagInput + "█"
+			return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: colTeal})}
+		}
+		return m.renderMenuRows(" [tag mode] ", colTeal, colPurple, tagMenuItems)
+
 	case m.gitMode:
 		if m.remoteMode {
 			if m.remoteAction != "" {
@@ -3196,7 +3365,7 @@ func (m Model) selChangeID() string {
 // the bottom help bar while browsing the log (the default context).
 var defaultHelpBarItems = [][2]string{
 	{"⏎diff", "⏎"}, {"describe", "d"},
-	{"AI Desc", "D"}, {"bookmark", "b"}, {"git", "g"},
+	{"AI Desc", "D"}, {"bookmark", "b"}, {"tag", "t"}, {"git", "g"},
 	{"undo", "u"}, {"rebase", "r"}, {"squash", "s"}, {"absorb", "x"}, {"edit", "e"}, {"new", "n"},
 	{"abandon", "a"}, {"file", "f"}, {"?help", "?"}, {"quit", "q"},
 }
@@ -3249,7 +3418,7 @@ func (m Model) helpBarItems() [][2]string {
 			{"↑/k", "↑"}, {"↓/j", "↓"}, {"?/q close", "?"},
 		}
 	case m.rebaseMode, m.squashMode,
-		m.bookmarkMode, m.gitMode:
+		m.bookmarkMode, m.tagMode, m.gitMode:
 		// Keys for these modes are shown inline in the status bar.
 		return nil
 	default:
@@ -3273,6 +3442,11 @@ var (
 	remoteMenuItems = [][2]string{
 		{"add", "a"}, {"list", "l"}, {"remove", "r"},
 		{"rename", "m"}, {"set-url", "s"},
+		{"cancel", "esc"},
+	}
+	tagMenuItems = [][2]string{
+		{"set", "s"}, {"move", "m"}, {"delete", "d"},
+		{"list", "l"}, {"push", "p"},
 		{"cancel", "esc"},
 	}
 )

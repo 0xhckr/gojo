@@ -78,7 +78,7 @@ fields. Fields are `|`-separated (9 total):
 ```
 0: change_id.short(8) | 1: change_id.shortest() | 2: commit_id.short(8) |
 3: commit_id.shortest() | 4: author.email() | 5: date | 6: working_copy (Y/N) |
-7: immutable (Y/N) | 8: bookmarks (comma-separated)
+7: immutable (Y/N) | 8: bookmarks (comma-separated) | 9: tags (comma-separated)
 ```
 
 Lines without a marker byte are graph edge lines, attached to the preceding
@@ -134,8 +134,8 @@ repo dir via `os/exec`, capturing stdout and surfacing stderr on error.
 
 Operations: Log, Status, Diff (`--git`), DiffSummary, FileShow, Describe, New,
 Edit, Abandon, Absorb, Undo, Redo, Bookmark{Create,Delete,Forget,List,Move,Rename,Set,
-Track,Untrack}, GitFetch, GitPush, Remote{Add,List,Remove,Rename,SetURL},
-AIDescribe.
+Track,Untrack}, Tag{List,Set,Delete}, GitFetch, GitPush, GitPushTags,
+Remote{Add,List,Remove,Rename,SetURL}, AIDescribe.
 
 ## Color Palette (styles.go — CharmTone)
 

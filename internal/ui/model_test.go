@@ -383,6 +383,41 @@ func TestGitModeRendering(t *testing.T) {
 	}
 }
 
+func TestTagModeRendering(t *testing.T) {
+	m := bootedModel(t)
+
+	// Enter tag mode.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	if !m.tagMode {
+		t.Fatal("t did not enter tag mode")
+	}
+	if !strings.Contains(stripView(m), "[tag mode]") {
+		t.Error("status bar missing tag menu")
+	}
+
+	// Choose set, type a name.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	for _, r := range "v2.0" {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if m.tagInput != "v2.0" {
+		t.Errorf("tag input = %q, want v2.0", m.tagInput)
+	}
+	if !strings.Contains(stripView(m), "set to") || !strings.Contains(stripView(m), "v2.0") {
+		t.Error("status bar missing set prompt with input")
+	}
+
+	// Escape clears the action, escape again exits tag mode.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.tagAction != "" {
+		t.Error("escape did not clear action")
+	}
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.tagMode {
+		t.Error("escape did not exit tag mode")
+	}
+}
+
 // TestElevationPromptFlow checks that an elevatable failure surfaces a
 // "retry with --flag?" prompt, that confirming runs the elevated retry, and
 // that cancelling clears it.

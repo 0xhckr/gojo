@@ -35,6 +35,8 @@ var (
 	colDarkOrange lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#a06b1a", Dark: "#b08030"} // git mode hint
 	colPink       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#c44b8a", Dark: "#ff7eb6"} // remote mode
 	colDarkPink   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9a3868", Dark: "#b85a90"} // remote mode hint
+	colTeal       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#00897B", Dark: "#4DB6AC"} // tag mode, tags
+	colDarkTeal   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#00695C", Dark: "#2E7D72"} // tag mode hint
 
 	// ── Legacy aliases (map old names to new palette) ─────────────
 	colWhite     = colText

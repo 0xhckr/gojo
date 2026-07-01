@@ -13,7 +13,7 @@ import (
 
 // logTemplate is a two-line jj template using a \x01 marker byte to separate
 // the graph prefix from structured field data. See parseLog for the layout.
-const logTemplate = `"\x01" ++ change_id.short(8) ++ "|" ++ change_id.shortest() ++ "|" ++ commit_id.short(8) ++ "|" ++ commit_id.shortest() ++ "|" ++ author.email() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"`
+const logTemplate = `"\x01" ++ change_id.short(8) ++ "|" ++ change_id.shortest() ++ "|" ++ commit_id.short(8) ++ "|" ++ commit_id.shortest() ++ "|" ++ author.email() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "|" ++ tags.join(",") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"`
 
 // LogEntry is one commit in the log, plus the surrounding graph rendering.
 type LogEntry struct {
@@ -25,6 +25,7 @@ type LogEntry struct {
 	Date              string
 	Subject           string
 	Bookmarks         []string
+	Tags              []string
 	IsWorkingCopy     bool
 	IsImmutable       bool
 	HeaderPrefix      string
@@ -390,6 +391,52 @@ func (r *Runner) BookmarkUntrack(name string) error {
 	return err
 }
 
+// TagList lists tags (raw text).
+func (r *Runner) TagList() (string, error) {
+	return r.run("tag", "list")
+}
+
+// TagSet creates or updates a tag pointing at rev. Extra flags (e.g.
+// "--allow-move") are appended for elevation retries.
+func (r *Runner) TagSet(name, rev string, extra ...string) error {
+	args := []string{"tag", "set", name}
+	if rev != "" {
+		args = append(args, "-r", rev)
+	}
+	args = appendExtra(args, extra)
+	_, err := r.run(args...)
+	return err
+}
+
+// TagDelete deletes a tag. Extra flags are appended for elevation retries.
+func (r *Runner) TagDelete(name string, extra ...string) error {
+	args := appendExtra([]string{"tag", "delete", name}, extra)
+	_, err := r.run(args...)
+	return err
+}
+
+// GitPushTags pushes all tags to the default remote using git directly. jj's
+// `git push` doesn't support pushing new tags in 0.41, so this shells out to
+// `git push --tags` as a workaround.
+func (r *Runner) GitPushTags() error {
+	if r.cfg.GitPath == "" {
+		return fmt.Errorf("git not found in PATH")
+	}
+	cmd := exec.Command(r.cfg.GitPath, "push", "--tags")
+	cmd.Dir = r.cfg.RepoRoot
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("git push --tags: %s", msg)
+	}
+	return nil
+}
+
 // GitFetch fetches from the git remote. Extra flags are appended for elevation
 // retries.
 func (r *Runner) GitFetch(extra ...string) error {
@@ -528,6 +575,7 @@ func parseSplitSelected(out string) string {
 // Currently recognized:
 //   - "... is immutable"        → --ignore-immutable
 //   - "backwards or sideways"   → --allow-backwards
+//   - "refusing to move tag"    → --allow-move
 //
 // Matching is on lowercased substrings so it survives jj rewording the
 // surrounding text across versions.
@@ -538,6 +586,8 @@ func DetectElevation(errStr string) (flag, reason string) {
 		return "--ignore-immutable", "target is immutable"
 	case strings.Contains(s, "backwards or sideways"):
 		return "--allow-backwards", "bookmark moves backwards/sideways"
+	case strings.Contains(s, "refusing to move tag"):
+		return "--allow-move", "tag already exists"
 	}
 	return "", ""
 }
@@ -581,7 +631,7 @@ func parseLog(raw string) []LogEntry {
 		}
 
 		fields := strings.Split(p.data, "|")
-		if len(fields) < 9 {
+		if len(fields) < 10 {
 			i++
 			continue
 		}
@@ -601,6 +651,15 @@ func parseLog(raw string) []LogEntry {
 			}
 		}
 
+		var tags []string
+		if fields[9] != "" {
+			for _, tg := range strings.Split(fields[9], ",") {
+				tg = strings.TrimSuffix(tg, "*")
+				tg = strings.TrimSuffix(tg, "??")
+				tags = append(tags, tg)
+			}
+		}
+
 		entry := LogEntry{
 			HeaderPrefix:      p.prefix,
 			ChangeID:          fields[0],
@@ -612,6 +671,7 @@ func parseLog(raw string) []LogEntry {
 			IsWorkingCopy:     fields[6] == "Y",
 			IsImmutable:       fields[7] == "Y",
 			Bookmarks:         bookmarks,
+			Tags:              tags,
 		}
 
 		// Next line should be the body (subject).

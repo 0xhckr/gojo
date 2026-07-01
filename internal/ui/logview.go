@@ -181,6 +181,10 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 			hs = append(hs, seg{text: " ", bg: bg})
 			hs = append(hs, seg{text: bm, fg: colGreen, bold: true, bg: bg})
 		}
+		for _, tg := range e.Tags {
+			hs = append(hs, seg{text: " ", bg: bg})
+			hs = append(hs, seg{text: tg, fg: colTeal, bold: true, bg: bg})
+		}
 		if rb.active && i == rb.source {
 			tag := "  ● moving"
 			if rb.subtree {
