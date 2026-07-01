@@ -24,17 +24,17 @@ var (
 	colTextMuted lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#787884", Dark: "#787886"}
 
 	// ── Accents ────────────────────────────────────────────────────
-	colPurple     lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#6B50FF", Dark: "#9d7cd8"}  // change IDs, primary accent
-	colMagenta    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#7b3fb5", Dark: "#c487f0"}  // change ID prefix
-	colBlue       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#5c9cf5"}  // author names
-	colGreen      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#3d9a57", Dark: "#7fd88f"}  // bookmarks, additions
-	colRed        lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d1383d", Dark: "#e06c75"}  // errors, deletions
-	colYellow     lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#b0851f", Dark: "#f5a742"}  // working copy, cursor
-	colCyan       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#318795", Dark: "#56b6c2"}  // bookmark mode, hunk headers
-	colOrange     lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d68c27", Dark: "#f5a742"}  // git mode
-	colDarkOrange lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#a06b1a", Dark: "#b08030"}  // git mode hint
-	colPink       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#c44b8a", Dark: "#ff7eb6"}  // remote mode
-	colDarkPink   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9a3868", Dark: "#b85a90"}  // remote mode hint
+	colPurple     lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#6B50FF", Dark: "#9d7cd8"} // change IDs, primary accent
+	colMagenta    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#7b3fb5", Dark: "#c487f0"} // change ID prefix
+	colBlue       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#5c9cf5"} // author names
+	colGreen      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#3d9a57", Dark: "#7fd88f"} // bookmarks, additions
+	colRed        lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d1383d", Dark: "#e06c75"} // errors, deletions
+	colYellow     lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#b0851f", Dark: "#f5a742"} // working copy, cursor
+	colCyan       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#318795", Dark: "#56b6c2"} // bookmark mode, hunk headers
+	colOrange     lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d68c27", Dark: "#f5a742"} // git mode
+	colDarkOrange lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#a06b1a", Dark: "#b08030"} // git mode hint
+	colPink       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#c44b8a", Dark: "#ff7eb6"} // remote mode
+	colDarkPink   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9a3868", Dark: "#b85a90"} // remote mode hint
 
 	// ── Legacy aliases (map old names to new palette) ─────────────
 	colWhite     = colText
@@ -43,8 +43,8 @@ var (
 	colMutedGray = colBorderSubtle
 
 	// Background bands — remapped to the surface tiers.
-	colDarkPurple = colElement    // selection / top bar
-	colDarkerGray = colPanel      // status / help bars
+	colDarkPurple = colElement // selection / top bar
+	colDarkerGray = colPanel   // status / help bars
 )
 
 // Blame-view section backgrounds — alternating tints per blame hunk so
@@ -79,6 +79,11 @@ var (
 	diffCursorDelBright lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d1383d", Dark: "#e06c75"}
 	diffCursorAddDim    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#a8d8a8", Dark: "#2e4a2e"}
 	diffCursorDelDim    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d8a8a8", Dark: "#4a2e2e"}
+
+	// Split mode — indicators for marked/unmarked/partial selection.
+	splitMarked   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#3d9a57", Dark: "#7fd88f"}
+	splitPartial  lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#b0851f", Dark: "#f5a742"}
+	splitUnmarked lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#999999", Dark: "#555560"}
 )
 
 // spinnerFrames cycles a braille spinner.

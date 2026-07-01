@@ -5,6 +5,7 @@ package jj
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -418,6 +419,90 @@ func (r *Runner) RemoteRename(oldName, newName string) error {
 func (r *Runner) RemoteSetURL(name, url string) error {
 	_, err := r.run("git", "remote", "set-url", name, url)
 	return err
+}
+
+// SplitPaths splits a revision by moving changes to the specified paths into a
+// new preceding revision. A -m flag is passed with an empty message so jj does
+// not open $EDITOR for the split commit's description. Returns the change ID
+// of the newly created (selected) revision. Extra flags are appended for
+// elevation retries.
+func (r *Runner) SplitPaths(rev string, paths []string, extra ...string) (string, error) {
+	args := []string{"split", "-r", rev, "-m", ""}
+	args = append(args, paths...)
+	args = appendExtra(args, extra)
+	out, err := r.run(args...)
+	if err != nil {
+		return "", err
+	}
+	return parseSplitSelected(out), nil
+}
+
+// ParentCommit returns the commit ID of the parent of the given revision.
+// Used by split to fetch parent file contents for intermediate-version
+// computation.
+func (r *Runner) ParentCommit(rev string) (string, error) {
+	out, err := r.run("log", "-r", "parents("+rev+")", "--no-graph", "-T", "commit_id", "--color", "never")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// SplitInteractive splits a revision using a custom diff-editor tool. The tool
+// receives $LEFT (parent tree), $RIGHT (current tree), and $OUTPUT (where to
+// write the preceding revision's content). The intermediateDir contains
+// pre-computed file versions for the preceding revision; oldPaths are paths to
+// remove from $OUTPUT (for renamed files whose old path should not appear in
+// the preceding revision). Returns the change ID of the newly created
+// (selected) revision. Extra flags are appended for elevation retries.
+func (r *Runner) SplitInteractive(rev, toolPath, intermediateDir string, oldPaths []string, extra ...string) (string, error) {
+	cfgStrs := []string{
+		`merge-tools.gojo-split.program="` + toolPath + `"`,
+		`merge-tools.gojo-split.edit-args=["$left", "$right", "$output"]`,
+	}
+	args := []string{}
+	for _, c := range cfgStrs {
+		args = append(args, "--config", c)
+	}
+	args = append(args, "split", "-r", rev, "--interactive", "--tool", "gojo-split", "-m", "")
+	args = appendExtra(args, extra)
+
+	cmd := exec.Command(r.cfg.JJPath, args...)
+	cmd.Dir = r.cfg.RepoRoot
+	cmd.Env = os.Environ()
+	cmd.Env = append(cmd.Env, "GOJO_INTERMEDIATE="+intermediateDir)
+	if len(oldPaths) > 0 {
+		cmd.Env = append(cmd.Env, "GOJO_OLD_PATHS="+strings.Join(oldPaths, "\n"))
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("jj split: %s", msg)
+	}
+	return parseSplitSelected(stdout.String()), nil
+}
+
+// parseSplitSelected extracts the change ID of the "Selected changes" revision
+// from `jj split` stdout. The output line looks like:
+//
+//	Selected changes : <change_id> <commit_id> ...
+//
+// Returns "" if the line is not found.
+func parseSplitSelected(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "Selected changes :") {
+			fields := strings.Fields(line)
+			if len(fields) >= 4 {
+				return fields[3]
+			}
+		}
+	}
+	return ""
 }
 
 // ── Elevation ─────────────────────────────────────────────────────────────

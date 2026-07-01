@@ -74,7 +74,7 @@ func TestRenderDiff(t *testing.T) {
 	}
 
 	// Ensure renderDiffPanel produces exactly the requested height.
-	out := renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, maxLineDigits(rows), nil, "", 0, -1, nil, nil)
+	out := renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, maxLineDigits(rows), nil, "", 0, -1, nil, nil, splitView{})
 	if len(out) != 24 {
 		t.Errorf("diff panel lines = %d, want 24", len(out))
 	}
@@ -371,7 +371,7 @@ func TestDiffCursorRefresh(t *testing.T) {
 		t.Fatal("expected refresh detection")
 	}
 	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen(), nil) // unchanged shape
-	m.diffClampMax()                                        // refresh path preserves viewport; only clamps
+	m.diffClampMax()                                             // refresh path preserves viewport; only clamps
 	if r := m.diffCursorBodyRow(); r >= 0 && (r < m.diffScrollY || r >= m.diffScrollY+m.diffBodyHeight()) {
 		m.diffFollowCursor()
 	}
@@ -457,7 +457,7 @@ func TestDiffWrap(t *testing.T) {
 	}
 
 	// The panel must still emit exactly `height` lines at this width.
-	out := renderDiffPanel(m.width, m.height, m.diffRev, 0, false, false, 0, m.diffDesc, true, rows, m.diffDigits, m.diffStatus, "", m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), nil)
+	out := renderDiffPanel(m.width, m.height, m.diffRev, 0, false, false, 0, m.diffDesc, true, rows, m.diffDigits, m.diffStatus, "", m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), nil, splitView{})
 	if len(out) != m.height {
 		t.Errorf("wrapped panel lines = %d, want %d", len(out), m.height)
 	}
@@ -654,7 +654,7 @@ func TestDiffCollapseLayout(t *testing.T) {
 func TestDiffCollapseRendering(t *testing.T) {
 	rows := renderDiff(sampleDiff)
 	collapsed := map[string]bool{"foo.go": true}
-	out := renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, maxLineDigits(rows), nil, "", 0, -1, nil, collapsed)
+	out := renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, maxLineDigits(rows), nil, "", 0, -1, nil, collapsed, splitView{})
 	if len(out) != 24 {
 		t.Errorf("collapsed panel lines = %d, want 24", len(out))
 	}

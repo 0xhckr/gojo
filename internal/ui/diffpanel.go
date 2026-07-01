@@ -141,8 +141,10 @@ func diffFileHeaderForRow(rows []diffRow, rowIdx int) int {
 // diffRowWrapCount is the number of terminal lines a diff row occupies at
 // scrollW columns. File/hunk headers wrap their label; content lines wrap the
 // syntax-highlighted body after the line-number gutter. fileCollapsed only
-// affects file header rows, adding a ▼/▶ indicator to the label.
-func diffRowWrapCount(scrollW, digits int, r diffRow, fileCollapsed bool) int {
+// affects file header rows, adding a ▼/▶ indicator to the label. When
+// splitActive is true, a 3-char indicator slot ([x]/[ ]/[~]) replaces the
+// single-char prefix, widening the prefix by 2 columns.
+func diffRowWrapCount(scrollW, digits int, r diffRow, fileCollapsed bool, splitActive bool) int {
 	switch r.kind {
 	case rowFileHeader:
 		indicator := "▼ "
@@ -153,11 +155,19 @@ func diffRowWrapCount(scrollW, digits int, r diffRow, fileCollapsed bool) int {
 		if r.prevPath != "" {
 			label = indicator + r.prevPath + " → " + r.path + "  (" + r.changeType + ")"
 		}
-		return textWrapCount(label, max(1, scrollW-2))
+		prefix := 2
+		if splitActive {
+			prefix = 4
+		}
+		return textWrapCount(label, max(1, scrollW-prefix))
 	case rowHunkHeader:
 		return textWrapCount(r.hunkText, max(1, scrollW-2))
 	default:
-		return spansWrapCount(r.spans, max(1, scrollW-(2*digits+5)))
+		gutter := 2*digits + 5
+		if splitActive {
+			gutter = 2*digits + 7
+		}
+		return spansWrapCount(r.spans, max(1, scrollW-gutter))
 	}
 }
 
@@ -165,7 +175,7 @@ func diffRowWrapCount(scrollW, digits int, r diffRow, fileCollapsed bool) int {
 // scrollbar reservation depends on whether the body overflows the viewport,
 // which in turn depends on the wrap width, so it is resolved in two passes:
 // first at the full width, then (if overflow) at width minus the scrollbar.
-func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw string, digits int, collapsed map[string]bool) diffLayout {
+func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw string, digits int, collapsed map[string]bool, splitActive bool) diffLayout {
 	scrollW := width
 	if scrollW < 1 {
 		scrollW = 1
@@ -190,7 +200,7 @@ func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw str
 					continue
 				}
 				isCollapsed := r.kind == rowFileHeader && collapsed != nil && collapsed[r.path]
-				counts[i] = diffRowWrapCount(scrollW, digits, r, isCollapsed)
+				counts[i] = diffRowWrapCount(scrollW, digits, r, isCollapsed, splitActive)
 			}
 		}
 		total := 0
@@ -224,7 +234,7 @@ func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw str
 // (-1 if none); chunkRows is the set of body-row indices (headLen + rowIdx)
 // that belong to the focused chunk. A thin left-edge bar is drawn for those
 // rows: bright for the cursor line, dim for the rest of the chunk.
-func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, aiLoading bool, spinnerFrame int, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool, collapsed map[string]bool) []string {
+func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, aiLoading bool, spinnerFrame int, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool, collapsed map[string]bool, sv splitView) []string {
 	// Title bar — the only sticky chrome; description + status + separator +
 	// diff all scroll together below it as one body. The revision ID uses the
 	// same two-tone highlighting as the log view: the shortest-unique prefix
@@ -259,7 +269,7 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 	head = append(head, buildChangesHead(width)...)
 	headLen := len(head)
 
-	layout := computeDiffLayoutPure(width, contentH, headLen, rows, rawContent, digits, collapsed)
+	layout := computeDiffLayoutPure(width, contentH, headLen, rows, rawContent, digits, collapsed, sv.active)
 	bodyTotal := headLen + layout.total
 
 	start, end := visibleRange(scrollY, contentH, bodyTotal)
@@ -301,7 +311,8 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 			isCursor := ri == cursorRowIdx
 			inChunk := chunkRows != nil && chunkRows[headLen+ri]
 			isCollapsed := r.kind == rowFileHeader && collapsed != nil && collapsed[r.path]
-			str := renderDiffRowSubLine(scrollW, digits, r, sub, cursorBar(r, isCursor, inChunk), isCollapsed, isCursor)
+			splitInd := splitIndicatorForRow(rows, ri, sv)
+			str := renderDiffRowSubLine(scrollW, digits, r, sub, cursorBar(r, isCursor, inChunk), isCollapsed, isCursor, splitInd, sv.active)
 			rowBg := diffRowBg(r)
 			if r.kind == rowFileHeader && isCursor {
 				rowBg = diffFileHeaderFg
@@ -350,7 +361,7 @@ func renderRawSubLine(scrollW int, line string, sub int) string {
 // aligns under the original content while the gutter columns keep the row's
 // background. The left cursor bar (┃) is drawn on every sub-line so a focused
 // wrapped line stays visually marked end-to-end.
-func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipgloss.TerminalColor, fileCollapsed bool, isCursor bool) string {
+func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipgloss.TerminalColor, fileCollapsed bool, isCursor bool, splitIndicator string, splitActive bool) string {
 	switch r.kind {
 	case rowFileHeader:
 		indicator := "▼ "
@@ -365,7 +376,11 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 		if isCursor {
 			labelFg, labelBg = diffFileHeaderBg, diffFileHeaderFg
 		}
-		bodyW := max(1, scrollW-2)
+		prefix := 2
+		if splitActive {
+			prefix = 4
+		}
+		bodyW := max(1, scrollW-prefix)
 		wrapped := wrapSegs([]seg{{text: label, fg: labelFg, bold: true, bg: labelBg}}, bodyW)
 		var segs []seg
 		if sub == 0 {
@@ -373,14 +388,36 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 			if barColor != nil {
 				barFg = barColor
 			}
-			segs = []seg{
-				{text: "┃", fg: barFg, bold: true, bg: colPanel},
-				{text: " ", fg: labelFg, bold: true, bg: labelBg},
+			if splitActive {
+				indFg := splitIndicatorColor(splitIndicator)
+				if indFg == nil {
+					indFg = labelFg
+				}
+				indText := splitIndicator
+				if indText == "" {
+					indText = "   "
+				}
+				segs = []seg{
+					{text: "┃", fg: barFg, bold: true, bg: colPanel},
+					{text: indText, fg: indFg, bold: true, bg: labelBg},
+				}
+			} else {
+				segs = []seg{
+					{text: "┃", fg: barFg, bold: true, bg: colPanel},
+					{text: " ", fg: labelFg, bold: true, bg: labelBg},
+				}
 			}
 		} else {
-			segs = []seg{
-				{text: " ", bg: colPanel},
-				{text: " ", bg: labelBg},
+			if splitActive {
+				segs = []seg{
+					{text: " ", bg: colPanel},
+					{text: "   ", bg: labelBg},
+				}
+			} else {
+				segs = []seg{
+					{text: " ", bg: colPanel},
+					{text: " ", bg: labelBg},
+				}
 			}
 		}
 		if sub >= 0 && sub < len(wrapped) {
@@ -420,6 +457,9 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 		}
 
 		prefixW := 2*digits + 8 // leftBar + gutter(incl leading space) + gap + sign + 2 trailing spaces
+		if splitActive {
+			prefixW = 2*digits + 10 // indicator slot is 3 chars instead of 1
+		}
 		bodyW := max(1, scrollW-prefixW)
 
 		// Build the wrapping body: the syntax-highlighted spans, all carrying
@@ -448,6 +488,8 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 
 		// Gutter: real line numbers on sub-line 0, blank thereafter. Uses a
 		// dimmer tint than the content area so the gutter is less opaque.
+		// In split mode, the leading space is replaced by a 3-char indicator
+		// slot ([x]/[ ]/[~] for selectable lines, 3 spaces for context lines).
 		var gutterBg lipgloss.TerminalColor
 		switch r.lineKind {
 		case "addition":
@@ -455,11 +497,34 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 		case "deletion":
 			gutterBg = diffRemovedGutterBg
 		}
-		var gutterSeg seg
+		gutterBlankW := 2*digits + 3
+		if splitActive {
+			gutterBlankW = 2*digits + 5
+		}
+		var gutterSegs []seg
 		if sub == 0 {
-			gutterSeg = seg{text: lineNumText(r, digits), fg: diffLineNumber, bg: gutterBg}
+			if splitActive {
+				indFg := splitIndicatorColor(splitIndicator)
+				if indFg == nil {
+					indFg = diffLineNumber
+				}
+				indText := splitIndicator
+				if indText == "" {
+					indText = "   "
+				}
+				gutterSegs = []seg{
+					{text: indText, fg: indFg, bold: true, bg: gutterBg},
+					{text: padNum(r.oldNum, digits) + " " + padNum(r.newNum, digits) + " ", fg: diffLineNumber, bg: gutterBg},
+				}
+			} else {
+				gutterSegs = []seg{
+					{text: lineNumText(r, digits), fg: diffLineNumber, bg: gutterBg},
+				}
+			}
 		} else {
-			gutterSeg = seg{text: strings.Repeat(" ", 2*digits+3), bg: gutterBg}
+			gutterSegs = []seg{
+				{text: strings.Repeat(" ", gutterBlankW), bg: gutterBg},
+			}
 		}
 
 		// Sign: real sign on sub-line 0, blank after. A one-space gap separates
@@ -471,7 +536,9 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 			signSeg = seg{text: "    ", bg: lineBg}
 		}
 
-		segs := []seg{leftBar, gutterSeg, signSeg}
+		segs := []seg{leftBar}
+		segs = append(segs, gutterSegs...)
+		segs = append(segs, signSeg)
 		if sub >= 0 && sub < len(wrapped) {
 			segs = append(segs, wrapped[sub]...)
 		}
@@ -599,4 +666,20 @@ func cursorBar(r diffRow, isCursor, inChunk bool) lipgloss.TerminalColor {
 		return diffCursorDelDim
 	}
 	return nil
+}
+
+// splitIndicatorColor returns the foreground color for a split-mode indicator
+// glyph: green for marked ([x]), yellow for partial ([~]), gray for unmarked
+// ([ ]). Returns nil for unknown indicators.
+func splitIndicatorColor(indicator string) lipgloss.TerminalColor {
+	switch indicator {
+	case "[x]":
+		return splitMarked
+	case "[~]":
+		return splitPartial
+	case "[ ]":
+		return splitUnmarked
+	default:
+		return nil
+	}
 }

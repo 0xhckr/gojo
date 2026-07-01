@@ -61,7 +61,7 @@ type Model struct {
 	// Diff panel.
 	diffOpen       bool
 	diffRev        string
-	diffRevPrefix  int // shortest-unique-prefix length for diffRev (0 = none)
+	diffRevPrefix  int  // shortest-unique-prefix length for diffRev (0 = none)
 	diffIsRevision bool // true: showing a revision diff (reloadable); false: a list view
 	diffLoading    bool
 	diffDesc       string // revision description shown above the status section
@@ -121,6 +121,12 @@ type Model struct {
 	squashSource int // index into entries of the commit being squashed
 	squashDest   int // index into entries of the target (moves with j/k)
 
+	// Split mode. Entered from the diff panel with `x`. The user marks
+	// individual files/lines to keep in the current revision; unmarked
+	// changes are split into a new preceding revision via `jj split`.
+	splitMode   bool
+	splitMarked map[int]bool // diff row indices of marked addition/deletion lines
+
 	// AI describe. Generation (HTTP, read-only) runs concurrently; the jj
 	// describe apply step is serialized via aiDescribeQueue so only one
 	// mutating subprocess is in flight at a time — concurrent describes on
@@ -161,8 +167,8 @@ func NewModel() Model {
 		home: os.Getenv("HOME"),
 		// Terminal is focused at launch and the OS may not emit an initial
 		// FocusMsg, so the poll loop (started in Init) runs from the start.
-		focused:   true,
-		polling:   true,
+		focused:         true,
+		polling:         true,
 		aiLoading:       map[string]bool{},
 		aiDescribeQueue: []aiPendingDescribe{},
 	}
@@ -561,7 +567,7 @@ func pollTick() tea.Cmd {
 // the log + status, plus the open diff when it's a revision view.
 func (m Model) refreshFocusedCmds() []tea.Cmd {
 	cmds := []tea.Cmd{m.refreshCmd()}
-	if m.diffOpen && m.diffIsRevision {
+	if m.diffOpen && m.diffIsRevision && !m.splitMode {
 		// diffRev is the change ID, a stable revset across working-copy edits.
 		cmds = append(cmds, m.openDiffCmd(m.diffRev, m.diffRev))
 	}
@@ -760,6 +766,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errMsg = msg.err.Error()
 		} else {
 			m.message = "squashed " + msg.from + " into " + msg.into
+		}
+		return m, m.refreshCmd()
+
+	case splitFinishedMsg:
+		m.popBusy()
+		if msg.err != nil {
+			if msg.elev != nil {
+				m.pendingElev = msg.elev
+				m.errMsg = ""
+				return m, nil
+			}
+			m.errMsg = msg.err.Error()
+			return m, m.refreshCmd()
+		}
+		m.message = "split " + msg.rev
+		// Auto-route: open the diff of the newly created (selected) revision
+		// so the user can immediately inspect what was split off.
+		if msg.selectedRev != "" {
+			m.diffRev = msg.selectedRev
+			m.diffRevPrefix = 0
+			m.diffIsRevision = true
+			m.diffLoading = true
+			m.diffScrollY = 0
+			m.diffDesc = ""
+			m.diffRaw = ""
+			m.diffRows = nil
+			m.diffStatus = nil
+			m.diffChunks = nil
+			return m, tea.Batch(m.refreshCmd(), m.openDiffCmd(msg.selectedRev, msg.selectedRev))
 		}
 		return m, m.refreshCmd()
 
@@ -978,7 +1013,7 @@ func (m Model) rowCountTerm(rowIdx int) int {
 // body from the terminal size and content. Called on diff/raw load and on
 // resize so navigation and rendering agree on where wrapped lines land.
 func (m *Model) computeDiffLayout() {
-	m.diffLayout = computeDiffLayoutPure(m.width, m.contentHeight(), m.diffHeadLen(), m.diffRows, m.diffRaw, m.diffDigits, m.diffCollapsed)
+	m.diffLayout = computeDiffLayoutPure(m.width, m.contentHeight(), m.diffHeadLen(), m.diffRows, m.diffRaw, m.diffDigits, m.diffCollapsed, m.splitMode)
 }
 
 // diffHeadLen is the number of body rows occupied by the description header,
@@ -1435,6 +1470,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.squashMode {
 		return m.handleSquashKey(k)
+	}
+
+	// Split mode handles its own keys (including q/esc to leave) while the
+	// diff panel stays open.
+	if m.splitMode {
+		return m.handleSplitKey(k)
 	}
 
 	// File view handles its own keys (including q/esc to leave) per phase.
@@ -2011,14 +2052,69 @@ func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
 				m.spinnerRunning = true
 				cmds = append(cmds, spinnerTick())
 			}
-		return m, tea.Batch(cmds...)
-	}
+			return m, tea.Batch(cmds...)
+		}
 	case "n":
 		if m.diffIsRevision && m.diffRev != "" {
 			rev := m.diffRev
 			m, tick := m.startBusy("creating change…")
 			return m, tea.Batch(tick, m.newOnRevCmd(rev))
 		}
+	case "x":
+		if m.diffIsRevision && m.diffRev != "" && len(m.diffRows) > 0 {
+			m.splitMode = true
+			m.splitMarked = map[int]bool{}
+			m.errMsg = ""
+			m.message = ""
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// handleSplitKey drives the split-mode interaction: space toggles file/line
+// selection, c confirms, q/esc cancels, and navigation keys (up/down/left/
+// right/home/end) work the same as in the diff panel.
+func (m Model) handleSplitKey(k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "q", "esc":
+		m.splitMode = false
+		m.splitMarked = nil
+		m.message = "split cancelled"
+		return m, nil
+	case "c":
+		return m.execSplit()
+	case " ":
+		m.splitToggle()
+		return m, nil
+	case "up", "k":
+		m.diffMoveUp()
+		return m, nil
+	case "down", "j":
+		m.diffMoveDown()
+		return m, nil
+	case "home", "g":
+		m.diffMoveTop()
+		return m, nil
+	case "end", "G":
+		m.diffMoveBottom()
+		return m, nil
+	case "left", "h":
+		if fileIdx, ok := m.cursorFileHeader(); ok {
+			path := m.diffRows[fileIdx].path
+			if m.diffCollapsed == nil || !m.diffCollapsed[path] {
+				m.toggleDiffCollapse(fileIdx)
+			}
+		}
+		return m, nil
+	case "right", "l":
+		if fileIdx, ok := m.cursorFileHeader(); ok {
+			path := m.diffRows[fileIdx].path
+			if m.diffCollapsed != nil && m.diffCollapsed[path] {
+				m.toggleDiffCollapse(fileIdx)
+			}
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -2738,7 +2834,8 @@ func (m Model) View() string {
 	case m.view == viewHelp:
 		lines = append(lines, renderHelp(m.width, ch, m.helpScrollY)...)
 	case m.diffOpen:
-		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), m.diffCollapsed)...)
+		sv := splitView{active: m.splitMode, marked: m.splitMarked}
+		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), m.diffCollapsed, sv)...)
 	case m.view == viewFile:
 		lines = append(lines, m.renderFileView(m.width, ch)...)
 	default:
@@ -2927,6 +3024,12 @@ func (m Model) renderStatusBar() []string {
 		segs = append(segs, seg{text: "   j/k move · ⏎ confirm · esc cancel", fg: colGray})
 		return []string{bgRow(m.width, colDarkerGray, segs...)}
 
+	case m.splitMode:
+		segs := []seg{{text: " [split] ", fg: colYellow, bold: true}}
+		segs = append(segs, seg{text: m.diffRev, fg: colMagenta, bold: true})
+		segs = append(segs, seg{text: " · space toggle · c confirm · esc cancel · ↑/↓ navigate", fg: colGray})
+		return []string{bgRow(m.width, colDarkerGray, segs...)}
+
 	case m.errMsg != "":
 		msg := m.errMsg
 		limit := m.width - 4
@@ -2997,11 +3100,18 @@ var defaultHelpBarItems = [][2]string{
 // bar), so the content area can reclaim that row.
 func (m Model) helpBarItems() [][2]string {
 	switch {
+	case m.splitMode:
+		return [][2]string{
+			{"space toggle", "space"}, {"c confirm", "c"}, {"esc cancel", "esc"},
+			{"↑/k chunk↑", "↑"}, {"↓/j chunk↓", "↓"},
+			{"g top", "g"}, {"G bot", "G"}, {"←/→ fold", "←"},
+		}
 	case m.diffOpen:
 		return [][2]string{
 			{"⏎ close", "⏎"}, {"↑/k chunk↑", "↑"}, {"↓/j chunk↓", "↓"},
 			{"g top", "g"}, {"G bot", "G"}, {"←/→ fold", "←"},
-			{"describe", "d"}, {"AI Desc", "D"}, {"new", "n"}, {"q close", "q"},
+			{"describe", "d"}, {"AI Desc", "D"}, {"new", "n"}, {"split", "x"},
+			{"q close", "q"},
 		}
 	case m.view == viewFile:
 		switch m.fileView.phase {
