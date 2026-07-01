@@ -46,6 +46,55 @@ func bootedModel(t *testing.T) Model {
 	return m
 }
 
+// TestBootErrorQuit verifies that the user can escape from an unrecoverable
+// boot error (e.g. no .jj directory) by pressing q, esc, or ctrl+c, instead
+// of being trapped in the alt screen with no way out.
+func TestBootErrorQuit(t *testing.T) {
+	m := NewModel()
+	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = step(t, m, bootMsg{err: errors.New("no .jj directory found")})
+
+	if m.ready {
+		t.Fatal("model should not be ready after boot error")
+	}
+	if m.bootErr == "" {
+		t.Fatal("bootErr should be set after boot error")
+	}
+
+	// The error and a quit hint should be visible.
+	plain := stripView(m)
+	if !strings.Contains(plain, "no .jj directory found") {
+		t.Fatalf("view missing boot error: %s", plain)
+	}
+	if !strings.Contains(plain, "q") || !strings.Contains(plain, "ctrl+c") {
+		t.Fatalf("view missing quit hint: %s", plain)
+	}
+
+	// q should produce a quit command.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd == nil {
+		t.Fatal("q did not produce a quit command from boot error screen")
+	}
+
+	// esc should produce a quit command.
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	if cmd == nil {
+		t.Fatal("esc did not produce a quit command from boot error screen")
+	}
+
+	// ctrl+c should produce a quit command.
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("ctrl+c did not produce a quit command from boot error screen")
+	}
+
+	// A random key should be swallowed (no command, no panic).
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if cmd != nil {
+		t.Error("random key should not produce a command from boot error screen")
+	}
+}
+
 func TestFileViewPickerBlameHistory(t *testing.T) {
 	m := bootedModel(t)
 

@@ -1104,13 +1104,20 @@ func (m Model) selectedEntry() *jj.LogEntry {
 // ── Keyboard ────────────────────────────────────────────────────────────────
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if !m.ready {
-		return m, nil
-	}
 	k := msg.String()
 
+	// ctrl+c always quits, even from an unrecoverable boot error screen.
 	if k == "ctrl+c" {
 		return m, tea.Quit
+	}
+
+	if !m.ready {
+		// Boot failed (e.g. no .jj directory). q / esc also quits so the
+		// user is never trapped in the alt screen with no escape.
+		if m.bootErr != "" && (k == "q" || k == "esc") {
+			return m, tea.Quit
+		}
+		return m, nil
 	}
 
 	// A pending elevation prompt captures all keys until answered.
@@ -2378,7 +2385,11 @@ func (m Model) View() string {
 		return ""
 	}
 	if m.bootErr != "" {
-		lines := []string{plainRow(m.width, seg{text: " error: " + m.bootErr + " ", fg: colRed})}
+		lines := []string{
+			plainRow(m.width, seg{text: " error: " + m.bootErr + " ", fg: colRed}),
+			"",
+			plainRow(m.width, seg{text: " press q or ctrl+c to quit", fg: colGray}),
+		}
 		return strings.Join(padLines(lines, m.height), "\n")
 	}
 	if !m.ready || (len(m.entries) == 0 && m.errMsg == "") {
