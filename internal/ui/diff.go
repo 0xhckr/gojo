@@ -40,12 +40,13 @@ type diffRow struct {
 	hunkText string
 
 	// content line
-	lineKind   string // "addition" | "deletion" | "context"
-	sign       string
-	oldNum     int // 0 = none
-	newNum     int // 0 = none
-	spans      []span
-	sectionBg  lipgloss.TerminalColor // file mode only: alternating blame section background
+	lineKind      string // "addition" | "deletion" | "context"
+	sign          string
+	oldNum        int // 0 = none
+	newNum        int // 0 = none
+	spans         []span
+	sectionBg     lipgloss.TerminalColor // file mode only: alternating blame section background
+	sectionParity int                    // file mode only: 0 or 1, for bar colour lookup
 }
 
 // ── git diff parsing ───────────────────────────────────────────────────────

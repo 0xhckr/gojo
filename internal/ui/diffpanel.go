@@ -338,16 +338,19 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 			splitInd := splitIndicatorForRow(rows, ri, sv)
 			var barColor lipgloss.TerminalColor
 			if fileMode {
+				p := r.sectionParity
 				if isCursor {
-					barColor = colYellow
+					barColor = fileSectionBarBright[p%len(fileSectionBarBright)]
+				} else if inChunk {
+					barColor = fileSectionBarDim[p%len(fileSectionBarDim)]
 				}
 			} else {
 				barColor = cursorBar(r, isCursor, inChunk)
 			}
 			str := renderDiffRowSubLine(scrollW, digits, r, sub, barColor, isCollapsed, isCursor, splitInd, sv.active, fileMode)
-			rowBg := colPanel
+			var rowBg lipgloss.TerminalColor
 			if fileMode {
-				rowBg = fileRowBg(r, isCursor)
+				rowBg = fileRowBg(r)
 			} else {
 				rowBg = diffRowBg(r)
 				if r.kind == rowFileHeader && isCursor {
@@ -379,13 +382,9 @@ func diffRowBg(r diffRow) lipgloss.TerminalColor {
 	}
 }
 
-// fileRowBg is the background colour for a file-view row: the selection
-// surface (colElement) on the cursor line, otherwise the row's alternating
-// section tint (falling back to colPanel when unset).
-func fileRowBg(r diffRow, isCursor bool) lipgloss.TerminalColor {
-	if isCursor {
-		return colElement
-	}
+// fileRowBg is the background colour for a file-view row: the row's
+// alternating section tint (falling back to colPanel when unset).
+func fileRowBg(r diffRow) lipgloss.TerminalColor {
 	if r.sectionBg != nil {
 		return r.sectionBg
 	}
@@ -498,10 +497,9 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 	default:
 		if fileMode {
 			// File viewer mode: single line number, no sign column.
-			// Background alternates per blame section (r.sectionBg); the
-			// cursor line uses the selection surface (colElement). The left
-			// ┃ bar marks the cursor line in yellow.
-			bg := fileRowBg(r, isCursor)
+			// Background alternates per blame section (r.sectionBg). The left
+			// ┃ bar highlights the entire section, bright on the cursor line.
+			bg := fileRowBg(r)
 			lineFg := diffContextFg
 			prefixW := digits + 3 // leftBar(1) + gutter(1+digits+1)
 			bodyW := max(1, scrollW-prefixW)

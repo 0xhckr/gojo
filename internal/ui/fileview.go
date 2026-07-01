@@ -375,16 +375,14 @@ func annotateToDiffRows(lines []jj.AnnotateLine, highlights [][]span) []diffRow 
 		} else {
 			sp = []span{}
 		}
-		bg := fileSectionBgA
-		if parity == 1 {
-			bg = fileSectionBgB
-		}
+		bg := fileSectionBg[parity]
 		rows[i] = diffRow{
-			kind:      rowLine,
-			lineKind:  "context",
-			newNum:    l.LineNo,
-			spans:     sp,
-			sectionBg: bg,
+			kind:          rowLine,
+			lineKind:      "context",
+			newNum:        l.LineNo,
+			spans:         sp,
+			sectionBg:     bg,
+			sectionParity: parity,
 		}
 	}
 	return rows
@@ -450,6 +448,19 @@ func (m Model) renderFileBlame(width, height int) []string {
 	head := buildBlameHead(width, cid, cur.Author, desc)
 	headLen := len(head)
 
+	// Compute the set of row indices that belong to the cursor's current
+	// section (contiguous run of the same ChangeID) so the ┃ bar can
+	// highlight the entire hunk.
+	sectionRows := map[int]bool{}
+	if cursorY >= 0 && cursorY < len(fv.lines) {
+		target := fv.lines[cursorY].ChangeID
+		for i := 0; i < len(fv.lines); i++ {
+			if fv.lines[i].ChangeID == target {
+				sectionRows[i] = true
+			}
+		}
+	}
+
 	contentH := height - 1 - headLen // minus title bar and sticky blame header
 	if contentH < 1 {
 		contentH = 1
@@ -485,7 +496,7 @@ func (m Model) renderFileBlame(width, height int) []string {
 		termScrollY = maxScroll
 	}
 
-	return renderDiffPanel(width, height, fv.path, 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, nil, nil, splitView{}, true, head)
+	return renderDiffPanel(width, height, fv.path, 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, sectionRows, nil, splitView{}, true, head)
 }
 
 func lineDigits(n int) int {

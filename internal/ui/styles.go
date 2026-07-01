@@ -47,12 +47,23 @@ var (
 	colDarkerGray = colPanel   // status / help bars
 )
 
-// File-view section backgrounds — alternating tints per blame hunk so
-// contiguous runs of the same commit stand out. Vibrant blue and red
-// undertones make sections immediately distinguishable.
+// File-view section colours — alternating per blame hunk. Section A is a
+// blue-purple, section B a pink-purple. Each section has its own bar colours:
+// a subdued shade for the rest of the hunk and an intense shade for the
+// cursor line, so the ┃ bar always tints toward the section it belongs to.
 var (
-	fileSectionBgA lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#e0ecff", Dark: "#1e2230"}
-	fileSectionBgB lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#ffe8d6", Dark: "#2e1d0a"}
+	fileSectionBg = []lipgloss.TerminalColor{
+		lipgloss.AdaptiveColor{Light: "#eae6f6", Dark: "#1a1a2e"}, // blue-purple
+		lipgloss.AdaptiveColor{Light: "#f6e8f0", Dark: "#241a26"}, // pink-purple
+	}
+	fileSectionBarDim = []lipgloss.TerminalColor{
+		lipgloss.AdaptiveColor{Light: "#c4bbe0", Dark: "#2e2e48"}, // dim blue-purple
+		lipgloss.AdaptiveColor{Light: "#e0bcd0", Dark: "#3e2840"}, // dim pink-purple
+	}
+	fileSectionBarBright = []lipgloss.TerminalColor{
+		lipgloss.AdaptiveColor{Light: "#6B50FF", Dark: "#8a8cf5"}, // intense blue-purple
+		lipgloss.AdaptiveColor{Light: "#c44b8a", Dark: "#e08ad8"}, // intense pink-purple
+	}
 )
 
 // Diff panel colors — subtle tinted backgrounds, refined foregrounds.
