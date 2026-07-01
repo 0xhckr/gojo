@@ -27,15 +27,13 @@ jobs:
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
-          # Pinned to v2.15.x: v2.16 hard-deprecated the `brews` section,
-          # but gojo is a cross-platform CLI (not a macOS .app), so Casks
-          # would break Linuxbrew installs. Formulas are still the correct
-          # Homebrew construct for CLI tools. Unpin only if we migrate off
-          # formulas or drop Linux support.
+          # Pinned to v2.15.x for reproducibility. Now using
+          # `homebrew_casks` (supported since v2.10) instead of the
+          # deprecated `brews` section. Safe to upgrade to v2.16+.
           version: "~> v2.15"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No separate tap token needed: the Homebrew formula is committed
-          # back into this same repo (Formula/gojo.rb), which GITHUB_TOKEN
+          # No separate tap token needed: the Homebrew cask is committed
+          # back into this same repo (Casks/gojo.rb), which GITHUB_TOKEN
           # can already write to thanks to the `contents: write` permission.

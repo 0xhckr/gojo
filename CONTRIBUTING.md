@@ -72,7 +72,7 @@ Refactor blame line rendering to align separator column across row types
 
 Maintainers only — see [`RELEASE.md`](./RELEASE.md). The short version: bump
 `VERSION`, tag `v<VERSION>`, push the tag; goreleaser handles binaries,
-the GitHub Release, and the Homebrew formula.
+the GitHub Release, and the Homebrew cask.
 
 ## License
 

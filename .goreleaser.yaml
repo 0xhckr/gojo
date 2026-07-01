@@ -65,30 +65,36 @@ release:
   prerelease: auto
   name_template: "{{ .Tag }}"
 
-# Auto-generate and push the Homebrew formula into this same repo at
-# Formula/gojo.rb. Because the formula lives in the repo we're releasing
+# Auto-generate and push the Homebrew cask into this same repo at
+# Casks/gojo.rb. Because the cask lives in the repo we're releasing
 # from, the default GITHUB_TOKEN (granted `contents: write` by the
 # release workflow) is sufficient — no separate tap repo or PAT needed.
 # Users install via: brew tap 0xhckr/gojo https://github.com/0xhckr/gojo
-brews:
+#                  brew install --cask gojo
+homebrew_casks:
   - name: gojo
     repository:
       owner: 0xhckr
       name: gojo
       branch: main
-    directory: Formula
     homepage: https://github.com/0xhckr/gojo
     description: "Fullscreen terminal UI for jj (Jujutsu VCS)"
-    license: MIT
     skip_upload: auto
+    binaries:
+      - gojo
+    url:
+      verified: github.com/0xhckr/gojo/
     dependencies:
-      - name: jj
-    install: |
-      bin.install "gojo"
-      bin.install_symlink "gojo" => "gj"
-    test: |
-      assert_match version.to_s, shell_output("#{bin}/gojo --version")
+      - formula: jj
+    # Binary is not signed/notarized — strip quarantine on install.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/gojo"]
+          end
+    caveats: "Run `ln -sf $(which gojo) $(brew --prefix)/bin/gj` for the shorter 'gj' alias."
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
-    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    commit_msg_template: "Brew cask update for {{ .ProjectName }} version {{ .Tag }}"

@@ -1,11 +1,11 @@
 # Releasing gojo
 
 gojo uses [goreleaser](https://goreleaser.com) (v2) to cross-build binaries,
-publish a GitHub Release, and auto-update the Homebrew formula.
+publish a GitHub Release, and auto-update the Homebrew cask.
 
-The formula lives in **this same repo** at `Formula/gojo.rb` — there is no
+The cask lives in **this same repo** at `Casks/gojo.rb` — there is no
 separate tap repo and no PAT to manage. The default `GITHUB_TOKEN` (granted
-`contents: write` by the release workflow) is enough to commit the formula
+`contents: write` by the release workflow) is enough to commit the cask
 back into `0xhckr/gojo`.
 
 ## Prerequisites
@@ -38,19 +38,20 @@ drift silently. The `release` workflow then:
 1. Builds `gojo` for `linux/{amd64,arm64}` and `darwin/{amd64,arm64}`.
 2. Stamps `main.version` via ldflags (`gojo --version` → `gojo 1.0.0`).
 3. Publishes tarballs + checksums to the GitHub Release.
-4. Generates `Formula/gojo.rb` and commits it back to `main` in this repo.
+4. Generates `Casks/gojo.rb` and commits it back to `main` in this repo.
 
 ## Installing (end users)
 
 ```sh
 brew tap 0xhckr/gojo https://github.com/0xhckr/gojo
-brew install gojo
+brew install --cask gojo
 ```
 
 The explicit URL is required because Homebrew's `brew tap <user>/<repo>`
 shorthand only auto-discovers repos named `homebrew-<repo>`. Since the
-formula lives here instead of in a `homebrew-gojo` repo, the URL must be
+cask lives here instead of in a `homebrew-gojo` repo, the URL must be
 given. (This is the only downside of the single-repo setup; it trades one
 extra line at install time for not maintaining a second repo + PAT.)
 
-This also installs `jj` (jujutsu) as a runtime dependency and a `gj` symlink.
+This also installs `jj` (jujutsu) as a runtime dependency. The cask prints
+a caveat with instructions for creating the optional `gj` shorthand alias.

@@ -23,7 +23,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
-          # Pinned to match release.yml — see note there about `brews`.
+          # Pinned to match release.yml.
           version: "~> v2.15"
           args: check
 
