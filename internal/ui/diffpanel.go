@@ -212,6 +212,7 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 		head = append(head, buildDescHead(width, desc, aiLoading, spinnerFrame)...)
 	}
 	head = append(head, buildStatusHead(width, status)...)
+	head = append(head, buildChangesHead(width)...)
 	headLen := len(head)
 
 	layout := computeDiffLayoutPure(width, contentH, headLen, rows, rawContent, digits)
@@ -477,6 +478,11 @@ func diffBodyLen(rows []diffRow, rawContent string) int {
 		return strings.Count(rawContent, "\n") + 1
 	}
 	return len(rows)
+}
+
+// buildChangesHead renders the "changes" label that precedes the diff body.
+func buildChangesHead(width int) []string {
+	return []string{bgRow(width, colPanel, seg{text: "┃ ", fg: colCyan, bold: true, bg: colPanel}, seg{text: "changes", fg: colTextMuted, bg: colPanel})}
 }
 
 // visibleRange clamps a scroll offset to a [start, end) window of at most

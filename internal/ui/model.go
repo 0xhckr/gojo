@@ -973,8 +973,9 @@ func (m *Model) computeDiffLayout() {
 }
 
 // diffHeadLen is the number of body rows occupied by the description header,
-// status header, items, and separators — everything above the first diff/raw
-// line. The description section only appears for revision diffs.
+// status header, items, separators, and the changes label — everything above
+// the first diff/raw line. The description section only appears for revision
+// diffs.
 func (m Model) diffHeadLen() int {
 	statusCount := len(m.diffStatus)
 	if statusCount == 0 {
@@ -988,7 +989,7 @@ func (m Model) diffHeadLen() int {
 			descLen = descHeadLen(m.diffDesc)
 		}
 	}
-	return descLen + statusCount + 2
+	return descLen + statusCount + 2 + 1 // +1 for the "changes" label
 }
 
 // diffBodyHeight is the number of visible rows below the sticky diff title.
