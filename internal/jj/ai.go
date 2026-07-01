@@ -26,7 +26,8 @@ type chatRequest struct {
 type chatResponse struct {
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			Content  string `json:"content"`
+			Reasoning string `json:"reasoning"`
 		} `json:"message"`
 	} `json:"choices"`
 }
@@ -62,7 +63,7 @@ func (r *Runner) AIDescribe(rev string) (string, error) {
 	reqBody, err := json.Marshal(chatRequest{
 		Model:     model,
 		Messages:  []chatMessage{{Role: "user", Content: prompt + diffText}},
-		MaxTokens: 200,
+		MaxTokens: 2048,
 	})
 	if err != nil {
 		return "", err
@@ -99,6 +100,9 @@ func (r *Runner) AIDescribe(rev string) (string, error) {
 		return "", errors.New("Empty response from AI")
 	}
 	msg := strings.TrimSpace(parsed.Choices[0].Message.Content)
+	if msg == "" {
+		msg = strings.TrimSpace(parsed.Choices[0].Message.Reasoning)
+	}
 	if msg == "" {
 		return "", errors.New("Empty response from AI")
 	}

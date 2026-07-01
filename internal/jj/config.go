@@ -65,10 +65,22 @@ func applyTOMLConfig(cfg *Config, raw string, section string) {
 		}
 		key := strings.TrimSpace(trimmed[:eq])
 		val := strings.TrimSpace(trimmed[eq+1:])
-		// Strip matching quotes
-		if len(val) >= 2 {
-			if (val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'') {
-				val = val[1 : len(val)-1]
+		// Strip inline comments and matching quotes. TOML allows `# comment`
+		// after a value; the old code only stripped quotes when the entire
+		// remainder was quoted, so `key = "value" # comment` left the quote
+		// and comment baked into the value.
+		switch {
+		case strings.HasPrefix(val, `"`):
+			if end := strings.Index(val[1:], `"`); end >= 0 {
+				val = val[1 : 1+end]
+			}
+		case strings.HasPrefix(val, `'`):
+			if end := strings.Index(val[1:], `'`); end >= 0 {
+				val = val[1 : 1+end]
+			}
+		default:
+			if hash := strings.Index(val, "#"); hash >= 0 {
+				val = strings.TrimSpace(val[:hash])
 			}
 		}
 
