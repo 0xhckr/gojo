@@ -2584,7 +2584,8 @@ func (m Model) helpBarItems() [][2]string {
 	case m.diffOpen:
 		return [][2]string{
 			{"⏎ close", "⏎"}, {"↑/k chunk↑", "↑"}, {"↓/j chunk↓", "↓"},
-			{"g top", "g"}, {"G bot", "G"}, {"q close", "q"},
+			{"g top", "g"}, {"G bot", "G"}, {"describe", "d"},
+			{"AI Desc", "D"}, {"q close", "q"},
 		}
 	case m.view == viewFile:
 		switch m.fileView.phase {
