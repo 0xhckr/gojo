@@ -71,6 +71,13 @@ type Model struct {
 	diffRaw        string
 	diffScrollY    int
 
+	// diffLayout is the wrapped-line layout of the diff body (the region below
+	// the description/status head). Recomputed on diff load, raw-list load and
+	// resize. When unset (e.g. in unit tests) the helpers below fall back to a
+	// 1:1 mapping (one terminal line per row), preserving the pre-wrap
+	// behaviour so scroll math stays correct without a layout.
+	diffLayout diffLayout
+
 	// Chunk cursor — navigates change chunks (contiguous add/del runs) in the
 	// diff panel. diffChunks holds body-row indices per chunk; diffCurChunk /
 	// diffCurLine track the focused line. Empty when the diff has no chunks or
@@ -564,6 +571,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.recomputeOffset()
 		if m.diffOpen {
+			// Wrapping depends on width, so rebuild the layout before clamping.
+			m.computeDiffLayout()
 			// Preserve the user's scroll position (which may be free-scrolled to
 			// show the status section); just clamp into the valid range for the
 			// new height.
@@ -627,6 +636,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diffStatus = msg.status
 		m.diffRows = msg.rows
 		m.diffDigits = maxLineDigits(msg.rows)
+		m.computeDiffLayout()
 		m.diffChunks = computeDiffChunks(msg.rows, m.diffHeadLen())
 		if !isRefresh {
 			m.diffCurChunk = 0
@@ -684,6 +694,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diffDesc = ""
 		m.diffLoading = false
 		m.diffScrollY = 0
+		m.computeDiffLayout()
 		return m, nil
 
 	case aiGeneratedMsg:
@@ -921,9 +932,44 @@ func (m Model) statusBarHeight() int {
 // diffMaxScroll is the furthest scroll offset that still keeps the last
 // screenful of the (description + status + diff) body in view.
 func (m Model) diffMaxScroll() int {
-	bodyTotal := m.diffHeadLen() + diffBodyLen(m.diffRows, m.diffRaw)
+	bodyTotal := m.diffHeadLen() + m.diffBodyTotal()
 	bodyH := m.contentHeight() - 1 // minus the sticky title bar
 	return max(0, bodyTotal-bodyH)
+}
+
+// diffBodyTotal is the number of terminal lines the diff body (below the head)
+// occupies, accounting for wrapping. Falls back to 1:1 when no layout is set.
+func (m Model) diffBodyTotal() int {
+	if len(m.diffLayout.starts) > 0 {
+		return m.diffLayout.total
+	}
+	return diffBodyLen(m.diffRows, m.diffRaw)
+}
+
+// rowStartTerm is the 0-based body terminal-line index of the first wrapped
+// sub-line of diff row `rowIdx` (a 0-based index into diffRows / raw lines).
+// Falls back to rowIdx (1:1) when no layout is set.
+func (m Model) rowStartTerm(rowIdx int) int {
+	if rowIdx >= 0 && rowIdx < len(m.diffLayout.starts) {
+		return m.diffLayout.starts[rowIdx]
+	}
+	return rowIdx
+}
+
+// rowCountTerm is the number of terminal lines diff row `rowIdx` spans.
+// Falls back to 1 when no layout is set.
+func (m Model) rowCountTerm(rowIdx int) int {
+	if rowIdx >= 0 && rowIdx < len(m.diffLayout.counts) {
+		return m.diffLayout.counts[rowIdx]
+	}
+	return 1
+}
+
+// computeDiffLayout (re)builds the wrapped-line layout for the current diff
+// body from the terminal size and content. Called on diff/raw load and on
+// resize so navigation and rendering agree on where wrapped lines land.
+func (m *Model) computeDiffLayout() {
+	m.diffLayout = computeDiffLayoutPure(m.width, m.contentHeight(), m.diffHeadLen(), m.diffRows, m.diffRaw, m.diffDigits)
 }
 
 // diffHeadLen is the number of body rows occupied by the description header,
@@ -954,8 +1000,10 @@ func (m Model) diffBodyHeight() int {
 	return h
 }
 
-// diffCursorBodyRow is the body-row index of the focused line, or -1 if the
-// diff has no chunks to navigate.
+// diffCursorBodyRow is the terminal body-line index of the focused line's
+// first wrapped sub-line, or -1 if the diff has no chunks to navigate. With
+// wrapping this is the top terminal line of the cursor's logical row so the
+// scroll-follow logic keeps the row visible.
 func (m Model) diffCursorBodyRow() int {
 	if len(m.diffChunks) == 0 || m.diffCurChunk < 0 || m.diffCurChunk >= len(m.diffChunks) {
 		return -1
@@ -964,7 +1012,9 @@ func (m Model) diffCursorBodyRow() int {
 	if m.diffCurLine < 0 || m.diffCurLine >= len(cur) {
 		return -1
 	}
-	return cur[m.diffCurLine]
+	headLen := m.diffHeadLen()
+	rowIdx := cur[m.diffCurLine] - headLen
+	return headLen + m.rowStartTerm(rowIdx)
 }
 
 // diffChunkRows returns a set of the body-row indices in the focused chunk,
@@ -990,21 +1040,33 @@ func (m *Model) diffClampMax() {
 	}
 }
 
+// chunkTerminalSpan returns the [first, last] terminal body-line indices
+// (inclusive, including the head offset) spanned by the focused chunk. Used by
+// the scroll-follow logic to reason about wrapped chunk extents.
+func (m Model) chunkTerminalSpan() (int, int) {
+	cur := m.diffChunks[m.diffCurChunk]
+	headLen := m.diffHeadLen()
+	firstIdx := cur[0] - headLen
+	lastIdx := cur[len(cur)-1] - headLen
+	first := headLen + m.rowStartTerm(firstIdx)
+	last := headLen + m.rowStartTerm(lastIdx) + m.rowCountTerm(lastIdx) - 1
+	return first, last
+}
+
 // diffFollowCursor scrolls the minimum amount needed so the cursor is visible
 // AND as much of the focused chunk as possible is shown.
 //   - For a chunk that fits in the viewport, the whole chunk is kept visible,
 //     so surrounding context (hunk header above, context lines below) stays on
 //     screen too.
 //   - For a chunk taller than the viewport, only the cursor line is guaranteed
-//     visible — so stepping at an edge reveals exactly one new line.
+//     visible — so stepping at an edge reveals exactly one new (wrapped) line.
 func (m *Model) diffFollowCursor() {
 	row := m.diffCursorBodyRow()
 	if row < 0 {
 		return
 	}
-	cur := m.diffChunks[m.diffCurChunk]
+	first, last := m.chunkTerminalSpan()
 	h := m.diffBodyHeight()
-	first, last := cur[0], cur[len(cur)-1]
 	if last-first+1 <= h {
 		// Whole chunk fits: keep it entirely in view (scroll only if needed).
 		if first < m.diffScrollY {
@@ -1035,7 +1097,8 @@ const diffChunkContext = 3
 // of the chunk as fits in the viewport.
 func (m *Model) diffEnterChunkDown() {
 	cur := m.diffChunks[m.diffCurChunk]
-	first := cur[0]
+	headLen := m.diffHeadLen()
+	first := headLen + m.rowStartTerm(cur[0]-headLen)
 	top := first - diffChunkContext
 	if top < 0 {
 		top = 0
@@ -1049,7 +1112,9 @@ func (m *Model) diffEnterChunkDown() {
 // chunk as fits in the viewport.
 func (m *Model) diffEnterChunkUp() {
 	cur := m.diffChunks[m.diffCurChunk]
-	last := cur[len(cur)-1]
+	headLen := m.diffHeadLen()
+	lastIdx := cur[len(cur)-1] - headLen
+	last := headLen + m.rowStartTerm(lastIdx) + m.rowCountTerm(lastIdx) - 1
 	h := m.diffBodyHeight()
 	top := last + diffChunkContext - h + 1
 	if top < 0 {

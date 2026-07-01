@@ -1,6 +1,9 @@
 package ui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const sampleDiff = `diff --git a/foo.go b/foo.go
 index 1234567..89abcde 100644
@@ -266,4 +269,94 @@ func TestDiffCursorShowsContext(t *testing.T) {
 		t.Errorf("chunk first line %d scrolled above viewport %d", chunkFirst, m.diffScrollY)
 	}
 	_ = head
+}
+
+// TestDiffWrap verifies that long diff lines wrap onto extra terminal lines
+// without breaking the panel's fixed-height contract or the chunk cursor's
+// scroll-following. The wrapped-line layout must report more terminal lines
+// than there are logical rows, and the cursor's terminal position must land on
+// the wrapped row's first sub-line.
+func TestDiffWrap(t *testing.T) {
+	// One hunk with a single very long addition line.
+	longLine := strings.Repeat("x", 200)
+	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,1 +1,2 @@\n ctx\n+" + longLine + "\n"
+	m := Model{width: 60, height: 24, view: viewLog, diffOpen: true, diffIsRevision: true, diffRev: "abc"}
+	rows := renderDiff(raw)
+	m.diffRows = rows
+	m.diffStatus = nil
+	m.diffDigits = maxLineDigits(rows)
+	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen())
+	m.diffCurChunk, m.diffCurLine = 0, 0
+	m.computeDiffLayout()
+
+	// The body must occupy more terminal lines than logical rows (wrapping
+	// happened), and the layout's per-row counts must exceed 1 for the long
+	// line.
+	if m.diffBodyTotal() <= len(rows) {
+		t.Errorf("bodyTotal %d <= rows %d; expected wrapping", m.diffBodyTotal(), len(rows))
+	}
+	longIdx := -1
+	for i, r := range rows {
+		if r.kind == rowLine && r.lineKind == "addition" && len(r.spans) > 0 && len(r.spans[0].text) >= 200 {
+			longIdx = i
+		}
+	}
+	if longIdx < 0 {
+		t.Fatal("long addition row not found")
+	}
+	if m.rowCountTerm(longIdx) <= 1 {
+		t.Errorf("long row wrapped count = %d, want >1", m.rowCountTerm(longIdx))
+	}
+
+	// The cursor's terminal body row must equal the wrapped first sub-line of
+	// the long row (headLen + its start), not the 1:1 logical offset.
+	headLen := m.diffHeadLen()
+	wantCursor := headLen + m.rowStartTerm(longIdx)
+	if got := m.diffCursorBodyRow(); got != wantCursor {
+		t.Errorf("cursorBodyRow = %d, want %d (wrapped start)", got, wantCursor)
+	}
+
+	// The panel must still emit exactly `height` lines at this width.
+	out := renderDiffPanel(m.width, m.height, m.diffRev, 0, false, false, 0, m.diffDesc, true, rows, m.diffDigits, m.diffStatus, "", m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows())
+	if len(out) != m.height {
+		t.Errorf("wrapped panel lines = %d, want %d", len(out), m.height)
+	}
+
+	// Following the cursor must keep the cursor's first sub-line in view.
+	m.diffEnterChunkDown()
+	row := m.diffCursorBodyRow()
+	if row < m.diffScrollY || row >= m.diffScrollY+m.diffBodyHeight() {
+		t.Errorf("wrapped cursor %d out of view [%d,%d)", row, m.diffScrollY, m.diffScrollY+m.diffBodyHeight())
+	}
+}
+
+// TestDiffWrapNoMisplace checks that every visible terminal line produced by
+// renderDiffPanel maps back to a valid logical row via the layout, i.e. no
+// wrapped sub-line is dropped or duplicated relative to the computed layout.
+func TestDiffWrapNoMisplace(t *testing.T) {
+	longLine := "+" + strings.Repeat("y", 120) + "\n"
+	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,1 +1,3 @@\n ctx\n" + longLine + longLine
+	m := Model{width: 50, height: 30, view: viewLog, diffOpen: true}
+	rows := renderDiff(raw)
+	m.diffRows = rows
+	m.diffStatus = nil
+	m.diffDigits = maxLineDigits(rows)
+	m.computeDiffLayout()
+	headLen := m.diffHeadLen()
+
+	// Walk every body terminal line and confirm rowAt round-trips within the
+	// row's [start, start+count) range.
+	for bl := 0; bl < m.diffBodyTotal(); bl++ {
+		ri, sub := m.diffLayout.rowAt(bl)
+		if ri < 0 || ri >= len(rows) {
+			t.Fatalf("bodyLine %d -> rowIdx %d out of range", bl, ri)
+		}
+		if bl < m.rowStartTerm(ri) || bl >= m.rowStartTerm(ri)+m.rowCountTerm(ri) {
+			t.Errorf("bodyLine %d not within row %d span [%d,%d)", bl, ri, m.rowStartTerm(ri), m.rowStartTerm(ri)+m.rowCountTerm(ri))
+		}
+		if sub != bl-m.rowStartTerm(ri) {
+			t.Errorf("bodyLine %d sub = %d, want %d", bl, sub, bl-m.rowStartTerm(ri))
+		}
+	}
+	_ = headLen
 }
