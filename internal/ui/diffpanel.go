@@ -267,6 +267,13 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 	}
 	out := []string{bgRow(width, colPanel, titleSegs...)}
 
+	// In file mode the blame header is sticky chrome (always visible), not
+	// part of the scrollable body, so the user always knows which commit owns
+	// the cursor line.
+	if fileMode && len(fileHead) > 0 {
+		out = append(out, fileHead...)
+	}
+
 	contentH := height - len(out)
 	if contentH < 0 {
 		contentH = 0
@@ -274,12 +281,10 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 
 	// The scrollable body is: description header + status header + status
 	// items + separators + diff. The head lines themselves do not wrap; only
-	// the diff/raw body wraps. In file mode the head is a caller-supplied
-	// blame header (or nil for no head); the body is the file's lines.
+	// the diff/raw body wraps. In file mode the body is just the file's lines
+	// (the blame header is rendered as sticky chrome above).
 	var head []string
-	if fileMode {
-		head = fileHead
-	} else {
+	if !fileMode {
 		if showDesc {
 			head = append(head, buildDescHead(width, desc, aiLoading, spinnerFrame)...)
 		}
@@ -341,7 +346,9 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 			}
 			str := renderDiffRowSubLine(scrollW, digits, r, sub, barColor, isCollapsed, isCursor, splitInd, sv.active, fileMode)
 			rowBg := colPanel
-			if !fileMode {
+			if fileMode {
+				rowBg = fileRowBg(r, isCursor)
+			} else {
 				rowBg = diffRowBg(r)
 				if r.kind == rowFileHeader && isCursor {
 					rowBg = diffFileHeaderFg
@@ -370,6 +377,19 @@ func diffRowBg(r diffRow) lipgloss.TerminalColor {
 	default:
 		return colPanel
 	}
+}
+
+// fileRowBg is the background colour for a file-view row: the selection
+// surface (colElement) on the cursor line, otherwise the row's alternating
+// section tint (falling back to colPanel when unset).
+func fileRowBg(r diffRow, isCursor bool) lipgloss.TerminalColor {
+	if isCursor {
+		return colElement
+	}
+	if r.sectionBg != nil {
+		return r.sectionBg
+	}
+	return colPanel
 }
 
 // renderRawSubLine renders sub-line `sub` of a raw (list-output) line, wrapped
@@ -477,8 +497,11 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 
 	default:
 		if fileMode {
-			// File viewer mode: single line number, no sign column, panel
-			// background. The left ┃ bar marks the cursor line in yellow.
+			// File viewer mode: single line number, no sign column.
+			// Background alternates per blame section (r.sectionBg); the
+			// cursor line uses the selection surface (colElement). The left
+			// ┃ bar marks the cursor line in yellow.
+			bg := fileRowBg(r, isCursor)
 			lineFg := diffContextFg
 			prefixW := digits + 3 // leftBar(1) + gutter(1+digits+1)
 			bodyW := max(1, scrollW-prefixW)
@@ -489,23 +512,23 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 				if s.fg != "" {
 					fg = lipgloss.Color(s.fg)
 				}
-				bodySegs = append(bodySegs, seg{text: s.text, fg: fg, bg: colPanel})
+				bodySegs = append(bodySegs, seg{text: s.text, fg: fg, bg: bg})
 			}
 			wrapped := wrapSegs(bodySegs, bodyW)
 
-			leftBar := seg{text: "┃", fg: colPanel, bg: colPanel}
+			leftBar := seg{text: "┃", fg: bg, bg: bg}
 			if barColor != nil {
-				leftBar = seg{text: "┃", fg: barColor, bg: colPanel}
+				leftBar = seg{text: "┃", fg: barColor, bg: bg}
 			}
 
 			var gutterSegs []seg
 			if sub == 0 {
 				gutterSegs = []seg{
-					{text: " " + padNum(r.newNum, digits) + " ", fg: diffLineNumber, bg: colPanel},
+					{text: " " + padNum(r.newNum, digits) + " ", fg: diffLineNumber, bg: bg},
 				}
 			} else {
 				gutterSegs = []seg{
-					{text: strings.Repeat(" ", digits+2), bg: colPanel},
+					{text: strings.Repeat(" ", digits+2), bg: bg},
 				}
 			}
 
@@ -514,7 +537,7 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 			if sub >= 0 && sub < len(wrapped) {
 				segs = append(segs, wrapped[sub]...)
 			}
-			return bgRow(scrollW, colPanel, segs...)
+			return bgRow(scrollW, bg, segs...)
 		}
 
 		var lineFg, lineBg lipgloss.TerminalColor

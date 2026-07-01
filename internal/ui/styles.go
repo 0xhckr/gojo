@@ -47,6 +47,14 @@ var (
 	colDarkerGray = colPanel   // status / help bars
 )
 
+// File-view section backgrounds — alternating tints per blame hunk so
+// contiguous runs of the same commit stand out. Vibrant blue and red
+// undertones make sections immediately distinguishable.
+var (
+	fileSectionBgA lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#e0ecff", Dark: "#1e2230"}
+	fileSectionBgB lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#ffe8d6", Dark: "#2e1d0a"}
+)
+
 // Diff panel colors — subtle tinted backgrounds, refined foregrounds.
 var (
 	diffAddedSign    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#3d9a57", Dark: "#7fd88f"}

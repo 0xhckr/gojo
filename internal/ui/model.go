@@ -1664,23 +1664,22 @@ func (m Model) applyScrollBarDrag(mouseY int) (tea.Model, tea.Cmd) {
 		fv.ensureHighlights()
 		rows := annotateToDiffRows(fv.lines, fv.highlights)
 		digits := lineDigits(len(fv.lines))
-		headLen := 3 // buildBlameHead: label + info + divider
-		layout := computeDiffLayoutPure(m.width, trackH, headLen, rows, "", digits, nil, false, true)
-		bodyTotal := headLen + layout.total
-		if bodyTotal <= trackH {
+		// Head is sticky chrome (3 lines) — not part of the scrollable body.
+		bodyH := trackH - 3
+		if bodyH < 1 {
+			bodyH = 1
+		}
+		layout := computeDiffLayoutPure(m.width, bodyH, 0, rows, "", digits, nil, false, true)
+		if layout.total <= bodyH {
 			return m, nil
 		}
-		maxScroll := bodyTotal - trackH
+		maxScroll := layout.total - bodyH
 		targetTermScroll := trackY * maxScroll / max(1, trackH-1)
 		// Move the cursor to the source line at the drag position so the
 		// centering logic in renderFileBlame doesn't override the scroll.
-		relScroll := targetTermScroll - headLen
-		if relScroll < 0 {
-			relScroll = 0
-		}
 		fv.cursorY = 0
 		for i, s := range layout.starts {
-			if s <= relScroll {
+			if s <= targetTermScroll {
 				fv.cursorY = i
 			} else {
 				break

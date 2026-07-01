@@ -353,12 +353,18 @@ func renderTreeRowString(width int, row treeRow, selected bool) string {
 // rendering via renderDiffPanel in file viewer mode. All lines become context
 // lines (no +/- signs, no diff backgrounds) with a single line number in
 // newNum. Tabs are expanded to 4 spaces to match the previous blame renderer.
+// Section backgrounds alternate per ChangeID run so contiguous blame hunks
+// are visually distinguishable.
 func annotateToDiffRows(lines []jj.AnnotateLine, highlights [][]span) []diffRow {
 	if len(lines) == 0 {
 		return nil
 	}
 	rows := make([]diffRow, len(lines))
+	parity := 0
 	for i, l := range lines {
+		if i > 0 && l.ChangeID != lines[i-1].ChangeID {
+			parity ^= 1
+		}
 		var sp []span
 		if highlights != nil && i < len(highlights) && len(highlights[i]) > 0 {
 			for _, s := range highlights[i] {
@@ -369,11 +375,16 @@ func annotateToDiffRows(lines []jj.AnnotateLine, highlights [][]span) []diffRow 
 		} else {
 			sp = []span{}
 		}
+		bg := fileSectionBgA
+		if parity == 1 {
+			bg = fileSectionBgB
+		}
 		rows[i] = diffRow{
-			kind:     rowLine,
-			lineKind: "context",
-			newNum:   l.LineNo,
-			spans:    sp,
+			kind:      rowLine,
+			lineKind:  "context",
+			newNum:    l.LineNo,
+			spans:     sp,
+			sectionBg: bg,
 		}
 	}
 	return rows
@@ -426,7 +437,9 @@ func (m Model) renderFileBlame(width, height int) []string {
 	rows := annotateToDiffRows(fv.lines, fv.highlights)
 	digits := lineDigits(len(fv.lines))
 
-	// Build the blame head from the cursor's current line.
+	// Build the blame head from the cursor's current line. This is rendered
+	// as sticky chrome (always visible) by renderDiffPanel, not as part of
+	// the scrollable body.
 	cursorY := min(fv.cursorY, len(fv.lines)-1)
 	cur := fv.lines[cursorY]
 	cid := cur.ChangeID
@@ -437,21 +450,21 @@ func (m Model) renderFileBlame(width, height int) []string {
 	head := buildBlameHead(width, cid, cur.Author, desc)
 	headLen := len(head)
 
-	contentH := height - 1 // minus the title bar
+	contentH := height - 1 - headLen // minus title bar and sticky blame header
 	if contentH < 1 {
 		contentH = 1
 	}
 
 	// Compute the layout to map between source-line indices (which the file
-	// view's cursor/scroll use) and terminal-line indices (which
-	// renderDiffPanel expects). renderDiffPanel recomputes this internally
-	// with the same parameters, so the values stay in sync.
-	layout := computeDiffLayoutPure(width, contentH, headLen, rows, "", digits, nil, false, true)
+	// view's cursor uses) and terminal-line indices (which renderDiffPanel
+	// expects). The head is sticky chrome, so headLen=0 for the body layout.
+	layout := computeDiffLayoutPure(width, contentH, 0, rows, "", digits, nil, false, true)
 
-	// Map the cursor (source line) to a terminal body line (including head).
+	// Map the cursor (source line) to a terminal body line (body-relative;
+	// the head is not part of the body).
 	cursorBodyRow := -1
 	if cursorY >= 0 && cursorY < len(layout.starts) {
-		cursorBodyRow = headLen + layout.starts[cursorY]
+		cursorBodyRow = layout.starts[cursorY]
 	}
 
 	// Center the cursor: aim to place it at the vertical middle of the
@@ -464,8 +477,7 @@ func (m Model) renderFileBlame(width, height int) []string {
 		termScrollY = cursorBodyRow - half
 	}
 
-	bodyTotal := headLen + layout.total
-	maxScroll := max(0, bodyTotal-contentH)
+	maxScroll := max(0, layout.total-contentH)
 	if termScrollY < 0 {
 		termScrollY = 0
 	}

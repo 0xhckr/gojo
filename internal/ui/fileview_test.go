@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -91,10 +92,10 @@ func TestFileModeCursorBar(t *testing.T) {
 	rows := annotateToDiffRows(lines, nil)
 	digits := lineDigits(len(lines))
 	head := buildBlameHead(80, "a", "x@y.z", "test")
-	headLen := len(head)
 
-	layout := computeDiffLayoutPure(80, 20, headLen, rows, "", digits, nil, false, true)
-	cursorBodyRow := headLen + layout.starts[1] // cursor on line 2
+	// Head is sticky chrome; body layout uses headLen=0.
+	layout := computeDiffLayoutPure(80, 20, 0, rows, "", digits, nil, false, true)
+	cursorBodyRow := layout.starts[1] // cursor on line 2
 
 	out := renderDiffPanel(80, 24, "f.go", 0, false, false, 0, "", false, rows, digits, nil, "", 0, cursorBodyRow, nil, nil, splitView{}, true, head)
 	if len(out) != 24 {
@@ -104,5 +105,57 @@ func TestFileModeCursorBar(t *testing.T) {
 	view := ansi.Strip(strings.Join(out, "\n"))
 	if !strings.Contains(view, "┃") {
 		t.Errorf("missing cursor bar: %s", view)
+	}
+}
+
+// TestFileModeStickyBlameHead verifies the blame header stays visible when
+// scrolled to the bottom of a long file.
+func TestFileModeStickyBlameHead(t *testing.T) {
+	var lines []jj.AnnotateLine
+	for i := 0; i < 100; i++ {
+		lines = append(lines, jj.AnnotateLine{ChangeID: "abc", LineNo: i + 1, Text: "line" + strconv.Itoa(i+1)})
+	}
+	rows := annotateToDiffRows(lines, nil)
+	digits := lineDigits(len(lines))
+	head := buildBlameHead(80, "abc", "x@y.z", "test")
+
+	// Scroll to near the bottom.
+	layout := computeDiffLayoutPure(80, 20, 0, rows, "", digits, nil, false, true)
+	cursorY := 95
+	cursorBodyRow := layout.starts[cursorY]
+	termScrollY := max(0, min(layout.total-20, cursorBodyRow-10))
+
+	out := renderDiffPanel(80, 24, "f.go", 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, nil, nil, splitView{}, true, head)
+	if len(out) != 24 {
+		t.Fatalf("panel lines = %d, want 24", len(out))
+	}
+	view := ansi.Strip(strings.Join(out, "\n"))
+	// The sticky blame header must still be visible.
+	if !strings.Contains(view, "blame") {
+		t.Errorf("sticky blame header missing when scrolled: %s", view)
+	}
+	if !strings.Contains(view, "x@y.z") {
+		t.Errorf("sticky blame header missing author when scrolled: %s", view)
+	}
+}
+
+// TestFileModeSectionColors verifies that different change IDs produce
+// different section backgrounds on the diff rows.
+func TestFileModeSectionColors(t *testing.T) {
+	lines := []jj.AnnotateLine{
+		{ChangeID: "aaa", LineNo: 1, Text: "a1"},
+		{ChangeID: "aaa", LineNo: 2, Text: "a2"},
+		{ChangeID: "bbb", LineNo: 3, Text: "b1"},
+		{ChangeID: "bbb", LineNo: 4, Text: "b2"},
+	}
+	rows := annotateToDiffRows(lines, nil)
+	if rows[0].sectionBg == nil || rows[2].sectionBg == nil {
+		t.Fatal("sectionBg not set")
+	}
+	if rows[0].sectionBg == rows[2].sectionBg {
+		t.Fatal("sections with different change IDs have the same background")
+	}
+	if rows[0].sectionBg != rows[1].sectionBg {
+		t.Fatal("lines in the same section have different backgrounds")
 	}
 }
