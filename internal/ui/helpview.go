@@ -66,6 +66,7 @@ var helpSections = []helpSection{
 		{"g / G", "jump top / bottom"},
 		{"d", "edit description"},
 		{"D", "AI describe"},
+		{"n", "jj new  (create change on top)"},
 		{"enter / q", "close diff"},
 	}},
 	{title: "File View", color: colMagenta, bindings: []helpBinding{

@@ -237,6 +237,14 @@ type squashFinishedMsg struct {
 	err  error
 }
 
+// newCreatedMsg is returned after `jj new` creates a revision on top of
+// another, carrying the new working-copy entry so the diff can track it.
+type newCreatedMsg struct {
+	entry *jj.LogEntry
+	err   error
+	elev  *elevReq
+}
+
 type listLoadedMsg struct {
 	title   string
 	content string
@@ -459,6 +467,35 @@ func (m Model) squashCmd(from, into string) tea.Cmd {
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return squashFinishedMsg{from: from, into: into, err: err}
 	})
+}
+
+// newOnRevCmd runs `jj new -r <rev>` and, on success, fetches the new working
+// copy's log entry so the caller can open a diff on it. Extra flags are
+// appended for elevation retries.
+func (m Model) newOnRevCmd(rev string, extra ...string) tea.Cmd {
+	r := m.runner
+	return func() tea.Msg {
+		if err := r.New(rev, extra...); err != nil {
+			if len(extra) == 0 {
+				if flag, reason := jj.DetectElevation(err.Error()); flag != "" {
+					return newCreatedMsg{
+						err: err,
+						elev: &elevReq{
+							flag:   flag,
+							reason: reason,
+							retry:  func() tea.Cmd { return m.newOnRevCmd(rev, flag) },
+						},
+					}
+				}
+			}
+			return newCreatedMsg{err: err}
+		}
+		entry, err := r.WorkingCopyEntry()
+		if err != nil {
+			return newCreatedMsg{err: err}
+		}
+		return newCreatedMsg{entry: entry}
+	}
 }
 
 func listCmd(fn func() (string, error), title string) tea.Cmd {
@@ -703,6 +740,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errMsg = msg.err.Error()
 		} else {
 			m.message = "squashed " + msg.from + " into " + msg.into
+		}
+		return m, m.refreshCmd()
+
+	case newCreatedMsg:
+		m.popBusy()
+		if msg.err != nil {
+			if msg.elev != nil {
+				m.pendingElev = msg.elev
+				m.errMsg = ""
+				return m, nil
+			}
+			m.errMsg = msg.err.Error()
+			return m, m.refreshCmd()
+		}
+		m.message = "created new change"
+		if msg.entry != nil {
+			m.diffOpen = true
+			m.diffRev = msg.entry.ChangeID
+			m.diffRevPrefix = msg.entry.ChangeIDPrefixLen
+			m.diffIsRevision = true
+			m.diffLoading = true
+			m.diffScrollY = 0
+			m.diffDesc = msg.entry.Subject
+			m.diffRaw = ""
+			m.diffRows = nil
+			m.diffStatus = nil
+			m.diffChunks = nil
+			m.cursor = 0
+			m.recomputeOffset()
+			return m, tea.Batch(m.refreshCmd(), m.openDiffCmd(msg.entry.CommitID, msg.entry.ChangeID))
 		}
 		return m, m.refreshCmd()
 
@@ -1688,7 +1755,13 @@ func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
 				m.spinnerRunning = true
 				cmds = append(cmds, spinnerTick())
 			}
-			return m, tea.Batch(cmds...)
+		return m, tea.Batch(cmds...)
+	}
+	case "n":
+		if m.diffIsRevision && m.diffRev != "" {
+			rev := m.diffRev
+			m, tick := m.startBusy("creating change…")
+			return m, tea.Batch(tick, m.newOnRevCmd(rev))
 		}
 	}
 	return m, nil
@@ -2672,7 +2745,7 @@ func (m Model) helpBarItems() [][2]string {
 		return [][2]string{
 			{"⏎ close", "⏎"}, {"↑/k chunk↑", "↑"}, {"↓/j chunk↓", "↓"},
 			{"g top", "g"}, {"G bot", "G"}, {"describe", "d"},
-			{"AI Desc", "D"}, {"q close", "q"},
+			{"AI Desc", "D"}, {"new", "n"}, {"q close", "q"},
 		}
 	case m.view == viewFile:
 		switch m.fileView.phase {

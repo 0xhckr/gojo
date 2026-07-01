@@ -259,6 +259,20 @@ func (r *Runner) New(rev string, extra ...string) error {
 	return err
 }
 
+// WorkingCopyEntry returns the log entry for the working copy (@). Used after
+// `jj new` to discover the newly created revision's change/commit IDs.
+func (r *Runner) WorkingCopyEntry() (*LogEntry, error) {
+	out, err := r.run("log", "-r", "@", "--no-graph", "-T", logTemplate, "--color", "never")
+	if err != nil {
+		return nil, err
+	}
+	entries := parseLog(out)
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("no working copy found")
+	}
+	return &entries[0], nil
+}
+
 // Abandon removes a revision. Extra flags are appended for elevation retries.
 func (r *Runner) Abandon(rev string, extra ...string) error {
 	args := appendExtra([]string{"abandon", "-r", rev}, extra)

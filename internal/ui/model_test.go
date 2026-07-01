@@ -701,3 +701,127 @@ func TestAIDescribeStartNextEmptyQueue(t *testing.T) {
 		t.Error("startNextAIDescribe with empty queue should return nil cmd")
 	}
 }
+
+// TestDiffNewRevision verifies that pressing 'n' in the diff view dispatches
+// a create-new command, and that a successful newCreatedMsg switches the diff
+// to track the new revision.
+func TestDiffNewRevision(t *testing.T) {
+	m := Model{
+		ready:          true,
+		width:          100,
+		height:         30,
+		view:           viewLog,
+		diffOpen:       true,
+		diffIsRevision: true,
+		diffRev:        "abc12345",
+		diffDesc:       "original commit",
+		entries: []jj.LogEntry{
+			{ChangeID: "abc12345", CommitID: "deadbeef", Subject: "original commit"},
+		},
+	}
+
+	// Press 'n' in the diff view — should start busy and return a command.
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m = m2.(Model)
+	if cmd == nil {
+		t.Fatal("'n' in diff view did not produce a command")
+	}
+	if len(m.busy) == 0 {
+		t.Fatal("busy stack should have 'creating change…' after 'n'")
+	}
+
+	// Simulate newCreatedMsg with a new working-copy entry.
+	newEntry := &jj.LogEntry{
+		ChangeID:          "xyz99999",
+		ChangeIDPrefixLen: 3,
+		CommitID:          "cafebabe",
+		Subject:           "",
+	}
+	m2, _ = m.Update(newCreatedMsg{entry: newEntry})
+	m = m2.(Model)
+
+	if m.diffRev != "xyz99999" {
+		t.Errorf("diffRev = %q, want xyz99999", m.diffRev)
+	}
+	if m.diffRevPrefix != 3 {
+		t.Errorf("diffRevPrefix = %d, want 3", m.diffRevPrefix)
+	}
+	if !m.diffLoading {
+		t.Error("diffLoading should be true after newCreatedMsg")
+	}
+	if !m.diffOpen {
+		t.Error("diff should remain open after newCreatedMsg")
+	}
+	if m.diffDesc != "" {
+		t.Errorf("diffDesc = %q, want empty for new revision", m.diffDesc)
+	}
+	if m.diffScrollY != 0 {
+		t.Errorf("diffScrollY = %d, want 0", m.diffScrollY)
+	}
+	if len(m.busy) != 0 {
+		t.Error("busy stack should be empty after newCreatedMsg")
+	}
+	if m.message != "created new change" {
+		t.Errorf("message = %q, want 'created new change'", m.message)
+	}
+}
+
+// TestDiffNewRevisionError verifies that a failed newCreatedMsg clears the
+// busy state and shows the error.
+func TestDiffNewRevisionError(t *testing.T) {
+	m := Model{
+		ready:          true,
+		width:          100,
+		height:         30,
+		view:           viewLog,
+		diffOpen:       true,
+		diffIsRevision: true,
+		diffRev:        "abc12345",
+		busy:           []string{"creating change…"},
+	}
+
+	m2, _ := m.Update(newCreatedMsg{err: errors.New("jj new failed")})
+	m = m2.(Model)
+
+	if len(m.busy) != 0 {
+		t.Error("busy stack should be empty after error")
+	}
+	if m.errMsg != "jj new failed" {
+		t.Errorf("errMsg = %q, want 'jj new failed'", m.errMsg)
+	}
+	if m.diffRev != "abc12345" {
+		t.Errorf("diffRev should be unchanged, got %q", m.diffRev)
+	}
+}
+
+// TestDiffNewRevisionElevation verifies that an elevatable newCreatedMsg sets
+// pendingElev instead of showing a bare error.
+func TestDiffNewRevisionElevation(t *testing.T) {
+	m := Model{
+		ready:          true,
+		width:          100,
+		height:         30,
+		view:           viewLog,
+		diffOpen:       true,
+		diffIsRevision: true,
+		diffRev:        "abc12345",
+		busy:           []string{"creating change…"},
+	}
+
+	m2, _ := m.Update(newCreatedMsg{
+		err: errors.New("revision is immutable"),
+		elev: &elevReq{
+			flag:   "--ignore-immutable",
+			reason: "target is immutable",
+			retry:  func() tea.Cmd { return nil },
+		},
+	})
+	m = m2.(Model)
+
+	if m.pendingElev == nil {
+		t.Fatal("elevation error did not set pendingElev")
+	}
+	if m.errMsg != "" {
+		t.Errorf("errMsg should be empty during elevation prompt, got %q", m.errMsg)
+	}
+}
