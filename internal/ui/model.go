@@ -946,8 +946,14 @@ func (m *Model) recomputeOffset() {
 	m.offset, _ = logWindow(m.entries, cur, m.offset, avail)
 }
 
+// bottomBarHeight is the 1-line blank strip drawn below the help bar, coloured
+// the same as the status/help bars. It prevents Ghostty from extending the last
+// content line's background into the remaining terminal rows (which made the
+// text-input cursor appear two lines tall).
+const bottomBarHeight = 1
+
 func (m Model) contentHeight() int {
-	h := m.height - 2 - m.statusBarHeight() - m.helpBarHeight()
+	h := m.height - 2 - m.statusBarHeight() - m.helpBarHeight() - bottomBarHeight
 	if m.suggestionsVisible() {
 		h--
 	}
@@ -2880,9 +2886,10 @@ func (m Model) View() string {
 		lines = append(lines, m.renderSuggestions())
 	}
 
-	// Status bar + help bar.
+	// Status bar + help bar + bottom blank strip.
 	lines = append(lines, m.renderStatusBar()...)
 	lines = append(lines, m.renderHelpBar()...)
+	lines = append(lines, blankRow(m.width, colPanel))
 
 	return strings.Join(padLines(lines, m.height), "\n")
 }

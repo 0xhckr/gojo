@@ -243,7 +243,7 @@ func TestDiffCursorScroll(t *testing.T) {
 	}
 	raw += "diff --git a/b b/b\n+++ b/b\n@@ -1,1 +1,2 @@\n+x\n+y\n"
 
-	m := Model{width: 80, height: 10, view: viewLog, diffOpen: true}
+	m := Model{width: 80, height: 11, view: viewLog, diffOpen: true}
 	m.diffRows = renderDiff(raw)
 	m.diffStatus = nil
 	m.diffChunks = computeDiffChunks(m.diffRows, m.diffHeadLen(), nil)
