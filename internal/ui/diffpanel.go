@@ -357,7 +357,7 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 			lineFg = diffContextFg
 		}
 
-		prefixW := 2*digits + 5 // leftBar + gutter + rightBar + sign
+		prefixW := 2*digits + 5 // leftBar + gutter + gap + sign
 		bodyW := max(1, scrollW-prefixW)
 
 		// Build the wrapping body: the syntax-highlighted spans, all carrying
@@ -379,24 +379,32 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 			leftBar = seg{text: "┃", fg: barColor, bg: colPanel}
 		}
 
-		// Gutter: real line numbers on sub-line 0, blank thereafter.
+		// Gutter: real line numbers on sub-line 0, blank thereafter. Uses a
+		// dimmer tint than the content area so the gutter is less opaque.
+		var gutterBg lipgloss.TerminalColor
+		switch r.lineKind {
+		case "addition":
+			gutterBg = diffAddedGutterBg
+		case "deletion":
+			gutterBg = diffRemovedGutterBg
+		}
 		var gutterSeg seg
 		if sub == 0 {
-			gutterSeg = seg{text: lineNumText(r, digits), fg: diffLineNumber, bg: lineBg}
+			gutterSeg = seg{text: lineNumText(r, digits), fg: diffLineNumber, bg: gutterBg}
 		} else {
-			gutterSeg = seg{text: strings.Repeat(" ", 2*digits+2), bg: lineBg}
+			gutterSeg = seg{text: strings.Repeat(" ", 2*digits+2), bg: gutterBg}
 		}
 
-		// Right cursor gutter + sign: real sign on sub-line 0, blank after.
-		rightBar := seg{text: "┃", fg: colPanel, bg: lineBg}
+		// Sign: real sign on sub-line 0, blank after. A one-space gap separates
+		// the sign column from the line numbers.
 		var signSeg seg
 		if sub == 0 {
-			signSeg = seg{text: r.sign, fg: lineFg, bg: lineBg}
+			signSeg = seg{text: " " + r.sign, fg: lineFg, bg: lineBg}
 		} else {
-			signSeg = seg{text: " ", bg: lineBg}
+			signSeg = seg{text: "  ", bg: lineBg}
 		}
 
-		segs := []seg{leftBar, gutterSeg, rightBar, signSeg}
+		segs := []seg{leftBar, gutterSeg, signSeg}
 		if sub >= 0 && sub < len(wrapped) {
 			segs = append(segs, wrapped[sub]...)
 		}

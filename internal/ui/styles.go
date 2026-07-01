@@ -69,6 +69,11 @@ var (
 	diffHunkHeaderBg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d8e4ec", Dark: "#1a2230"}
 	diffFileHeaderBg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#eee4cc", Dark: "#24221a"}
 
+	// Gutter backgrounds — a dimmer blend toward the panel surface, so the
+	// coloured tint between the ┃ bars is less opaque than the content area.
+	diffAddedGutterBg   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#ebf6eb", Dark: "#171f1f"}
+	diffRemovedGutterBg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#f7ebed", Dark: "#1f171f"}
+
 	// Chunk cursor — ┃ bar marking the focused change chunk.
 	diffCursorAddBright lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#3d9a57", Dark: "#7fd88f"}
 	diffCursorDelBright lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d1383d", Dark: "#e06c75"}
