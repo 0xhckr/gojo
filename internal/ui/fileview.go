@@ -339,44 +339,62 @@ func (m Model) renderFilePicker(width, height int) []string {
 	return padLines(out, height, width)
 }
 
+// renderTreeRowString renders a single file-picker tree row. The layout
+// mirrors the diff panel: a left-edge ┃ cursor bar (bright yellow on the
+// selected row, invisible otherwise), the ▼/▶ expand/collapse arrow for
+// directories (matching the diff view's file headers), and the name. Every
+// row is filled with colPanel (or colElement when selected) so no
+// transparent gaps show through.
 func renderTreeRowString(width int, row treeRow, selected bool) string {
 	n := row.node
 	indent := strings.Repeat("  ", row.depth)
-	var marker, name string
+
+	var arrow, name string
 	if n.isDir {
 		if n.expanded {
-			marker = "▾"
+			arrow = "▼"
 		} else {
-			marker = "▸"
+			arrow = "▶"
 		}
 		name = n.name + "/"
 	} else {
-		marker = " "
+		arrow = " "
 		name = n.name
 	}
 
-	var bg lipgloss.TerminalColor
-	var nameFg lipgloss.TerminalColor
+	bg := colPanel
 	if selected {
-		bg = colDarkPurple
+		bg = colElement
 	}
+
+	// Cursor bar: yellow on the selected row, bg-coloured (invisible) else.
+	barFg := bg
+	if selected {
+		barFg = colYellow
+	}
+
+	var nameFg lipgloss.TerminalColor
 	switch {
 	case n.isDir:
 		nameFg = colBlue
 	case selected:
 		nameFg = colYellow
 	default:
-		nameFg = colWhite
+		nameFg = colText
 	}
 
-	segs := []seg{{text: " " + indent, fg: colDarkGray, bg: bg}}
-	markerFg := colGray
+	arrowFg := colTextMuted
 	if selected {
-		markerFg = colYellow
+		arrowFg = colYellow
 	}
-	segs = append(segs, seg{text: marker + " ", fg: markerFg, bg: bg})
-	segs = append(segs, seg{text: name, fg: nameFg, bg: bg, bold: n.isDir})
-	return renderRow(width, bg, segs)
+
+	segs := []seg{
+		{text: "┃", fg: barFg, bold: true, bg: bg},
+		{text: " " + indent, bg: bg},
+		{text: arrow + " ", fg: arrowFg, bg: bg},
+		{text: name, fg: nameFg, bg: bg, bold: n.isDir},
+	}
+	return bgRow(width, bg, segs...)
 }
 
 // annotateToDiffRows converts annotated file lines into diffRow format for
