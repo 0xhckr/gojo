@@ -357,7 +357,7 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 			lineFg = diffContextFg
 		}
 
-		prefixW := 2*digits + 6 // leftBar + gutter(incl leading space) + gap + sign
+		prefixW := 2*digits + 8 // leftBar + gutter(incl leading space) + gap + sign + 2 trailing spaces
 		bodyW := max(1, scrollW-prefixW)
 
 		// Build the wrapping body: the syntax-highlighted spans, all carrying
@@ -396,12 +396,12 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 		}
 
 		// Sign: real sign on sub-line 0, blank after. A one-space gap separates
-		// the sign column from the line numbers.
+		// the sign column from the line numbers; two spaces follow the sign.
 		var signSeg seg
 		if sub == 0 {
-			signSeg = seg{text: " " + r.sign, fg: lineFg, bg: lineBg}
+			signSeg = seg{text: " " + r.sign + "  ", fg: lineFg, bg: lineBg}
 		} else {
-			signSeg = seg{text: "  ", bg: lineBg}
+			signSeg = seg{text: "    ", bg: lineBg}
 		}
 
 		segs := []seg{leftBar, gutterSeg, signSeg}
