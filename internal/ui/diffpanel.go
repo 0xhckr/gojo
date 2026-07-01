@@ -195,10 +195,16 @@ func renderDiffRow(width, gutterWidth, digits int, r diffRow, barColor lipgloss.
 		if r.prevPath != "" {
 			label = r.prevPath + " → " + r.path + "  (" + r.changeType + ")"
 		}
-		return bgRow(width, diffFileHeaderBg, seg{text: "┃ ", fg: diffFileHeaderFg, bold: true}, seg{text: label, fg: diffFileHeaderFg, bold: true})
+		return bgRow(width, diffFileHeaderBg,
+			seg{text: "┃", fg: diffFileHeaderFg, bold: true, bg: colPanel},
+			seg{text: " ", fg: diffFileHeaderFg, bold: true, bg: diffFileHeaderBg},
+			seg{text: label, fg: diffFileHeaderFg, bold: true, bg: diffFileHeaderBg})
 
 	case rowHunkHeader:
-		return bgRow(width, diffHunkHeaderBg, seg{text: "  " + r.hunkText, fg: diffHunkHeaderFg})
+		return bgRow(width, diffHunkHeaderBg,
+			seg{text: "┃", fg: diffHunkHeaderFg, bg: colPanel},
+			seg{text: " ", fg: diffHunkHeaderFg, bg: diffHunkHeaderBg},
+			seg{text: r.hunkText, fg: diffHunkHeaderFg, bg: diffHunkHeaderBg})
 
 	default:
 		var lineFg, lineBg lipgloss.TerminalColor
@@ -216,9 +222,9 @@ func renderDiffRow(width, gutterWidth, digits int, r diffRow, barColor lipgloss.
 
 		// Left cursor gutter: ┃ before line numbers. Bright on cursor, dim
 		// on chunk, panel-coloured (invisible) elsewhere.
-		leftBar := seg{text: "┃", fg: colPanel, bg: lineBg}
+		leftBar := seg{text: "┃", fg: colPanel, bg: colPanel}
 		if barColor != nil {
-			leftBar = seg{text: "┃", fg: barColor, bg: lineBg}
+			leftBar = seg{text: "┃", fg: barColor, bg: colPanel}
 		}
 
 		// Right cursor gutter: ┃ after line numbers, always panel-coloured.
