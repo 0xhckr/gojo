@@ -496,7 +496,9 @@ func parseLog(raw string) []LogEntry {
 		var bookmarks []string
 		if fields[8] != "" {
 			for _, b := range strings.Split(fields[8], ",") {
-				bookmarks = append(bookmarks, strings.TrimSuffix(b, "*"))
+				b = strings.TrimSuffix(b, "*")
+				b = strings.TrimSuffix(b, "??")
+				bookmarks = append(bookmarks, b)
 			}
 		}
 
