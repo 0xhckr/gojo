@@ -239,7 +239,7 @@ func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw str
 // (-1 if none); chunkRows is the set of body-row indices (headLen + rowIdx)
 // that belong to the focused chunk. A thin left-edge bar is drawn for those
 // rows: bright for the cursor line, dim for the rest of the chunk.
-func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, aiLoading bool, spinnerFrame int, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool, collapsed map[string]bool, sv splitView, fileMode bool, fileHead []string, preLayout *diffLayout) []string {
+func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, aiLoading bool, spinnerFrame int, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool, collapsed map[string]bool, sv splitView, fileMode bool, fileHead []string, preLayout *diffLayout, hoverRow int) []string {
 	// Title bar — the only sticky chrome; description + status + separator +
 	// diff all scroll together below it as one body. The revision ID uses the
 	// same two-tone highlighting as the log view: the shortest-unique prefix
@@ -351,6 +351,9 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 				}
 			} else {
 				barColor = cursorBar(r, isCursor, inChunk)
+			}
+			if hoverRow == ri && !isCursor {
+				barColor = colHover
 			}
 			str := renderDiffRowSubLine(scrollW, digits, r, sub, barColor, isCollapsed, isCursor, splitInd, sv.active, fileMode)
 			var rowBg lipgloss.TerminalColor

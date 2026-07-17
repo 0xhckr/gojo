@@ -170,6 +170,9 @@ type Model struct {
 	contextMenuOffset int
 	contextMenuX      int
 	contextMenuY      int
+
+	// hover tracks the row/item under the mouse for visual hover highlighting.
+	hover hoverState
 }
 
 // NewModel builds the initial model.
@@ -885,6 +888,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Terminal lost focus: stop refreshing. The poll loop self-terminates on
 		// its next tick when it sees !focused.
 		m.focused = false
+		m.hover.valid = false
 		return m, nil
 
 	case pollMsg:
@@ -1535,6 +1539,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Update hover highlighting on any mouse movement or click inside the
+	// content area (the context menu has its own hover handling).
+	m = m.updateHover(msg.X, msg.Y)
+
 	// Wheel events work regardless of cursor position.
 	if msg.Action == tea.MouseActionPress {
 		switch msg.Button {
@@ -1547,10 +1555,6 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Once a drag is in progress, keep tracking the mouse Y regardless of X
-	// so the user can drift left/right without the drag slipping off the
-	// narrow scrollbar column. applyScrollBarDrag clamps Y to the track.
-	// Only a release ends the drag.
 	if m.scrollDragging {
 		switch msg.Action {
 		case tea.MouseActionMotion:
@@ -3062,7 +3066,7 @@ func (m Model) View() string {
 		lines = append(lines, renderHelp(m.width, ch, m.helpScrollY)...)
 	case m.diffOpen:
 		sv := splitView{active: m.splitMode, marked: m.splitMarked}
-		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), m.diffCollapsed, sv, false, nil, nil)...)
+		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), m.diffCollapsed, sv, false, nil, nil, m.hover.diffRow)...)
 	case m.view == viewFile:
 		lines = append(lines, m.renderFileView(m.width, ch)...)
 	default:
@@ -3078,7 +3082,7 @@ func (m Model) View() string {
 			source: m.squashSource,
 			dest:   m.squashDest,
 		}
-		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.aiLoading, m.spinnerFrame, rb, sq)...)
+		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.aiLoading, m.spinnerFrame, rb, sq, m.hover.logIdx)...)
 	}
 
 	// Autocomplete suggestions.
@@ -3349,8 +3353,8 @@ func (m Model) helpBarItems() [][2]string {
 		return [][2]string{
 			{"⏎ close", "⏎"}, {"↑/k chunk↑", "↑"}, {"↓/j chunk↓", "↓"},
 			{"g top", "g"}, {"G bot", "G"}, {"←/→ fold", "←"},
-		{"describe", "d"}, {"AI Desc", "D"}, {"new", "n"}, {"split", "s"}, {"absorb", "x"},
-		{"q close", "q"},
+			{"describe", "d"}, {"AI Desc", "D"}, {"new", "n"}, {"split", "s"}, {"absorb", "x"},
+			{"q close", "q"},
 		}
 	case m.view == viewFile:
 		switch m.fileView.phase {
@@ -3364,17 +3368,17 @@ func (m Model) helpBarItems() [][2]string {
 				{"↑/k", "↑"}, {"↓/j", "↓"}, {"open commit", "⏎"},
 				{"back", "esc/q"},
 			}
-	default:
-		if m.fileView.fzfActive {
-			return [][2]string{
-				{"type", "filter"}, {"⌫ del", "backspace"}, {"⏎ open", "⏎"},
-				{"↑/k ↓/j", "nav"}, {"esc back", "esc"},
+		default:
+			if m.fileView.fzfActive {
+				return [][2]string{
+					{"type", "filter"}, {"⌫ del", "backspace"}, {"⏎ open", "⏎"},
+					{"↑/k ↓/j", "nav"}, {"esc back", "esc"},
+				}
 			}
-		}
-		return [][2]string{
-			{"↑/k", "↑"}, {"↓/j", "↓"}, {"⏎/l open", "⏎"}, {"h collapse", "h"},
-			{"type→fzf", "f"}, {"quit", "q"},
-		}
+			return [][2]string{
+				{"↑/k", "↑"}, {"↓/j", "↓"}, {"⏎/l open", "⏎"}, {"h collapse", "h"},
+				{"type→fzf", "f"}, {"quit", "q"},
+			}
 		}
 	case m.view == viewHelp:
 		return [][2]string{

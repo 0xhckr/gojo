@@ -8,6 +8,19 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// hoverState tracks the item currently under the mouse for visual hover
+// highlighting. It is view-specific: only one target field is populated at a
+// time.
+type hoverState struct {
+	valid     bool
+	logIdx    int
+	diffRow   int
+	pickerRow int
+	fzfRow    int
+	blameLine int
+	histIdx   int
+}
+
 // contextMenuItem is one entry in the right-click context menu.
 type contextMenuItem struct {
 	label   string
@@ -16,7 +29,7 @@ type contextMenuItem struct {
 }
 
 const (
-	contextMenuMinWidth = 24
+	contextMenuMinWidth  = 24
 	contextMenuMaxHeight = 16
 	contextMenuHPadding  = 2 // one space on each side
 )

@@ -238,7 +238,7 @@ func TestSplitPanelRendering(t *testing.T) {
 	digits := maxLineDigits(rows)
 
 	// Render without split mode — no indicators.
-	out := renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, digits, nil, "", 0, -1, nil, nil, splitView{}, false, nil, nil)
+	out := renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, digits, nil, "", 0, -1, nil, nil, splitView{}, false, nil, nil, -1)
 	plain := stripANSI(out)
 	if strings.Contains(plain, "[x]") || strings.Contains(plain, "[~]") || strings.Contains(plain, "[ ]") {
 		t.Error("split indicators found in non-split-mode render")
@@ -246,7 +246,7 @@ func TestSplitPanelRendering(t *testing.T) {
 
 	// Render with split mode active — indicators should appear.
 	sv := splitView{active: true, marked: map[int]bool{}}
-	out = renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, digits, nil, "", 0, -1, nil, nil, sv, false, nil, nil)
+	out = renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, digits, nil, "", 0, -1, nil, nil, sv, false, nil, nil, -1)
 	if len(out) != 24 {
 		t.Errorf("split panel lines = %d, want 24", len(out))
 	}

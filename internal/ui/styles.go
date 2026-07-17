@@ -13,6 +13,7 @@ var (
 	colBackground lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#f6f6f8", Dark: "#0d0d12"}
 	colPanel      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#14141c"}
 	colElement    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#ececf0", Dark: "#1c1c26"}
+	colHover      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#f0f0f5", Dark: "#181824"}
 
 	// ── Border hierarchy ───────────────────────────────────────────
 	colBorder       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#c4c4cc", Dark: "#343440"}

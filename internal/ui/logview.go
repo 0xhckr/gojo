@@ -107,7 +107,7 @@ func scrollbarThumb(total, firstVis, visLines, trackH int) (int, int) {
 // renderLog produces up to height lines for the commit log. The content area
 // gets a subtle panel background, and a scrollbar indicator on the right edge
 // shows position when the log overflows.
-func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView, sq squashView) []string {
+func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView, sq squashView, hoverIdx int) []string {
 	if len(entries) == 0 {
 		return padLines([]string{bgRow(width, colPanel, seg{text: "  no revisions found", fg: colTextMuted})}, height, width)
 	}
@@ -155,9 +155,12 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 	for i := off; i < end; i++ {
 		e := entries[i]
 		highlighted := i == focus
+		hovered := i == hoverIdx && !highlighted
 		var bg lipgloss.TerminalColor = colPanel
 		if highlighted {
 			bg = colElement
+		} else if hovered {
+			bg = colHover
 		}
 
 		// Header line.

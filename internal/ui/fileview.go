@@ -119,11 +119,11 @@ type fileViewState struct {
 	// cache bundles the expensive O(file-size) computations: syntax
 	// highlighting, row conversion, and wrapped-line layout. Rebuilt on file
 	// load and resize.
-	blameRows     []diffRow  // annotateToDiffRows output
-	blameDigits   int        // line-number gutter width
-	blameLayout   diffLayout // wrapped-line layout for the body
-	blameCacheW   int        // width used to build the cache (0 = dirty)
-	blameCacheCH  int        // contentH used to build the cache
+	blameRows    []diffRow  // annotateToDiffRows output
+	blameDigits  int        // line-number gutter width
+	blameLayout  diffLayout // wrapped-line layout for the body
+	blameCacheW  int        // width used to build the cache (0 = dirty)
+	blameCacheCH int        // contentH used to build the cache
 
 	// history
 	hist    []jj.LogEntry
@@ -407,7 +407,9 @@ func (m Model) renderFilePicker(width, height int) []string {
 	var content []string
 	for i := start; i < end; i++ {
 		row := fv.rows[i]
-		content = append(content, renderTreeRowString(width, row, i == fv.cursor))
+		selected := i == fv.cursor
+		hovered := m.hover.pickerRow == i && !selected
+		content = append(content, renderTreeRowString(width, row, selected, hovered))
 	}
 	content = padLines(content, contentH, width)
 	out = append(out, content...)
@@ -471,9 +473,12 @@ func (m Model) renderFzf(width, height int) []string {
 	for i := start; i < end; i++ {
 		r := fv.fzfResults[i]
 		selected := i == fv.fzfCursor
+		hovered := m.hover.fzfRow == i && !selected
 		bg := colPanel
 		if selected {
 			bg = colElement
+		} else if hovered {
+			bg = colHover
 		}
 		barFg := bg
 		if selected {
@@ -526,9 +531,9 @@ func (m Model) renderFzf(width, height int) []string {
 // mirrors the diff panel: a left-edge ┃ cursor bar (bright yellow on the
 // selected row, invisible otherwise), the ▼/▶ expand/collapse arrow for
 // directories (matching the diff view's file headers), and the name. Every
-// row is filled with colPanel (or colElement when selected) so no
-// transparent gaps show through.
-func renderTreeRowString(width int, row treeRow, selected bool) string {
+// row is filled with colPanel (or colElement when selected, colHover when
+// hovered) so no transparent gaps show through.
+func renderTreeRowString(width int, row treeRow, selected, hovered bool) string {
 	n := row.node
 	indent := strings.Repeat("  ", row.depth)
 
@@ -548,6 +553,8 @@ func renderTreeRowString(width int, row treeRow, selected bool) string {
 	bg := colPanel
 	if selected {
 		bg = colElement
+	} else if hovered {
+		bg = colHover
 	}
 
 	// Cursor bar: yellow on the selected row, bg-coloured (invisible) else.
@@ -725,7 +732,7 @@ func (m Model) renderFileBlame(width, height int) []string {
 		termScrollY = maxScroll
 	}
 
-	return renderDiffPanel(width, height, fv.path, 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, sectionRows, nil, splitView{}, true, head, &layout)
+	return renderDiffPanel(width, height, fv.path, 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, sectionRows, nil, splitView{}, true, head, &layout, m.hover.blameLine)
 }
 
 func lineDigits(n int) int {
@@ -785,6 +792,6 @@ func (m Model) renderFileHistory(width, height int) []string {
 		return padLines([]string{title, bgRow(width, colPanel, seg{text: "  (no commits touched this file)", fg: colGray})}, height, width)
 	}
 
-	body := renderLog(width, height-1, fv.hist, fv.histCur, fv.histOff, nil, 0, rebaseView{}, squashView{})
+	body := renderLog(width, height-1, fv.hist, fv.histCur, fv.histOff, nil, 0, rebaseView{}, squashView{}, m.hover.histIdx)
 	return padLines(append([]string{title}, body...), height, width)
 }

@@ -55,7 +55,7 @@ func TestFileModeRendering(t *testing.T) {
 	digits := lineDigits(len(lines))
 	head := buildBlameHead(80, "mwqwmwpp", "hackr@hackr.sh", "Rewrite gojo")
 
-	out := renderDiffPanel(80, 24, "main.go", 0, false, false, 0, "", false, rows, digits, nil, "", 0, -1, nil, nil, splitView{}, true, head, nil)
+	out := renderDiffPanel(80, 24, "main.go", 0, false, false, 0, "", false, rows, digits, nil, "", 0, -1, nil, nil, splitView{}, true, head, nil, -1)
 	if len(out) != 24 {
 		t.Fatalf("panel lines = %d, want 24", len(out))
 	}
@@ -97,7 +97,7 @@ func TestFileModeCursorBar(t *testing.T) {
 	layout := computeDiffLayoutPure(80, 20, 0, rows, "", digits, nil, false, true)
 	cursorBodyRow := layout.starts[1] // cursor on line 2
 
-	out := renderDiffPanel(80, 24, "f.go", 0, false, false, 0, "", false, rows, digits, nil, "", 0, cursorBodyRow, nil, nil, splitView{}, true, head, nil)
+	out := renderDiffPanel(80, 24, "f.go", 0, false, false, 0, "", false, rows, digits, nil, "", 0, cursorBodyRow, nil, nil, splitView{}, true, head, nil, -1)
 	if len(out) != 24 {
 		t.Fatalf("panel lines = %d, want 24", len(out))
 	}
@@ -125,7 +125,7 @@ func TestFileModeStickyBlameHead(t *testing.T) {
 	cursorBodyRow := layout.starts[cursorY]
 	termScrollY := max(0, min(layout.total-20, cursorBodyRow-10))
 
-	out := renderDiffPanel(80, 24, "f.go", 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, nil, nil, splitView{}, true, head, nil)
+	out := renderDiffPanel(80, 24, "f.go", 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, nil, nil, splitView{}, true, head, nil, -1)
 	if len(out) != 24 {
 		t.Fatalf("panel lines = %d, want 24", len(out))
 	}

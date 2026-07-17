@@ -291,3 +291,151 @@ func (m Model) handleHistoryClick(mouseY int) (tea.Model, tea.Cmd) {
 	m.recomputeFileHistOffset()
 	return m, nil
 }
+
+// updateHover recomputes the view-specific hover target from a mouse position.
+// It clears hover when the mouse is outside the content area or over the
+// scrollbar. Clicks are also fed through here so pressing sets the highlight
+// even if no motion event preceded the press.
+func (m Model) updateHover(x, y int) Model {
+	m.hover = hoverState{valid: true, logIdx: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1}
+	if x >= m.width-scrollbarWidth || x < 0 {
+		m.hover.valid = false
+		return m
+	}
+	if y < contentTopBarHeight || y >= contentTopBarHeight+m.contentHeight() {
+		m.hover.valid = false
+		return m
+	}
+
+	switch {
+	case m.diffOpen:
+		if rowIdx, ok := m.diffRowAtMouseY(y); ok {
+			m.hover.diffRow = rowIdx
+		}
+	case m.view == viewFile:
+		switch m.fileView.phase {
+		case fileBlame:
+			if line, ok := m.blameLineAtMouseY(y); ok {
+				m.hover.blameLine = line
+			}
+		case fileHistory:
+			if idx, ok := m.historyEntryAtMouseY(y); ok {
+				m.hover.histIdx = idx
+			}
+		default:
+			if m.fileView.fzfActive {
+				if idx, ok := m.fzfResultAtMouseY(y); ok {
+					m.hover.fzfRow = idx
+				}
+			} else {
+				if idx, ok := m.pickerRowAtMouseY(y); ok {
+					m.hover.pickerRow = idx
+				}
+			}
+		}
+	case m.view == viewHelp:
+		m.hover.valid = false
+	default:
+		if idx, ok := m.logEntryAtMouseY(y); ok {
+			m.hover.logIdx = idx
+		}
+	}
+	return m
+}
+
+// logEntryAtMouseY maps a terminal Y coordinate to a log entry index in the
+// main log view.
+func (m Model) logEntryAtMouseY(mouseY int) (int, bool) {
+	focus := m.cursor
+	if m.rebaseMode {
+		focus = m.rebaseDest
+	}
+	if m.squashMode {
+		focus = m.squashDest
+	}
+	return logEntryAtContentY(m.entries, focus, m.offset, mouseY-contentTopBarHeight, m.contentHeight())
+}
+
+// historyEntryAtMouseY maps a terminal Y coordinate to a file-history entry
+// index.
+func (m Model) historyEntryAtMouseY(mouseY int) (int, bool) {
+	fv := &m.fileView
+	return logEntryAtContentY(fv.hist, fv.histCur, fv.histOff, mouseY-contentTopBarHeight-1, m.contentHeight()-1)
+}
+
+// pickerRowAtMouseY maps a terminal Y coordinate to a file-picker tree row
+// index.
+func (m Model) pickerRowAtMouseY(mouseY int) (int, bool) {
+	fv := &m.fileView
+	rowIdx := mouseY - contentTopBarHeight - 1
+	if rowIdx < 0 {
+		return 0, false
+	}
+	contentH := m.contentHeight() - 1
+	if contentH < 0 {
+		contentH = 0
+	}
+	start, end := fv.pickerVisibleRange(contentH)
+	i := start + rowIdx
+	if i >= end || i >= len(fv.rows) {
+		return 0, false
+	}
+	return i, true
+}
+
+// fzfResultAtMouseY maps a terminal Y coordinate to a fuzzy-finder result
+// index.
+func (m Model) fzfResultAtMouseY(mouseY int) (int, bool) {
+	fv := &m.fileView
+	rowIdx := mouseY - contentTopBarHeight - 1
+	resIdx := rowIdx - 2
+	if resIdx < 0 {
+		return 0, false
+	}
+	contentH := m.contentHeight() - 3
+	if contentH < 0 {
+		contentH = 0
+	}
+	start, end := fv.fzfVisibleRange(contentH)
+	i := start + resIdx
+	if i >= end || i >= len(fv.fzfResults) {
+		return 0, false
+	}
+	return i, true
+}
+
+// blameLineAtMouseY maps a terminal Y coordinate to a blame source-line index.
+func (m Model) blameLineAtMouseY(mouseY int) (int, bool) {
+	fv := &m.fileView
+	if fv.err != "" || len(fv.lines) == 0 {
+		return 0, false
+	}
+	bodyLine := mouseY - contentTopBarHeight - 1 - 3
+	if bodyLine < 0 {
+		return 0, false
+	}
+	bodyH := fileViewContentH(m)
+	layout := fv.blameLayout
+	if !fv.blameCacheValid(m.width, bodyH) {
+		fv.buildBlameCache(m.width, bodyH)
+		layout = fv.blameLayout
+	}
+	if len(layout.starts) == 0 {
+		return 0, false
+	}
+	cursorY := min(fv.cursorY, len(fv.lines)-1)
+	cursorBodyRow := -1
+	if cursorY >= 0 && cursorY < len(layout.starts) {
+		cursorBodyRow = layout.starts[cursorY]
+	}
+	termScrollY := 0
+	if cursorBodyRow >= 0 {
+		termScrollY = cursorBodyRow - bodyH/2
+	}
+	termScrollY = max(0, min(termScrollY, max(0, layout.total-bodyH)))
+	rowIdx, _ := layout.rowAt(bodyLine + termScrollY)
+	if rowIdx < 0 || rowIdx >= len(fv.lines) {
+		return 0, false
+	}
+	return rowIdx, true
+}
