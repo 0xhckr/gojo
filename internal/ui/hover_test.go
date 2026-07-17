@@ -161,3 +161,34 @@ func TestHoverContextMenuSuppressed(t *testing.T) {
 		t.Fatal("hover updated while context menu was open")
 	}
 }
+
+// TestHoverLogEdgeLine verifies that moving the mouse over a "~" elided edge
+// line sets the edge hover target so it gets highlighted.
+func TestHoverLogEdgeLine(t *testing.T) {
+	m := mouseTestModel()
+	m.entries = []jj.LogEntry{
+		{ChangeID: "aaaa0000", CommitID: "c0ffee01", Subject: "first",
+			EdgeLines: []string{"~  (elided revisions)"}},
+		{ChangeID: "bbbb1111", CommitID: "c0ffee02", Subject: "second"},
+	}
+
+	// Entry 0: header Y=3, body Y=4, elided edge line Y=5.
+	m2, _ := m.Update(motion(10, 5))
+	m = m2.(Model)
+	if !m.hover.valid || m.hover.logEdge != 0 {
+		t.Fatalf("hover = %+v, want logEdge 0", m.hover)
+	}
+	if m.hover.logIdx != 0 {
+		t.Fatalf("logIdx = %d, want 0", m.hover.logIdx)
+	}
+
+	// Moving off the edge line clears the edge hover; entry stays hovered.
+	m2, _ = m.Update(motion(10, 4)) // body line
+	m = m2.(Model)
+	if m.hover.logEdge != -1 {
+		t.Fatalf("logEdge = %d, want -1 after moving off edge line", m.hover.logEdge)
+	}
+	if m.hover.logIdx != 0 {
+		t.Fatalf("logIdx = %d, want 0 after moving to body line", m.hover.logIdx)
+	}
+}

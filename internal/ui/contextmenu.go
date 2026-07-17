@@ -14,6 +14,7 @@ import (
 type hoverState struct {
 	valid     bool
 	logIdx    int
+	logEdge   int // edge-line index within logIdx, or -1
 	diffRow   int
 	pickerRow int
 	fzfRow    int

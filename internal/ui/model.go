@@ -3247,7 +3247,7 @@ func (m Model) View() string {
 				destIdx:   m.bookmarkDrag.targetIdx,
 			}
 		}
-		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.logEdgeCursor, m.aiLoading, m.spinnerFrame, rb, sq, bd, m.hover.logIdx)...)
+		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.logEdgeCursor, m.aiLoading, m.spinnerFrame, rb, sq, bd, m.hover.logIdx, m.hover.logEdge)...)
 	}
 
 	// Autocomplete suggestions.

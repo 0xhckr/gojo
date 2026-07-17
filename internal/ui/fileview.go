@@ -792,6 +792,6 @@ func (m Model) renderFileHistory(width, height int) []string {
 		return padLines([]string{title, bgRow(width, colPanel, seg{text: "  (no commits touched this file)", fg: colGray})}, height, width)
 	}
 
-	body := renderLog(width, height-1, fv.hist, fv.histCur, fv.histOff, -1, nil, 0, rebaseView{}, squashView{}, bookmarkDragView{}, m.hover.histIdx)
+	body := renderLog(width, height-1, fv.hist, fv.histCur, fv.histOff, -1, nil, 0, rebaseView{}, squashView{}, bookmarkDragView{}, m.hover.histIdx, -1)
 	return padLines(append([]string{title}, body...), height, width)
 }

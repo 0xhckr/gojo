@@ -118,7 +118,7 @@ func scrollbarThumb(total, firstVis, visLines, trackH int) (int, int) {
 // renderLog produces up to height lines for the commit log. The content area
 // gets a subtle panel background, and a scrollbar indicator on the right edge
 // shows position when the log overflows.
-func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCursor int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView, sq squashView, bd bookmarkDragView, hoverIdx int) []string {
+func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCursor int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView, sq squashView, bd bookmarkDragView, hoverIdx, hoverEdgeIdx int) []string {
 	if len(entries) == 0 {
 		return padLines([]string{bgRow(width, colPanel, seg{text: "  no revisions found", fg: colTextMuted})}, height, width)
 	}
@@ -166,7 +166,7 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 	for i := off; i < end; i++ {
 		e := entries[i]
 		highlighted := i == focus
-		hovered := i == hoverIdx && !highlighted
+		hovered := i == hoverIdx && !highlighted && hoverEdgeIdx < 0
 		// When the edge cursor is active, the entry's header/body lose their
 		// highlight and the selected edge line gets it instead.
 		edgeHighlighted := highlighted && edgeCursor >= 0 && edgeCursor < len(e.EdgeLines)
@@ -256,15 +256,20 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 		contentLine++
 
 		// Graph-only edge lines (merge connectors, elided "~" rows) use the
-		// panel background, except when the edge cursor highlights one.
+		// panel background, except when the edge cursor or hover highlights one.
+		edgeHovered := i == hoverIdx && hoverEdgeIdx >= 0
 		for ei, edge := range e.EdgeLines {
 			edgeBg := colPanel
 			edgeFg := colGraph
+			edgeBold := false
 			if edgeHighlighted && ei == edgeCursor {
 				edgeBg = colElement
 				edgeFg = colText
+				edgeBold = true
+			} else if edgeHovered && ei == hoverEdgeIdx {
+				edgeBg = colHover
 			}
-			lines = append(lines, renderRowWithBar(scrollW, width, edgeBg, hasBar, contentLine, thumbStart, thumbEnd, []seg{{text: " ", bg: edgeBg}, {text: edge, fg: edgeFg, bold: edgeHighlighted, bg: edgeBg}}))
+			lines = append(lines, renderRowWithBar(scrollW, width, edgeBg, hasBar, contentLine, thumbStart, thumbEnd, []seg{{text: " ", bg: edgeBg}, {text: edge, fg: edgeFg, bold: edgeBold, bg: edgeBg}}))
 			contentLine++
 		}
 	}

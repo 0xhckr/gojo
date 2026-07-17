@@ -79,13 +79,16 @@ func isElidedEdgeLine(s string) bool {
 // logElidedAtContentY reports whether the content line at contentY (0-based,
 // relative to the top of the log list area) falls on a "~" elided edge line.
 // When it does, it returns the index of the entry the edge line belongs to.
-func logElidedAtContentY(entries []jj.LogEntry, focus, offset, contentY, height int) (int, bool) {
+// logEdgeAtContentY maps a content Y to the entry index and edge-line index
+// of the elided "~" edge line under it. Returns ok=false when the position
+// is not on an elided edge line.
+func logEdgeAtContentY(entries []jj.LogEntry, focus, offset, contentY, height int) (entryIdx, edgeIdx int, ok bool) {
 	if len(entries) == 0 {
-		return 0, false
+		return 0, 0, false
 	}
 	lineIdx := contentY - 1 // skip the list's top padding row
 	if lineIdx < 0 {
-		return 0, false
+		return 0, 0, false
 	}
 	off, end := logWindow(entries, focus, offset, height-1)
 	acc := 0
@@ -93,16 +96,23 @@ func logElidedAtContentY(entries []jj.LogEntry, focus, offset, contentY, height 
 		h := commitLines(entries[i])
 		if lineIdx < acc+h {
 			local := lineIdx - acc
-			edgeIdx := local - 2 // 0=header, 1=body, 2+=edge lines
-			if edgeIdx >= 0 && edgeIdx < len(entries[i].EdgeLines) &&
-				isElidedEdgeLine(entries[i].EdgeLines[edgeIdx]) {
-				return i, true
+			ei := local - 2 // 0=header, 1=body, 2+=edge lines
+			if ei >= 0 && ei < len(entries[i].EdgeLines) &&
+				isElidedEdgeLine(entries[i].EdgeLines[ei]) {
+				return i, ei, true
 			}
-			return 0, false
+			return 0, 0, false
 		}
 		acc += h
 	}
-	return 0, false
+	return 0, 0, false
+}
+
+// logElidedAtContentY reports whether the content line at contentY falls on a
+// "~" elided edge line, returning the owning entry index.
+func logElidedAtContentY(entries []jj.LogEntry, focus, offset, contentY, height int) (int, bool) {
+	idx, _, ok := logEdgeAtContentY(entries, focus, offset, contentY, height)
+	return idx, ok
 }
 
 // toggleShowAllRev flips the showAllRev flag and returns the refresh command.
@@ -359,7 +369,7 @@ func (m Model) handleHistoryClick(mouseY int) (tea.Model, tea.Cmd) {
 // scrollbar. Clicks are also fed through here so pressing sets the highlight
 // even if no motion event preceded the press.
 func (m Model) updateHover(x, y int) Model {
-	m.hover = hoverState{valid: true, logIdx: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1}
+	m.hover = hoverState{valid: true, logIdx: -1, logEdge: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1}
 
 	// Check shortcut hover (help bar / status bar menus) first — this works
 	// regardless of content area bounds.
@@ -410,6 +420,9 @@ func (m Model) updateHover(x, y int) Model {
 		if idx, ok := m.logEntryAtMouseY(y); ok {
 			m.hover.logIdx = idx
 		}
+		if _, edgeIdx, ok := m.logEdgeAtMouseY(y); ok {
+			m.hover.logEdge = edgeIdx
+		}
 	}
 	return m
 }
@@ -425,6 +438,19 @@ func (m Model) logEntryAtMouseY(mouseY int) (int, bool) {
 		focus = m.squashDest
 	}
 	return logEntryAtContentY(m.entries, focus, m.offset, mouseY-contentTopBarHeight, m.contentHeight())
+}
+
+// logEdgeAtMouseY maps a terminal Y coordinate to an elided "~" edge line,
+// returning the owning entry index and the edge-line index within it.
+func (m Model) logEdgeAtMouseY(mouseY int) (int, int, bool) {
+	focus := m.cursor
+	if m.rebaseMode {
+		focus = m.rebaseDest
+	}
+	if m.squashMode {
+		focus = m.squashDest
+	}
+	return logEdgeAtContentY(m.entries, focus, m.offset, mouseY-contentTopBarHeight, m.contentHeight())
 }
 
 // bookmarkSegmentAt maps a terminal coordinate to the bookmark rendered on a
