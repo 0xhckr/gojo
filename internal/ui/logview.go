@@ -177,7 +177,7 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 		// Header line.
 		var hs []seg
 		hs = append(hs, seg{text: " ", bg: bg})
-		hs = append(hs, seg{text: e.HeaderPrefix, fg: colBorderSubtle, bg: bg})
+		hs = append(hs, seg{text: e.HeaderPrefix, fg: colGraph, bg: bg})
 		hs = append(hs, seg{text: " ", bg: bg})
 		if e.ChangeIDPrefixLen > 0 && e.ChangeIDPrefixLen < len(e.ChangeID) {
 			hs = append(hs, seg{text: e.ChangeID[:e.ChangeIDPrefixLen], fg: colMagenta, bold: true, bg: bg})
@@ -228,7 +228,7 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 		// Body line.
 		var bs []seg
 		bs = append(bs, seg{text: " ", bg: bg})
-		bs = append(bs, seg{text: e.BodyPrefix, fg: colBorderSubtle, bg: bg})
+		bs = append(bs, seg{text: e.BodyPrefix, fg: colGraph, bg: bg})
 		bs = append(bs, seg{text: " ", bg: bg})
 		if aiLoading[e.ChangeID] {
 			frame := spinnerFrames[spinnerFrame%len(spinnerFrames)]
@@ -254,7 +254,7 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 		// the panel background, not the selection highlight.
 		edgeBg := colPanel
 		for _, edge := range e.EdgeLines {
-			lines = append(lines, renderRowWithBar(scrollW, width, edgeBg, hasBar, contentLine, thumbStart, thumbEnd, []seg{{text: " ", bg: edgeBg}, {text: edge, fg: colBorderSubtle, bg: edgeBg}}))
+			lines = append(lines, renderRowWithBar(scrollW, width, edgeBg, hasBar, contentLine, thumbStart, thumbEnd, []seg{{text: " ", bg: edgeBg}, {text: edge, fg: colGraph, bg: edgeBg}}))
 			contentLine++
 		}
 	}

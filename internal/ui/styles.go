@@ -19,6 +19,7 @@ var (
 	colBorder       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#c4c4cc", Dark: "#343440"}
 	colBorderActive lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9898a4", Dark: "#545462"}
 	colBorderSubtle lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#dadde0", Dark: "#24242e"}
+	colGraph        lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9494a4", Dark: "#5a5a72"} // jj commit-graph edges/symbols
 
 	// ── Text ───────────────────────────────────────────────────────
 	colText      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#1a1a22", Dark: "#e2e2ec"}
