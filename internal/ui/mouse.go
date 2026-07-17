@@ -366,6 +366,47 @@ func (m Model) logEntryAtMouseY(mouseY int) (int, bool) {
 	return logEntryAtContentY(m.entries, focus, m.offset, mouseY-contentTopBarHeight, m.contentHeight())
 }
 
+// bookmarkSegmentAt maps a terminal coordinate to the bookmark rendered on a
+// commit's header line, if any. It mirrors renderLog's header segment layout
+// (prefix: leading space, HeaderPrefix, space, ChangeID, space, Authors,
+// space, Date, space, CommitID; then for each bookmark a separating space and
+// the bookmark text). Returns ok=false when the coordinate is not on a
+// header row or not within a bookmark segment's cell range. contentX is the
+// 0-based terminal X (already excluding the scrollbar, which the caller
+// filters out).
+func bookmarkSegmentAt(entries []jj.LogEntry, focus, offset, contentY, contentX, height int) (name string, entryIdx int, ok bool) {
+	lineIdx := contentY - 1 // skip the list's top padding row
+	if lineIdx < 0 || contentX < 0 {
+		return "", 0, false
+	}
+	off, end := logWindow(entries, focus, offset, height-1)
+	acc := 0
+	for i := off; i < end; i++ {
+		entryHeaderLine := acc // first sub-line of the entry is the header
+		h := commitLines(entries[i])
+		if lineIdx == entryHeaderLine {
+			// Hit-test X against this entry's bookmark segments.
+			prefix := 1 + runeWidthStr(entries[i].HeaderPrefix) + 1 +
+				runeWidthStr(entries[i].ChangeID) + 1 +
+				runeWidthStr(entries[i].Authors) + 1 +
+				runeWidthStr(entries[i].Date) + 1 +
+				runeWidthStr(entries[i].CommitID)
+			x := contentX
+			for _, bm := range entries[i].Bookmarks {
+				segStart := prefix + 1 // separating space
+				segEnd := segStart + runeWidthStr(bm)
+				if x >= segStart && x < segEnd {
+					return bm, i, true
+				}
+				prefix = segEnd
+			}
+			return "", 0, false
+		}
+		acc += h
+	}
+	return "", 0, false
+}
+
 // historyEntryAtMouseY maps a terminal Y coordinate to a file-history entry
 // index.
 func (m Model) historyEntryAtMouseY(mouseY int) (int, bool) {

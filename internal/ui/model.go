@@ -162,6 +162,11 @@ type Model struct {
 	// cleared on MouseActionRelease.
 	scrollDragging bool
 
+	// bookmarkDrag tracks an in-progress mouse drag of a bookmark from one
+	// revision to another. Set on press over a bookmark segment; cleared on
+	// release (which fires jj bookmark move when the drop target differs).
+	bookmarkDrag *bookmarkDragState
+
 	// contextMenuOpen is true while the right-click context menu is displayed.
 	// The menu is built per-view and rendered as a floating overlay.
 	contextMenuOpen   bool
@@ -1570,6 +1575,19 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Bookmark drag: once started (press on a bookmark segment) the drag
+	// captures motion/release until the button is let go. A release on a
+	// different revision fires jj bookmark move.
+	if m.bookmarkDrag != nil {
+		switch msg.Action {
+		case tea.MouseActionMotion:
+			return m.updateBookmarkDrag(msg.Y)
+		case tea.MouseActionRelease:
+			return m.finishBookmarkDrag(msg.Y)
+		}
+		return m, nil
+	}
+
 	// Left-click in the content area selects (or activates) the row under the
 	// mouse. Clicks inside the scrollbar fall through to drag handling, and
 	// modal input modes (menus, elevation prompt) ignore clicks.
@@ -1579,6 +1597,16 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return nm, cmd
 		}
 		if msg.X < m.width-scrollbarWidth && !m.modalInputActive() {
+			// A press on a bookmark segment starts a drag instead of
+			// selecting the row.
+			if name, idx, ok := m.bookmarkAtMouse(msg.X, msg.Y); ok {
+				m.bookmarkDrag = &bookmarkDragState{
+					name:      name,
+					sourceIdx: idx,
+					targetIdx: idx,
+				}
+				return m, nil
+			}
 			return m.handleClick(msg.Y)
 		}
 	}
@@ -1608,7 +1636,72 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// applyScrollBarDrag maps the mouse Y position to a scroll offset for the
+// bookmarkAtMouse maps a terminal coordinate to a bookmark rendered on the
+// header line under the mouse, if any. Only valid in the default log view.
+func (m Model) bookmarkAtMouse(x, y int) (string, int, bool) {
+	if m.diffOpen || m.view != viewLog {
+		return "", 0, false
+	}
+	focus := m.cursor
+	if m.rebaseMode {
+		focus = m.rebaseDest
+	}
+	if m.squashMode {
+		focus = m.squashDest
+	}
+	return bookmarkSegmentAt(m.entries, focus, m.offset, y-contentTopBarHeight, x, m.contentHeight())
+}
+
+// updateBookmarkDrag tracks the drop target as the mouse moves during a
+// bookmark drag.
+func (m Model) updateBookmarkDrag(mouseY int) (tea.Model, tea.Cmd) {
+	if m.bookmarkDrag == nil {
+		return m, nil
+	}
+	if idx, ok := m.logEntryAtMouseY(mouseY); ok {
+		m.bookmarkDrag.targetIdx = idx
+	} else {
+		m.bookmarkDrag.targetIdx = -1
+	}
+	return m, nil
+}
+
+// finishBookmarkDrag fires jj bookmark move when the drag ends on a different
+// revision than the source, then clears the drag state.
+func (m Model) finishBookmarkDrag(mouseY int) (tea.Model, tea.Cmd) {
+	drag := m.bookmarkDrag
+	m.bookmarkDrag = nil
+	if drag == nil {
+		return m, nil
+	}
+	if idx, ok := m.logEntryAtMouseY(mouseY); ok {
+		drag.targetIdx = idx
+	}
+	if drag.targetIdx < 0 || drag.targetIdx == drag.sourceIdx || drag.targetIdx >= len(m.entries) {
+		return m, nil
+	}
+	if m.runner == nil {
+		return m, nil
+	}
+	target := m.entries[drag.targetIdx].ChangeID
+	okMsg := "bookmark moved: " + drag.name + " → " + target
+	return m, func() tea.Msg {
+		if err := m.runner.BookmarkMove(drag.name, target); err != nil {
+			if flag, reason := jj.DetectElevation(err.Error()); flag != "" {
+				return actionDoneMsg{
+					err: err,
+					elev: &elevReq{
+						flag:   flag,
+						reason: reason,
+						retry:  func() tea.Cmd { return m.syncFnCmd(func() error { return m.runner.BookmarkMove(drag.name, target, flag) }, okMsg) },
+					},
+				}
+			}
+			return actionDoneMsg{err: err}
+		}
+		return actionDoneMsg{message: okMsg, refresh: true}
+	}
+}
 // active view and applies it.
 func (m Model) applyScrollBarDrag(mouseY int) (tea.Model, tea.Cmd) {
 	ch := m.contentHeight()
@@ -3091,7 +3184,16 @@ func (m Model) View() string {
 			source: m.squashSource,
 			dest:   m.squashDest,
 		}
-		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.aiLoading, m.spinnerFrame, rb, sq, m.hover.logIdx)...)
+		bd := bookmarkDragView{}
+		if m.bookmarkDrag != nil {
+			bd = bookmarkDragView{
+				active:    true,
+				name:      m.bookmarkDrag.name,
+				sourceIdx: m.bookmarkDrag.sourceIdx,
+				destIdx:   m.bookmarkDrag.targetIdx,
+			}
+		}
+		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.aiLoading, m.spinnerFrame, rb, sq, bd, m.hover.logIdx)...)
 	}
 
 	// Autocomplete suggestions.

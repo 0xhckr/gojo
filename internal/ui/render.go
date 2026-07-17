@@ -86,6 +86,15 @@ func blankRow(width int, bg lipgloss.TerminalColor) string {
 // runeWidth returns the display cell width of a rune (0 for combining marks).
 func runeWidth(r rune) int { return runewidth.RuneWidth(r) }
 
+// runeWidthStr returns the total display cell width of s.
+func runeWidthStr(s string) int {
+	w := 0
+	for _, r := range s {
+		w += runewidth.RuneWidth(r)
+	}
+	return w
+}
+
 // wrapSegs greedily wraps a sequence of styled segments into lines no wider
 // than `width` cells, splitting segments mid-text as needed. Styling is
 // preserved per emitted rune and adjacent same-style runes are merged back into

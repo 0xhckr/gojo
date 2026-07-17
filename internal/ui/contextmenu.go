@@ -21,6 +21,17 @@ type hoverState struct {
 	histIdx   int
 }
 
+// bookmarkDragState tracks an in-progress mouse drag of a bookmark from its
+// source revision toward a drop target revision. sourceIdx/name are fixed for
+// the drag's lifetime; targetIdx is updated each motion event (or -1 when the
+// cursor is off any commit row). On release, if targetIdx differs from
+// sourceIdx the bookmark is moved via jj bookmark move.
+type bookmarkDragState struct {
+	name      string
+	sourceIdx int
+	targetIdx int
+}
+
 // contextMenuItem is one entry in the right-click context menu.
 type contextMenuItem struct {
 	label   string

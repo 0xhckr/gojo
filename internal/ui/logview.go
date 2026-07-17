@@ -52,6 +52,17 @@ type squashView struct {
 	dest   int // index into entries of the squash target
 }
 
+// bookmarkDragView carries the live bookmark-drag selection into log rendering
+// so the source (the bookmark being dragged) and destination (the drop target)
+// can be marked. name is the dragged bookmark; sourceIdx is its origin; destIdx
+// is the current drop target (or -1 when the cursor is off any row).
+type bookmarkDragView struct {
+	active   bool
+	name     string
+	sourceIdx int
+	destIdx   int
+}
+
 // logWindow computes the visible [off, end) range of commits for the given
 // cursor, prior offset, and available line budget (variable-height commits).
 func logWindow(entries []jj.LogEntry, cursor, offset, availableLines int) (int, int) {
@@ -107,7 +118,7 @@ func scrollbarThumb(total, firstVis, visLines, trackH int) (int, int) {
 // renderLog produces up to height lines for the commit log. The content area
 // gets a subtle panel background, and a scrollbar indicator on the right edge
 // shows position when the log overflows.
-func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView, sq squashView, hoverIdx int) []string {
+func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView, sq squashView, bd bookmarkDragView, hoverIdx int) []string {
 	if len(entries) == 0 {
 		return padLines([]string{bgRow(width, colPanel, seg{text: "  no revisions found", fg: colTextMuted})}, height, width)
 	}
@@ -182,11 +193,18 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 		hs = append(hs, seg{text: e.CommitID, fg: colTextMuted, bg: bg})
 		for _, bm := range e.Bookmarks {
 			hs = append(hs, seg{text: " ", bg: bg})
-			hs = append(hs, seg{text: bm, fg: colGreen, bold: true, bg: bg})
+			dragging := bd.active && i == bd.sourceIdx && bm == bd.name
+			hs = append(hs, seg{text: bm, fg: colGreen, bold: true, underline: dragging, bg: bg})
 		}
 		for _, tg := range e.Tags {
 			hs = append(hs, seg{text: " ", bg: bg})
 			hs = append(hs, seg{text: tg, fg: colTeal, bold: true, bg: bg})
+		}
+		if bd.active && i == bd.sourceIdx {
+			hs = append(hs, seg{text: "  ● dragging " + bd.name, fg: colMagenta, bold: true, bg: bg})
+		}
+		if bd.active && i == bd.destIdx {
+			hs = append(hs, seg{text: "  ◀ drop", fg: colYellow, bold: true, bg: bg})
 		}
 		if rb.active && i == rb.source {
 			tag := "  ● moving"
