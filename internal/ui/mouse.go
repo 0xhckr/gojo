@@ -2,6 +2,7 @@ package ui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"gojo/internal/jj"
 )
@@ -438,4 +439,185 @@ func (m Model) blameLineAtMouseY(mouseY int) (int, bool) {
 		return 0, false
 	}
 	return rowIdx, true
+}
+
+// ── Help/status bar shortcut clicks ─────────────────────────────────────────
+
+// menuSpan records the screen position of a single clickable menu item.
+type menuSpan struct {
+	x1, x2, y int // screen coords; x2 exclusive
+	keyHint   string
+}
+
+// computeMenuSpans mirrors wrapMenu's greedy packing and returns the screen
+// position of each item's label. startY is the Y of the first row.
+func computeMenuSpans(width int, prefix, sep string, items [][2]string, startY int) []menuSpan {
+	if width <= 1 || len(items) == 0 {
+		return nil
+	}
+	prefixW := lipgloss.Width(prefix)
+	var spans []menuSpan
+	rowY := startY
+	curW := prefixW
+	hasItem := false
+	for _, it := range items {
+		itemW := lipgloss.Width(it[0])
+		addW := itemW
+		if hasItem {
+			addW += len(sep)
+		}
+		if curW+addW > width && hasItem {
+			rowY++
+			curW = 1
+			hasItem = false
+			addW = itemW
+		}
+		if hasItem {
+			curW += len(sep)
+		}
+		x1 := curW
+		curW += itemW
+		hasItem = true
+		spans = append(spans, menuSpan{x1: x1, x2: curW, y: rowY, keyHint: it[1]})
+	}
+	return spans
+}
+
+// statusBarStartY returns the terminal Y of the first status bar row.
+func (m Model) statusBarStartY() int {
+	y := contentTopBarHeight + m.contentHeight()
+	if m.suggestionsVisible() {
+		y++
+	}
+	return y
+}
+
+// helpBarStartY returns the terminal Y of the first help bar row.
+func (m Model) helpBarStartY() int {
+	return m.statusBarStartY() + m.statusBarHeight()
+}
+
+// tryShortcutClick checks whether a left-click at (x, y) lands on a menu item
+// in the status bar (sub-menu modes) or the help bar. If so, it dispatches the
+// corresponding key and returns ok=true.
+func (m Model) tryShortcutClick(x, y int) (Model, tea.Cmd, bool) {
+	// Status bar menu items (sub-menu modes with no sub-action selected).
+	type menuDef struct {
+		prefix string
+		items  [][2]string
+	}
+	var statusMenu menuDef
+	switch {
+	case m.bookmarkMode && m.bookmarkAction == "":
+		statusMenu = menuDef{" [bookmark mode] ", bookmarkMenuItems}
+	case m.tagMode && m.tagAction == "":
+		statusMenu = menuDef{" [tag mode] ", tagMenuItems}
+	case m.gitMode && m.remoteMode && m.remoteAction == "":
+		statusMenu = menuDef{" [git > remote] ", remoteMenuItems}
+	case m.gitMode && !m.remoteMode:
+		statusMenu = menuDef{" [git mode] ", gitMenuItems}
+	}
+	if statusMenu.items != nil {
+		spans := computeMenuSpans(m.width, statusMenu.prefix, " ", statusMenu.items, m.statusBarStartY())
+		if span, ok := hitMenuSpan(spans, x, y); ok {
+			return m.dispatchShortcutKey(span.keyHint)
+		}
+	}
+
+	// Help bar items.
+	helpItems := m.helpBarItems()
+	if helpItems != nil {
+		spans := computeMenuSpans(m.width, " ", "  ", helpItems, m.helpBarStartY())
+		if span, ok := hitMenuSpan(spans, x, y); ok {
+			return m.dispatchShortcutKey(span.keyHint)
+		}
+	}
+
+	return m, nil, false
+}
+
+func hitMenuSpan(spans []menuSpan, x, y int) (menuSpan, bool) {
+	for _, s := range spans {
+		if y == s.y && x >= s.x1 && x < s.x2 {
+			return s, true
+		}
+	}
+	return menuSpan{}, false
+}
+
+// dispatchShortcutKey synthesises a KeyMsg from a display key hint (e.g. "⏎",
+// "↑", "d") and routes it through the normal key handler.
+func (m Model) dispatchShortcutKey(keyHint string) (Model, tea.Cmd, bool) {
+	msg, _ := keyMsgFromHint(keyHint)
+	nm, cmd := m.handleKey(msg)
+	m = nm.(Model)
+	return m, cmd, true
+}
+
+// keyMsgFromHint converts a display key hint string into a (KeyMsg, string)
+// pair suitable for handleKey. Simple letter keys map directly; special glyphs
+// map to their corresponding KeyType.
+func keyMsgFromHint(hint string) (tea.KeyMsg, string) {
+	switch hint {
+	case "⏎":
+		return tea.KeyMsg{Type: tea.KeyEnter}, "enter"
+	case "↑":
+		return tea.KeyMsg{Type: tea.KeyUp}, "up"
+	case "↓":
+		return tea.KeyMsg{Type: tea.KeyDown}, "down"
+	case "←":
+		return tea.KeyMsg{Type: tea.KeyLeft}, "left"
+	case "→":
+		return tea.KeyMsg{Type: tea.KeyRight}, "right"
+	case "esc", "esc/q", "esc/back":
+		return tea.KeyMsg{Type: tea.KeyEscape}, "esc"
+	case "space":
+		return tea.KeyMsg{Type: tea.KeySpace}, " "
+	case "tab":
+		return tea.KeyMsg{Type: tea.KeyTab}, "tab"
+	case "backspace":
+		return tea.KeyMsg{Type: tea.KeyBackspace}, "backspace"
+	default:
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(hint)}, hint
+	}
+}
+
+// ── Shortcuts hover highlighting ─────────────────────────────────────────────
+
+// hoverShortcutLeft returns true if the mouse position (x, y) is over a
+// shortcut in the status or help bar.  Used to suppress the content area
+// hover highlight so a hover on a shortcut doesn't also highlight a content
+// row at the same Y.
+func (m Model) shortcutAtMouse(x, y int) bool {
+	// Status bar menus.
+	switch {
+	case m.bookmarkMode && m.bookmarkAction == "":
+		if ok := hitMenuSpanBool(computeMenuSpans(m.width, " [bookmark mode] ", " ", bookmarkMenuItems, m.statusBarStartY()), x, y); ok {
+			return true
+		}
+	case m.tagMode && m.tagAction == "":
+		if ok := hitMenuSpanBool(computeMenuSpans(m.width, " [tag mode] ", " ", tagMenuItems, m.statusBarStartY()), x, y); ok {
+			return true
+		}
+	case m.gitMode && m.remoteMode && m.remoteAction == "":
+		if ok := hitMenuSpanBool(computeMenuSpans(m.width, " [git > remote] ", " ", remoteMenuItems, m.statusBarStartY()), x, y); ok {
+			return true
+		}
+	case m.gitMode && !m.remoteMode:
+		if ok := hitMenuSpanBool(computeMenuSpans(m.width, " [git mode] ", " ", gitMenuItems, m.statusBarStartY()), x, y); ok {
+			return true
+		}
+	}
+	// Help bar.
+	if helpItems := m.helpBarItems(); helpItems != nil {
+		if ok := hitMenuSpanBool(computeMenuSpans(m.width, " ", "  ", helpItems, m.helpBarStartY()), x, y); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func hitMenuSpanBool(spans []menuSpan, x, y int) bool {
+	_, ok := hitMenuSpan(spans, x, y)
+	return ok
 }

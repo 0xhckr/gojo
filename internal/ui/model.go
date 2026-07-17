@@ -1569,6 +1569,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// mouse. Clicks inside the scrollbar fall through to drag handling, and
 	// modal input modes (menus, elevation prompt) ignore clicks.
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+		// Shortcut clicks (help bar / status bar menus) work in all modes.
+		if nm, cmd, ok := m.tryShortcutClick(msg.X, msg.Y); ok {
+			return nm, cmd
+		}
 		if msg.X < m.width-scrollbarWidth && !m.modalInputActive() {
 			return m.handleClick(msg.Y)
 		}
