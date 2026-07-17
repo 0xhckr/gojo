@@ -102,6 +102,48 @@ func TestMouseLogClickRebaseMovesDest(t *testing.T) {
 	}
 }
 
+// TestMouseLogClickElidedTogglesAllRevs verifies that clicking a "~" elided
+// edge line toggles the all-revisions mode (same as pressing A).
+func TestMouseLogClickElidedTogglesAllRevs(t *testing.T) {
+	m := mouseTestModel()
+	m.entries = []jj.LogEntry{
+		{ChangeID: "aaaa0000", CommitID: "c0ffee01", Subject: "first",
+			EdgeLines: []string{"~  (elided revisions)"}},
+		{ChangeID: "bbbb1111", CommitID: "c0ffee02", Subject: "second"},
+	}
+
+	// Entry 0: header Y=3, body Y=4, elided edge line Y=5.
+	m2, cmd := m.Update(leftClick(10, 5))
+	m = m2.(Model)
+	if !m.showAllRev {
+		t.Fatal("clicking elided row did not toggle showAllRev on")
+	}
+	if m.message != "showing all revisions" {
+		t.Errorf("message = %q, want %q", m.message, "showing all revisions")
+	}
+	if cmd == nil {
+		t.Error("toggling showAllRev should produce a refresh command")
+	}
+}
+
+// TestMouseLogClickNonElidedEdgeDoesNotToggle verifies that edge lines not
+// starting with "~" (e.g. merge connectors) do not toggle all-revisions mode.
+func TestMouseLogClickNonElidedEdgeDoesNotToggle(t *testing.T) {
+	m := mouseTestModel()
+	m.entries = []jj.LogEntry{
+		{ChangeID: "aaaa0000", CommitID: "c0ffee01", Subject: "first",
+			EdgeLines: []string{"│  "}},
+		{ChangeID: "bbbb1111", CommitID: "c0ffee02", Subject: "second"},
+	}
+
+	// Entry 0: header Y=3, body Y=4, non-elided edge line Y=5.
+	m2, _ := m.Update(leftClick(10, 5))
+	m = m2.(Model)
+	if m.showAllRev {
+		t.Fatal("clicking non-elided edge line should not toggle showAllRev")
+	}
+}
+
 // TestMouseClickScrollbarIgnored verifies clicks inside the scrollbar area
 // are not treated as row selection (they start a scrollbar drag instead).
 func TestMouseClickScrollbarIgnored(t *testing.T) {

@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -68,9 +70,68 @@ func logEntryAtContentY(entries []jj.LogEntry, focus, offset, contentY, height i
 	return 0, false
 }
 
+// isElidedEdgeLine reports whether an edge line text is a jj "~" elided
+// revisions row (e.g. "~  (elided revisions)" or bare "~").
+func isElidedEdgeLine(s string) bool {
+	return strings.HasPrefix(s, "~")
+}
+
+// hasElidedEdgeLines reports whether an entry has any "~" elided edge lines.
+func hasElidedEdgeLines(e *jj.LogEntry) bool {
+	for _, el := range e.EdgeLines {
+		if isElidedEdgeLine(el) {
+			return true
+		}
+	}
+	return false
+}
+
+// logElidedAtContentY reports whether the content line at contentY (0-based,
+// relative to the top of the log list area) falls on a "~" elided edge line.
+// When it does, it returns the index of the entry the edge line belongs to.
+func logElidedAtContentY(entries []jj.LogEntry, focus, offset, contentY, height int) (int, bool) {
+	if len(entries) == 0 {
+		return 0, false
+	}
+	lineIdx := contentY - 1 // skip the list's top padding row
+	if lineIdx < 0 {
+		return 0, false
+	}
+	off, end := logWindow(entries, focus, offset, height-1)
+	acc := 0
+	for i := off; i < end; i++ {
+		h := commitLines(entries[i])
+		if lineIdx < acc+h {
+			local := lineIdx - acc
+			edgeIdx := local - 2 // 0=header, 1=body, 2+=edge lines
+			if edgeIdx >= 0 && edgeIdx < len(entries[i].EdgeLines) &&
+				isElidedEdgeLine(entries[i].EdgeLines[edgeIdx]) {
+				return i, true
+			}
+			return 0, false
+		}
+		acc += h
+	}
+	return 0, false
+}
+
+// toggleShowAllRev flips the showAllRev flag and returns the refresh command.
+func (m Model) toggleShowAllRev() (tea.Model, tea.Cmd) {
+	m.showAllRev = !m.showAllRev
+	m.cursor = 0
+	m.offset = 0
+	if m.showAllRev {
+		m.message = "showing all revisions"
+	} else {
+		m.message = "showing default revisions"
+	}
+	return m, m.refreshCmd()
+}
+
 // handleLogClick selects the commit under the mouse. In rebase/squash mode it
 // moves the destination indicator instead. Re-clicking the selected commit
-// opens its diff (same as enter).
+// opens its diff (same as enter). Clicking a "~" elided edge line toggles
+// the all-revisions mode (same as pressing A).
 func (m Model) handleLogClick(mouseY int) (tea.Model, tea.Cmd) {
 	focus := m.cursor
 	if m.rebaseMode {
@@ -79,7 +140,14 @@ func (m Model) handleLogClick(mouseY int) (tea.Model, tea.Cmd) {
 	if m.squashMode {
 		focus = m.squashDest
 	}
-	idx, ok := logEntryAtContentY(m.entries, focus, m.offset, mouseY-contentTopBarHeight, m.contentHeight())
+	contentY := mouseY - contentTopBarHeight
+
+	// Check for a click on a "~" elided edge line first.
+	if _, elided := logElidedAtContentY(m.entries, focus, m.offset, contentY, m.contentHeight()); elided {
+		return m.toggleShowAllRev()
+	}
+
+	idx, ok := logEntryAtContentY(m.entries, focus, m.offset, contentY, m.contentHeight())
 	if !ok {
 		return m, nil
 	}

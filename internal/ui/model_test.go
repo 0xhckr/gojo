@@ -215,6 +215,61 @@ func TestViewBootAndLayout(t *testing.T) {
 	}
 }
 
+// TestEnterOnElidedEntryTogglesAllRevs verifies that pressing enter on an
+// entry with "~" elided edge lines toggles the all-revisions mode instead of
+// opening the diff.
+func TestEnterOnElidedEntryTogglesAllRevs(t *testing.T) {
+	m := NewModel()
+	m.ready = true
+	m.width = 100
+	m.height = 30
+	m.view = viewLog
+	m.entries = []jj.LogEntry{
+		{ChangeID: "aaaa0000", CommitID: "c0ffee01", Subject: "first",
+			EdgeLines: []string{"~  (elided revisions)"}},
+		{ChangeID: "bbbb1111", CommitID: "c0ffee02", Subject: "second"},
+	}
+
+	// Cursor is on entry 0 which has elided edge lines.
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = m2.(Model)
+	if !m.showAllRev {
+		t.Fatal("enter on elided entry did not toggle showAllRev on")
+	}
+	if m.diffOpen {
+		t.Error("enter on elided entry should not open the diff")
+	}
+	if m.message != "showing all revisions" {
+		t.Errorf("message = %q, want %q", m.message, "showing all revisions")
+	}
+	if cmd == nil {
+		t.Error("toggling showAllRev should produce a refresh command")
+	}
+}
+
+// TestEnterOnNonElidedEntryOpensDiff verifies that enter on an entry without
+// elided edge lines opens the diff as usual.
+func TestEnterOnNonElidedEntryOpensDiff(t *testing.T) {
+	m := NewModel()
+	m.ready = true
+	m.width = 100
+	m.height = 30
+	m.view = viewLog
+	m.entries = []jj.LogEntry{
+		{ChangeID: "aaaa0000", CommitID: "c0ffee01", Subject: "first"},
+		{ChangeID: "bbbb1111", CommitID: "c0ffee02", Subject: "second"},
+	}
+
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = m2.(Model)
+	if !m.diffOpen {
+		t.Fatal("enter on non-elided entry should open the diff")
+	}
+	if m.showAllRev {
+		t.Error("enter on non-elided entry should not toggle showAllRev")
+	}
+}
+
 func TestNavigationAndHelp(t *testing.T) {
 	m := bootedModel(t)
 

@@ -2357,6 +2357,9 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		if e := m.selectedEntry(); e != nil {
+			if hasElidedEdgeLines(e) {
+				return m.toggleShowAllRev()
+			}
 			return m.openRevisionDiff(e.ChangeID, e.CommitID, e.ChangeIDPrefixLen, e.Subject)
 		}
 		return m, nil
@@ -2432,15 +2435,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "A":
-		m.showAllRev = !m.showAllRev
-		m.cursor = 0
-		m.offset = 0
-		if m.showAllRev {
-			m.message = "showing all revisions"
-		} else {
-			m.message = "showing default revisions"
-		}
-		return m, m.refreshCmd()
+		return m.toggleShowAllRev()
 	case "b":
 		m.bookmarkMode = true
 		m.bookmarkAction = ""
