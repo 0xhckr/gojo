@@ -24,6 +24,14 @@ var helpSections = []helpSection{
 		{"q", "quit / close panel"},
 		{"ctrl+c", "force quit"},
 	}},
+	{title: "Mouse", color: colWhite, bindings: []helpBinding{
+		{"wheel", "scroll / move cursor"},
+		{"click", "select row / move cursor"},
+		{"click selected", "activate  (open diff / file / commit)"},
+		{"click file header", "diff: toggle collapse · split: toggle file"},
+		{"click diff line", "split: toggle mark · diff: move cursor"},
+		{"drag scrollbar", "scroll any view"},
+	}},
 	{title: "Log View", color: colBlue, bindings: []helpBinding{
 		{"↑/k, ↓/j", "navigate commits"},
 		{"Home", "first commit"},

@@ -343,6 +343,24 @@ func (m Model) openDiffCmd(commitID, changeID string) tea.Cmd {
 	}
 }
 
+// openRevisionDiff switches the model to the diff panel for a revision and
+// returns the command to load it. changeID is the panel's revset (stable
+// across working-copy edits); commitID is what jj diff resolves.
+func (m Model) openRevisionDiff(changeID, commitID string, prefixLen int, subject string) (tea.Model, tea.Cmd) {
+	m.diffOpen = true
+	m.diffRev = changeID
+	m.diffRevPrefix = prefixLen
+	m.diffIsRevision = true
+	m.diffLoading = true
+	m.diffScrollY = 0
+	m.diffDesc = subject
+	m.diffRaw = ""
+	m.diffRows = nil
+	m.diffStatus = nil
+	m.diffChunks = nil
+	return m, m.openDiffCmd(commitID, changeID)
+}
+
 func (m Model) simpleCmd(fn func() error, okMsg string) tea.Cmd {
 	return func() tea.Msg {
 		if err := fn(); err != nil {
@@ -1350,48 +1368,6 @@ func (m *Model) toggleDiffCollapse(fileHeaderIdx int) {
 	m.diffFollowCursor()
 }
 
-// diffFileHeaderAtMouseY maps a terminal Y coordinate to a diff row index and
-// returns it if the row is a file header (suitable for click-to-toggle). The
-// Y is 0-based from the top of the terminal.
-func (m Model) diffFileHeaderAtMouseY(mouseY int) (int, bool) {
-	bodyStartY := contentTopBarHeight + 1 // top bar + diff title bar
-	bodyLine := mouseY - bodyStartY + m.diffScrollY
-	headLen := m.diffHeadLen()
-	if bodyLine < headLen {
-		return 0, false
-	}
-	diffBodyLine := bodyLine - headLen
-	if diffBodyLine < 0 || diffBodyLine >= m.diffBodyTotal() {
-		return 0, false
-	}
-	if len(m.diffLayout.starts) == 0 {
-		return 0, false
-	}
-	rowIdx, _ := m.diffLayout.rowAt(diffBodyLine)
-	if rowIdx < 0 || rowIdx >= len(m.diffRows) {
-		return 0, false
-	}
-	if m.diffRows[rowIdx].kind != rowFileHeader {
-		return 0, false
-	}
-	return rowIdx, true
-}
-
-// setDiffCursorToFileHeader moves the chunk cursor to the file header at
-// fileHeaderIdx (a row index into diffRows). Does nothing if the file header
-// is not found among the navigable chunks.
-func (m *Model) setDiffCursorToFileHeader(fileHeaderIdx int) {
-	headLen := m.diffHeadLen()
-	targetRow := headLen + fileHeaderIdx
-	for i, chunk := range m.diffChunks {
-		if len(chunk) == 1 && chunk[0] == targetRow {
-			m.diffCurChunk = i
-			m.diffCurLine = 0
-			return
-		}
-	}
-}
-
 // computeDiffChunks groups contiguous addition/deletion lines into chunks,
 // recording each line's body-row index. File header rows are included as
 // single-element navigable chunks so the cursor can land on them (for
@@ -1566,15 +1542,12 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Click on a diff file header moves the cursor to it and toggles its
-	// collapsed state. Only intercept clicks outside the scrollbar area.
-	if m.diffOpen && msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-		if msg.X < m.width-scrollbarWidth {
-			if fileIdx, ok := m.diffFileHeaderAtMouseY(msg.Y); ok {
-				m.setDiffCursorToFileHeader(fileIdx)
-				m.toggleDiffCollapse(fileIdx)
-				return m, nil
-			}
+	// Left-click in the content area selects (or activates) the row under the
+	// mouse. Clicks inside the scrollbar fall through to drag handling, and
+	// modal input modes (menus, elevation prompt) ignore clicks.
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+		if msg.X < m.width-scrollbarWidth && !m.modalInputActive() {
+			return m.handleClick(msg.Y)
 		}
 	}
 
@@ -2014,18 +1987,7 @@ func (m Model) handleFileBlameKey(k string) (tea.Model, tea.Cmd) {
 		// Open the commit that last touched the focused line.
 		if fv.cursorY >= 0 && fv.cursorY < total {
 			line := fv.lines[fv.cursorY]
-			m.diffOpen = true
-			m.diffRev = line.ChangeID
-			m.diffRevPrefix = 0
-			m.diffIsRevision = true
-			m.diffLoading = true
-			m.diffScrollY = 0
-			m.diffDesc = line.Description
-			m.diffRaw = ""
-			m.diffRows = nil
-			m.diffStatus = nil
-			m.diffChunks = nil
-			return m, m.openDiffCmd(line.CommitID, line.ChangeID)
+			return m.openRevisionDiff(line.ChangeID, line.CommitID, 0, line.Description)
 		}
 	}
 	return m, nil
@@ -2062,18 +2024,7 @@ func (m Model) handleFileHistoryKey(k string) (tea.Model, tea.Cmd) {
 	case "enter":
 		if fv.histCur >= 0 && fv.histCur < len(fv.hist) {
 			e := fv.hist[fv.histCur]
-			m.diffOpen = true
-			m.diffRev = e.ChangeID
-			m.diffRevPrefix = e.ChangeIDPrefixLen
-			m.diffIsRevision = true
-			m.diffLoading = true
-			m.diffScrollY = 0
-			m.diffDesc = e.Subject
-			m.diffRaw = ""
-			m.diffRows = nil
-			m.diffStatus = nil
-			m.diffChunks = nil
-			return m, m.openDiffCmd(e.CommitID, e.ChangeID)
+			return m.openRevisionDiff(e.ChangeID, e.CommitID, e.ChangeIDPrefixLen, e.Subject)
 		}
 	}
 	return m, nil
@@ -2281,18 +2232,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		if e := m.selectedEntry(); e != nil {
-			m.diffOpen = true
-			m.diffRev = e.ChangeID
-			m.diffRevPrefix = e.ChangeIDPrefixLen
-			m.diffIsRevision = true
-			m.diffLoading = true
-			m.diffScrollY = 0
-			m.diffDesc = e.Subject
-			m.diffRaw = ""
-			m.diffRows = nil
-			m.diffStatus = nil
-			m.diffChunks = nil
-			return m, m.openDiffCmd(e.CommitID, e.ChangeID)
+			return m.openRevisionDiff(e.ChangeID, e.CommitID, e.ChangeIDPrefixLen, e.Subject)
 		}
 		return m, nil
 	case "d":
