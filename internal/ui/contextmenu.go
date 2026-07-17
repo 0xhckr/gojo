@@ -20,6 +20,7 @@ type hoverState struct {
 	fzfRow    int
 	blameLine int
 	histIdx   int
+	searchRow int
 }
 
 // bookmarkDragState tracks an in-progress mouse drag of a bookmark from its

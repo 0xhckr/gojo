@@ -47,9 +47,9 @@ type Model struct {
 	// annotation, and inspect its history. Driven by fileViewState.
 	fileView fileViewState
 
-	entries       []jj.LogEntry
-	cursor        int
-	offset        int
+	entries []jj.LogEntry
+	cursor  int
+	offset  int
 	// logEdgeCursor is the index of the highlighted edge line within the
 	// selected entry, or -1 when the cursor is on the entry itself (header +
 	// body). Stepping j/k onto a "~" elided edge line sets this so enter can
@@ -184,6 +184,15 @@ type Model struct {
 	// hover tracks the row/item under the mouse for visual hover highlighting.
 	hover hoverState
 
+	// Search mode — fzf-style fuzzy search across revision metadata (change
+	// ID, commit ID, description, author, bookmarks, tags). Activated with /
+	// from the log view; enter jumps the cursor to the selected result.
+	searchMode    bool
+	searchQuery   string
+	searchResults []searchResult
+	searchCursor  int
+	searchOffset  int
+
 	// hoverShortcut is the key hint of the shortcut button currently under
 	// the mouse (in the help bar or status bar menu). Empty when none.
 	hoverShortcut string
@@ -193,10 +202,10 @@ type Model struct {
 func NewModel() Model {
 	cwd, _ := os.Getwd()
 	return Model{
-		view:           viewLog,
-		cwd:            cwd,
-		home:           os.Getenv("HOME"),
-		logEdgeCursor:  -1,
+		view:            viewLog,
+		cwd:             cwd,
+		home:            os.Getenv("HOME"),
+		logEdgeCursor:   -1,
 		focused:         true,
 		polling:         true,
 		aiLoading:       map[string]bool{},
@@ -1528,6 +1537,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleElevKey(k)
 	}
 
+	if m.searchMode {
+		return m.handleSearchKey(msg, k)
+	}
+
 	if m.bookmarkMode {
 		return m.handleBookmarkKey(msg, k)
 	}
@@ -1756,7 +1769,9 @@ func (m Model) finishBookmarkDrag(mouseY int) (tea.Model, tea.Cmd) {
 					elev: &elevReq{
 						flag:   flag,
 						reason: reason,
-						retry:  func() tea.Cmd { return m.syncFnCmd(func() error { return m.runner.BookmarkMove(drag.name, target, flag) }, okMsg) },
+						retry: func() tea.Cmd {
+							return m.syncFnCmd(func() error { return m.runner.BookmarkMove(drag.name, target, flag) }, okMsg)
+						},
 					},
 				}
 			}
@@ -1765,6 +1780,7 @@ func (m Model) finishBookmarkDrag(mouseY int) (tea.Model, tea.Cmd) {
 		return actionDoneMsg{message: okMsg, refresh: true}
 	}
 }
+
 // active view and applies it.
 func (m Model) applyScrollBarDrag(mouseY int) (tea.Model, tea.Cmd) {
 	ch := m.contentHeight()
@@ -1934,6 +1950,17 @@ func (m Model) handleWheel(dir int) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.recomputeFileHistOffset()
+
+	case m.searchMode:
+		if dir > 0 {
+			if m.searchCursor < len(m.searchResults)-1 {
+				m.searchCursor++
+			}
+		} else {
+			if m.searchCursor > 0 {
+				m.searchCursor--
+			}
+		}
 
 	default:
 		// Log view.
@@ -2422,6 +2449,19 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			return m.openRevisionDiff(e.ChangeID, e.CommitID, e.ChangeIDPrefixLen, e.Subject)
 		}
 		return m, nil
+	case "/":
+		if len(m.entries) == 0 {
+			return m, nil
+		}
+		m.searchMode = true
+		m.searchQuery = ""
+		m.searchResults = nil
+		m.searchCursor = 0
+		m.searchOffset = 0
+		m.errMsg = ""
+		m.message = ""
+		m.searchFilter()
+		return m, nil
 	case "d":
 		if e := m.selectedEntry(); e != nil {
 			// The editor flow runs via ExecProcess, which attaches the terminal —
@@ -2583,6 +2623,63 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 				elevate: func(flag string) func() error { return func() error { return r.Absorb(rev, flag) } },
 			})
 		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleSearchKey drives the fzf-style search overlay. Typed characters
+// append to the query and re-filter; backspace removes the last character;
+// ctrl+u clears the query; enter jumps the cursor to the selected result;
+// navigation keys move through results; esc/q cancels and returns to the log.
+func (m Model) handleSearchKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "esc", "q":
+		m.searchMode = false
+		return m, nil
+	case "enter":
+		if len(m.searchResults) > 0 && m.searchCursor >= 0 && m.searchCursor < len(m.searchResults) {
+			idx := m.searchResults[m.searchCursor].entryIdx
+			m.cursor = idx
+			m.searchMode = false
+			m.recomputeOffset()
+			return m, nil
+		}
+		return m, nil
+	case "up":
+		if m.searchCursor > 0 {
+			m.searchCursor--
+		}
+		return m, nil
+	case "down":
+		if m.searchCursor < len(m.searchResults)-1 {
+			m.searchCursor++
+		}
+		return m, nil
+	case "home":
+		m.searchCursor = 0
+		return m, nil
+	case "end":
+		m.searchCursor = max(0, len(m.searchResults)-1)
+		return m, nil
+	case "pgup":
+		m.searchCursor = max(0, m.searchCursor-10)
+		return m, nil
+	case "pgdown":
+		m.searchCursor = min(max(0, len(m.searchResults)-1), m.searchCursor+10)
+		return m, nil
+	case "backspace", "delete":
+		m.searchQuery = trimLastRune(m.searchQuery)
+		m.searchFilter()
+		return m, nil
+	case "ctrl+u":
+		m.searchQuery = ""
+		m.searchFilter()
+		return m, nil
+	}
+	if s, ok := typed(msg); ok && s != "" {
+		m.searchQuery += s
+		m.searchFilter()
 		return m, nil
 	}
 	return m, nil
@@ -3225,6 +3322,8 @@ func (m Model) View() string {
 		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), m.diffCollapsed, sv, false, nil, nil, m.hover.diffRow)...)
 	case m.view == viewFile:
 		lines = append(lines, m.renderFileView(m.width, ch)...)
+	case m.searchMode:
+		lines = append(lines, m.renderSearch(m.width, ch)...)
 	default:
 		rb := rebaseView{
 			active:  m.rebaseMode,
@@ -3447,6 +3546,9 @@ func (m Model) renderStatusBar() []string {
 		segs = append(segs, seg{text: " · space toggle · c confirm · esc cancel · ↑/↓ navigate", fg: colGray})
 		return []string{bgRow(m.width, colDarkerGray, segs...)}
 
+	case m.searchMode:
+		return []string{bgRow(m.width, colDarkerGray, seg{text: " / search · type to filter · ⏎ jump · ↑/↓ navigate · esc cancel", fg: colGray})}
+
 	case m.errMsg != "":
 		msg := m.errMsg
 		limit := m.width - 4
@@ -3499,7 +3601,7 @@ var defaultHelpBarItems = [][2]string{
 	{"⏎diff", "⏎"}, {"describe", "d"},
 	{"AI Desc", "D"}, {"bookmark", "b"}, {"tag", "t"}, {"git", "g"},
 	{"undo", "u"}, {"rebase", "r"}, {"squash", "s"}, {"absorb", "x"}, {"edit", "e"}, {"new", "n"},
-	{"abandon", "a"}, {"file", "f"}, {"?help", "?"}, {"quit", "q"},
+	{"abandon", "a"}, {"file", "f"}, {"/search", "/"}, {"?help", "?"}, {"quit", "q"},
 }
 
 // helpBarItems returns the shortcut hints shown in the bottom help bar for the
@@ -3548,6 +3650,11 @@ func (m Model) helpBarItems() [][2]string {
 	case m.view == viewHelp:
 		return [][2]string{
 			{"↑/k", "↑"}, {"↓/j", "↓"}, {"?/q close", "?"},
+		}
+	case m.searchMode:
+		return [][2]string{
+			{"type", "filter"}, {"⌫ del", "backspace"}, {"⏎ jump", "⏎"},
+			{"↑/↓ nav", "↑"}, {"ctrl+u clear", "ctrl+u"}, {"esc cancel", "esc"},
 		}
 	case m.rebaseMode, m.squashMode,
 		m.bookmarkMode, m.tagMode, m.gitMode:

@@ -19,7 +19,7 @@ import (
 // modalInputActive reports whether a text-input/menu mode is capturing all
 // input. Clicks are ignored in those states (the wheel still scrolls).
 func (m Model) modalInputActive() bool {
-	return m.pendingElev != nil || m.bookmarkMode || m.tagMode || m.gitMode
+	return m.pendingElev != nil || m.bookmarkMode || m.tagMode || m.gitMode || m.searchMode
 }
 
 // handleClick dispatches a left-press at the given terminal Y (0-based) to
@@ -369,7 +369,7 @@ func (m Model) handleHistoryClick(mouseY int) (tea.Model, tea.Cmd) {
 // scrollbar. Clicks are also fed through here so pressing sets the highlight
 // even if no motion event preceded the press.
 func (m Model) updateHover(x, y int) Model {
-	m.hover = hoverState{valid: true, logIdx: -1, logEdge: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1}
+	m.hover = hoverState{valid: true, logIdx: -1, logEdge: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1, searchRow: -1}
 
 	// Check shortcut hover (help bar / status bar menus) first — this works
 	// regardless of content area bounds.
@@ -416,6 +416,10 @@ func (m Model) updateHover(x, y int) Model {
 		}
 	case m.view == viewHelp:
 		m.hover.valid = false
+	case m.searchMode:
+		if idx, ok := m.searchResultAtMouseY(y); ok {
+			m.hover.searchRow = idx
+		}
 	default:
 		if idx, ok := m.logEntryAtMouseY(y); ok {
 			m.hover.logIdx = idx
@@ -537,6 +541,28 @@ func (m Model) fzfResultAtMouseY(mouseY int) (int, bool) {
 	start, end := fv.fzfVisibleRange(contentH)
 	i := start + resIdx
 	if i >= end || i >= len(fv.fzfResults) {
+		return 0, false
+	}
+	return i, true
+}
+
+// searchResultAtMouseY maps a terminal Y coordinate to a search result index.
+func (m Model) searchResultAtMouseY(mouseY int) (int, bool) {
+	total := len(m.searchResults)
+	if total == 0 {
+		return 0, false
+	}
+	rowIdx := mouseY - contentTopBarHeight - 3 // title + prompt + divider
+	if rowIdx < 0 {
+		return 0, false
+	}
+	contentH := m.contentHeight() - 3
+	if contentH < 0 {
+		contentH = 0
+	}
+	start, end := searchVisibleRange(m.searchCursor, m.searchOffset, total, contentH)
+	i := start + rowIdx
+	if i >= end || i >= total {
 		return 0, false
 	}
 	return i, true
