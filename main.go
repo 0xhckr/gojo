@@ -34,6 +34,7 @@ func main() {
 		tea.WithAltScreen(),
 		tea.WithReportFocus(),
 		tea.WithMouseCellMotion(),
+		tea.WithMouseAllMotion(),
 	)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "fatal:", err)
