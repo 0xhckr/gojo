@@ -103,7 +103,7 @@ func TestVerifyAgainstJJLog(t *testing.T) {
 			got := gojoPrefixes(entries)
 
 			// Visual: gojo's actual rendered graph column (full window).
-			lines := renderLog(120, 400, entries, 0, 0, -1, nil, 0, rebaseView{}, squashView{}, bookmarkDragView{}, -1, -1)
+			lines := renderLog(120, 400, entries, 0, 0, -1, nil, 0, rebaseView{}, squashView{}, bookmarkDragView{}, -1, -1, "", "")
 			var rendered []string
 			for _, l := range lines {
 				if s := strings.TrimRight(ansi.Strip(l), " "); s != "" {

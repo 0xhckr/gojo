@@ -19,7 +19,7 @@ import (
 // modalInputActive reports whether a text-input/menu mode is capturing all
 // input. Clicks are ignored in those states (the wheel still scrolls).
 func (m Model) modalInputActive() bool {
-	return m.pendingElev != nil || m.bookmarkMode || m.tagMode || m.gitMode || m.searchMode
+	return m.pendingElev != nil || m.bookmarkMode || m.tagMode || m.renameMode || m.gitMode || m.searchMode
 }
 
 // handleClick dispatches a left-press at the given terminal Y (0-based) to
@@ -369,7 +369,7 @@ func (m Model) handleHistoryClick(mouseY int) (tea.Model, tea.Cmd) {
 // scrollbar. Clicks are also fed through here so pressing sets the highlight
 // even if no motion event preceded the press.
 func (m Model) updateHover(x, y int) Model {
-	m.hover = hoverState{valid: true, logIdx: -1, logEdge: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1, searchRow: -1}
+	m.hover = hoverState{valid: true, logIdx: -1, logEdge: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1, searchRow: -1, refName: "", refKind: ""}
 
 	// Check shortcut hover (help bar / status bar menus) first — this works
 	// regardless of content area bounds.
@@ -427,6 +427,10 @@ func (m Model) updateHover(x, y int) Model {
 		if _, edgeIdx, ok := m.logEdgeAtMouseY(y); ok {
 			m.hover.logEdge = edgeIdx
 		}
+		if kind, name, _, ok := m.refAtMouse(x, y); ok {
+			m.hover.refKind = kind
+			m.hover.refName = name
+		}
 	}
 	return m
 }
@@ -466,9 +470,21 @@ func (m Model) logEdgeAtMouseY(mouseY int) (int, int, bool) {
 // 0-based terminal X (already excluding the scrollbar, which the caller
 // filters out).
 func bookmarkSegmentAt(entries []jj.LogEntry, focus, offset, contentY, contentX, height int) (name string, entryIdx int, ok bool) {
+	_, n, idx, ok2 := refSegmentAt(entries, focus, offset, contentY, contentX, height)
+	if !ok2 {
+		return "", 0, false
+	}
+	return n, idx, true
+}
+
+// refSegmentAt maps a terminal coordinate to a bookmark or tag rendered on a
+// commit's header line, if any. It extends bookmarkSegmentAt to also hit-test
+// tag segments (which follow bookmarks in renderLog's layout). Returns the
+// kind ("bookmark" or "tag"), the ref name, and the entry index.
+func refSegmentAt(entries []jj.LogEntry, focus, offset, contentY, contentX, height int) (kind, name string, entryIdx int, ok bool) {
 	lineIdx := contentY - 1 // skip the list's top padding row
 	if lineIdx < 0 || contentX < 0 {
-		return "", 0, false
+		return "", "", 0, false
 	}
 	off, end := logWindow(entries, focus, offset, height-1)
 	acc := 0
@@ -476,7 +492,6 @@ func bookmarkSegmentAt(entries []jj.LogEntry, focus, offset, contentY, contentX,
 		entryHeaderLine := acc // first sub-line of the entry is the header
 		h := commitLines(entries[i])
 		if lineIdx == entryHeaderLine {
-			// Hit-test X against this entry's bookmark segments.
 			prefix := 1 + runeWidthStr(entries[i].HeaderPrefix) + 1 +
 				runeWidthStr(entries[i].ChangeID) + 1 +
 				runeWidthStr(entries[i].Authors) + 1 +
@@ -487,15 +502,23 @@ func bookmarkSegmentAt(entries []jj.LogEntry, focus, offset, contentY, contentX,
 				segStart := prefix + 1 // separating space
 				segEnd := segStart + runeWidthStr(bm)
 				if x >= segStart && x < segEnd {
-					return bm, i, true
+					return "bookmark", bm, i, true
 				}
 				prefix = segEnd
 			}
-			return "", 0, false
+			for _, tg := range entries[i].Tags {
+				segStart := prefix + 1
+				segEnd := segStart + runeWidthStr(tg)
+				if x >= segStart && x < segEnd {
+					return "tag", tg, i, true
+				}
+				prefix = segEnd
+			}
+			return "", "", 0, false
 		}
 		acc += h
 	}
-	return "", 0, false
+	return "", "", 0, false
 }
 
 // historyEntryAtMouseY maps a terminal Y coordinate to a file-history entry

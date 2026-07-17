@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"gojo/internal/jj"
 )
 
 func rightClick(x, y int) tea.MouseMsg {
@@ -278,4 +280,160 @@ func labels(items []contextMenuItem) []string {
 		out[i] = it.label
 	}
 	return out
+}
+
+// refTestModel builds a ready log-view model with entries that have bookmarks
+// and tags for testing the ref context menu.
+func refTestModel() Model {
+	return Model{
+		ready:         true,
+		width:         100,
+		height:        30,
+		view:          viewLog,
+		logEdgeCursor: -1,
+		entries: []jj.LogEntry{
+			{ChangeID: "aaaa0000", CommitID: "c0ffee01", Subject: "first", Bookmarks: []string{"main"}},
+			{ChangeID: "bbbb1111", CommitID: "c0ffee02", Subject: "second", Bookmarks: []string{"feature"}, Tags: []string{"v1.0"}},
+			{ChangeID: "cccc2222", CommitID: "c0ffee03", Subject: "third"},
+		},
+	}
+}
+
+// TestContextMenuOnBookmark verifies right-clicking on a bookmark segment
+// opens a ref-specific context menu with push, forget, and rename items.
+func TestContextMenuOnBookmark(t *testing.T) {
+	m := refTestModel()
+	// Entry 0 header is at Y=3 (top bar 2 + padding 1).
+	// Prefix: 1 + 0 + 1 + 8 + 1 + 0 + 1 + 0 + 1 + 8 = 21; bookmark "main"
+	// starts at X=22.
+	m2, _ := m.Update(rightClick(23, 3))
+	m = m2.(Model)
+	if !m.contextMenuOpen {
+		t.Fatal("right-click on bookmark did not open the context menu")
+	}
+	if m.contextMenuRef == nil {
+		t.Fatal("contextMenuRef not set")
+	}
+	if m.contextMenuRef.kind != "bookmark" || m.contextMenuRef.name != "main" {
+		t.Fatalf("contextMenuRef = {%s, %s}, want {bookmark, main}", m.contextMenuRef.kind, m.contextMenuRef.name)
+	}
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", m.cursor)
+	}
+	want := []string{"push to origin", "forget", "rename"}
+	got := labels(m.contextMenuItems)
+	for i, w := range want {
+		if i >= len(got) || got[i] != w {
+			t.Fatalf("item[%d] = %v, want %v (all: %v)", i, got, want, got)
+		}
+	}
+}
+
+// TestContextMenuOnTag verifies right-clicking on a tag segment opens a
+// ref-specific context menu with "delete" instead of "forget".
+func TestContextMenuOnTag(t *testing.T) {
+	m := refTestModel()
+	// Entry 1 header is at Y=5 (top bar 2 + padding 1 + entry0 2 lines).
+	// Prefix: 1 + 0 + 1 + 8 + 1 + 0 + 1 + 0 + 1 + 8 = 21; bookmark "feature"
+	// (7 chars) at X=22..28; tag "v1.0" (4 chars) starts at X=29.
+	m2, _ := m.Update(rightClick(30, 5))
+	m = m2.(Model)
+	if !m.contextMenuOpen {
+		t.Fatal("right-click on tag did not open the context menu")
+	}
+	if m.contextMenuRef == nil {
+		t.Fatal("contextMenuRef not set")
+	}
+	if m.contextMenuRef.kind != "tag" || m.contextMenuRef.name != "v1.0" {
+		t.Fatalf("contextMenuRef = {%s, %s}, want {tag, v1.0}", m.contextMenuRef.kind, m.contextMenuRef.name)
+	}
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1", m.cursor)
+	}
+	want := []string{"push to origin", "delete", "rename"}
+	got := labels(m.contextMenuItems)
+	for i, w := range want {
+		if i >= len(got) || got[i] != w {
+			t.Fatalf("item[%d] = %v, want %v (all: %v)", i, got, want, got)
+		}
+	}
+}
+
+// TestContextMenuRenameFlow verifies the rename action enters rename mode and
+// typing + enter produces the rename command.
+func TestContextMenuRenameFlow(t *testing.T) {
+	m := refTestModel()
+	// Right-click on bookmark "main" on entry 0.
+	m2, _ := m.Update(rightClick(23, 3))
+	m = m2.(Model)
+
+	// Activate "rename" (third item, index 2).
+	m.contextMenuCursor = 2
+	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = m2.(Model)
+	if m.contextMenuOpen {
+		t.Fatal("menu stayed open after rename activation")
+	}
+	if !m.renameMode {
+		t.Fatal("rename mode not entered")
+	}
+	if m.renameTarget.kind != "bookmark" || m.renameTarget.oldName != "main" {
+		t.Fatalf("renameTarget = {%s, %s}, want {bookmark, main}", m.renameTarget.kind, m.renameTarget.oldName)
+	}
+
+	// Type a new name.
+	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("master")})
+	m = m2.(Model)
+	if m.renameInput != "master" {
+		t.Fatalf("renameInput = %q, want master", m.renameInput)
+	}
+
+	// Enter should exit rename mode and produce a command.
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = m2.(Model)
+	if m.renameMode {
+		t.Fatal("rename mode not exited after enter")
+	}
+	if cmd == nil {
+		t.Fatal("enter in rename mode did not produce a command")
+	}
+}
+
+// TestContextMenuRenameEsc verifies esc cancels rename mode.
+func TestContextMenuRenameEsc(t *testing.T) {
+	m := refTestModel()
+	m.renameMode = true
+	m.renameInput = "test"
+	m.renameTarget = renameRef{kind: "bookmark", oldName: "main", rev: "aaaa0000"}
+
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = m2.(Model)
+	if m.renameMode {
+		t.Fatal("esc did not exit rename mode")
+	}
+	if m.renameInput != "" {
+		t.Fatalf("renameInput = %q, want empty", m.renameInput)
+	}
+	if cmd != nil {
+		t.Error("esc produced a command")
+	}
+}
+
+// TestContextMenuOnNonRefStillWorks verifies that right-clicking on a non-ref
+// area of a header line still opens the standard log context menu.
+func TestContextMenuOnNonRefStillWorks(t *testing.T) {
+	m := refTestModel()
+	// Click at X=1 (the header prefix area) on entry 1 (Y=5).
+	m2, _ := m.Update(rightClick(1, 5))
+	m = m2.(Model)
+	if !m.contextMenuOpen {
+		t.Fatal("right-click on non-ref area did not open context menu")
+	}
+	if m.contextMenuRef != nil {
+		t.Fatal("contextMenuRef should be nil for non-ref right-click")
+	}
+	// Should have the standard log menu items (e.g. "open diff").
+	if m.contextMenuItems[0].label != "open diff" {
+		t.Fatalf("first item = %q, want open diff", m.contextMenuItems[0].label)
+	}
 }

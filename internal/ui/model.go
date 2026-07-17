@@ -180,6 +180,7 @@ type Model struct {
 	contextMenuOffset int
 	contextMenuX      int
 	contextMenuY      int
+	contextMenuRef    *refInfo // bookmark/tag the menu was opened on, or nil
 
 	// hover tracks the row/item under the mouse for visual hover highlighting.
 	hover hoverState
@@ -196,6 +197,12 @@ type Model struct {
 	// hoverShortcut is the key hint of the shortcut button currently under
 	// the mouse (in the help bar or status bar menu). Empty when none.
 	hoverShortcut string
+
+	// Rename mode — entered from the bookmark/tag context menu. The user
+	// types a new name and presses enter to rename the ref.
+	renameMode   bool
+	renameInput  string
+	renameTarget renameRef
 }
 
 // NewModel builds the initial model.
@@ -1549,6 +1556,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleTagKey(msg, k)
 	}
 
+	if m.renameMode {
+		return m.handleRenameKey(msg, k)
+	}
+
 	if m.gitMode {
 		return m.handleGitKey(msg, k)
 	}
@@ -1726,6 +1737,22 @@ func (m Model) bookmarkAtMouse(x, y int) (string, int, bool) {
 		focus = m.squashDest
 	}
 	return bookmarkSegmentAt(m.entries, focus, m.offset, y-contentTopBarHeight, x, m.contentHeight())
+}
+
+// refAtMouse maps a terminal coordinate to a bookmark or tag rendered on the
+// header line under the mouse, if any. Only valid in the default log view.
+func (m Model) refAtMouse(x, y int) (string, string, int, bool) {
+	if m.diffOpen || m.view != viewLog {
+		return "", "", 0, false
+	}
+	focus := m.cursor
+	if m.rebaseMode {
+		focus = m.rebaseDest
+	}
+	if m.squashMode {
+		focus = m.squashDest
+	}
+	return refSegmentAt(m.entries, focus, m.offset, y-contentTopBarHeight, x, m.contentHeight())
 }
 
 // updateBookmarkDrag tracks the drop target as the mouse moves during a
@@ -3135,6 +3162,58 @@ func (m Model) execTag(action, input string) tea.Cmd {
 	}
 }
 
+func (m Model) handleRenameKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "esc", "q":
+		m.renameMode = false
+		m.renameInput = ""
+		m.renameTarget = renameRef{}
+		return m, nil
+	case "enter":
+		if m.renameInput == "" {
+			return m, nil
+		}
+		target := m.renameTarget
+		newName := m.renameInput
+		m.renameMode = false
+		m.renameInput = ""
+		m.renameTarget = renameRef{}
+		label := "renaming " + target.kind + "…"
+		m, tick := m.startBusy(label)
+		return m, tea.Batch(tick, m.execRename(target, newName))
+	case "backspace", "delete":
+		m.renameInput = trimLastRune(m.renameInput)
+		return m, nil
+	}
+	if s, ok := typed(msg); ok {
+		m.renameInput += s
+	}
+	return m, nil
+}
+
+func (m Model) execRename(target renameRef, newName string) tea.Cmd {
+	r := m.runner
+	if target.kind == "bookmark" {
+		okMsg := "renamed bookmark: " + target.oldName + " → " + newName
+		return func() tea.Msg {
+			if err := r.BookmarkRename(target.oldName, newName); err != nil {
+				return actionDoneMsg{err: err}
+			}
+			return actionDoneMsg{message: okMsg, refresh: true}
+		}
+	}
+	okMsg := "renamed tag: " + target.oldName + " → " + newName
+	return func() tea.Msg {
+		if err := r.TagDelete(target.oldName); err != nil {
+			return actionDoneMsg{err: err}
+		}
+		if err := r.TagSet(newName, target.rev); err != nil {
+			return actionDoneMsg{err: err}
+		}
+		return actionDoneMsg{message: okMsg, refresh: true}
+	}
+}
+
 func (m Model) execRemote(action, input string) tea.Cmd {
 	r := m.runner
 	if action == "l" {
@@ -3346,7 +3425,7 @@ func (m Model) View() string {
 				destIdx:   m.bookmarkDrag.targetIdx,
 			}
 		}
-		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.logEdgeCursor, m.aiLoading, m.spinnerFrame, rb, sq, bd, m.hover.logIdx, m.hover.logEdge)...)
+		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.logEdgeCursor, m.aiLoading, m.spinnerFrame, rb, sq, bd, m.hover.logIdx, m.hover.logEdge, m.hover.refName, m.hover.refKind)...)
 	}
 
 	// Autocomplete suggestions.
@@ -3488,6 +3567,16 @@ func (m Model) renderStatusBar() []string {
 			return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: colTeal})}
 		}
 		return m.renderMenuRows(" [tag mode] ", colTeal, colPurple, tagMenuItems)
+
+	case m.renameMode:
+		kindLabel := "bookmark"
+		color := colCyan
+		if m.renameTarget.kind == "tag" {
+			kindLabel = "tag"
+			color = colTeal
+		}
+		text := " [rename " + kindLabel + "] " + m.renameTarget.oldName + " → " + m.renameInput + "█"
+		return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: color})}
 
 	case m.gitMode:
 		if m.remoteMode {
@@ -3657,7 +3746,7 @@ func (m Model) helpBarItems() [][2]string {
 			{"↑/↓ nav", "↑"}, {"ctrl+u clear", "ctrl+u"}, {"esc cancel", "esc"},
 		}
 	case m.rebaseMode, m.squashMode,
-		m.bookmarkMode, m.tagMode, m.gitMode:
+		m.bookmarkMode, m.tagMode, m.renameMode, m.gitMode:
 		// Keys for these modes are shown inline in the status bar.
 		return nil
 	default:

@@ -118,7 +118,7 @@ func scrollbarThumb(total, firstVis, visLines, trackH int) (int, int) {
 // renderLog produces up to height lines for the commit log. The content area
 // gets a subtle panel background, and a scrollbar indicator on the right edge
 // shows position when the log overflows.
-func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCursor int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView, sq squashView, bd bookmarkDragView, hoverIdx, hoverEdgeIdx int) []string {
+func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCursor int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView, sq squashView, bd bookmarkDragView, hoverIdx, hoverEdgeIdx int, hoverRefName, hoverRefKind string) []string {
 	if len(entries) == 0 {
 		return padLines([]string{bgRow(width, colPanel, seg{text: "  no revisions found", fg: colTextMuted})}, height, width)
 	}
@@ -199,11 +199,13 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 		for _, bm := range e.Bookmarks {
 			hs = append(hs, seg{text: " ", bg: bg})
 			dragging := bd.active && i == bd.sourceIdx && bm == bd.name
-			hs = append(hs, seg{text: bm, fg: colGreen, bold: true, underline: dragging, bg: bg})
+			hovered := hoverRefKind == "bookmark" && hoverRefName == bm
+			hs = append(hs, seg{text: bm, fg: colGreen, bold: true, underline: dragging || hovered, bg: bg})
 		}
 		for _, tg := range e.Tags {
 			hs = append(hs, seg{text: " ", bg: bg})
-			hs = append(hs, seg{text: tg, fg: colTeal, bold: true, bg: bg})
+			hovered := hoverRefKind == "tag" && hoverRefName == tg
+			hs = append(hs, seg{text: tg, fg: colTeal, bold: true, underline: hovered, bg: bg})
 		}
 		if bd.active && i == bd.sourceIdx {
 			hs = append(hs, seg{text: "  ● dragging " + bd.name, fg: colMagenta, bold: true, bg: bg})

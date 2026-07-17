@@ -21,6 +21,8 @@ type hoverState struct {
 	blameLine int
 	histIdx   int
 	searchRow int
+	refName   string // bookmark/tag name under the mouse, or ""
+	refKind   string // "bookmark" | "tag", or ""
 }
 
 // bookmarkDragState tracks an in-progress mouse drag of a bookmark from its
@@ -32,6 +34,25 @@ type bookmarkDragState struct {
 	name      string
 	sourceIdx int
 	targetIdx int
+}
+
+// refInfo records the bookmark or tag that a context menu was opened on, so
+// the menu items can act on the specific ref.
+type refInfo struct {
+	kind     string // "bookmark" | "tag"
+	name     string
+	entryIdx int
+	rev      string // ChangeID of the entry the ref is on (for tag rename)
+}
+
+// renameRef tracks the target of an in-progress rename (entered from the
+// bookmark/tag context menu). For bookmarks it maps to jj bookmark rename;
+// for tags (which have no rename command) it is implemented as delete + set
+// at the same revision.
+type renameRef struct {
+	kind    string // "bookmark" | "tag"
+	oldName string
+	rev     string
 }
 
 // contextMenuItem is one entry in the right-click context menu.
@@ -97,6 +118,7 @@ func (m *Model) closeContextMenu() {
 	m.contextMenuOffset = 0
 	m.contextMenuX = 0
 	m.contextMenuY = 0
+	m.contextMenuRef = nil
 }
 
 // contextMenuWidth returns the rendered inner width of the menu (excluding
@@ -127,6 +149,22 @@ func (m Model) openContextMenuCmd(x, y int) (tea.Model, tea.Cmd) {
 		m.closeContextMenu()
 		return m, nil
 	}
+	// Check for a right-click on a bookmark or tag segment — if so, select
+	// the entry and build a ref-specific context menu.
+	if x < m.width-scrollbarWidth && !m.diffOpen && m.view == viewLog && !m.rebaseMode && !m.squashMode {
+		if kind, name, idx, ok := m.refAtMouse(x, y); ok {
+			rev := ""
+			if idx >= 0 && idx < len(m.entries) {
+				rev = m.entries[idx].ChangeID
+			}
+			m.cursor = idx
+			m.recomputeOffset()
+			m.contextMenuRef = &refInfo{kind: kind, name: name, entryIdx: idx, rev: rev}
+			m.openContextMenu(x, y)
+			return m, nil
+		}
+	}
+	m.contextMenuRef = nil
 	// Select the row under the click (but do not activate it).
 	if x < m.width-scrollbarWidth {
 		m = m.rightClickSelect(y)
@@ -138,6 +176,10 @@ func (m Model) openContextMenuCmd(x, y int) (tea.Model, tea.Cmd) {
 // buildContextMenuItems returns the context-sensitive actions for the current
 // view/state.
 func (m Model) buildContextMenuItems() []contextMenuItem {
+	// Ref-specific menu (right-click on a bookmark or tag).
+	if m.contextMenuRef != nil {
+		return m.refContextMenuItems()
+	}
 	switch {
 	case m.rebaseMode:
 		return m.rebaseContextMenuItems()
@@ -712,4 +754,68 @@ func (m Model) helpContextMenuItems() []contextMenuItem {
 			return m.handleHelpKey("q"), nil
 		}),
 	}
+}
+
+// refContextMenuItems builds the context menu for a right-click on a bookmark
+// or tag segment. It offers push to origin, forget (delete for tags), and
+// rename.
+func (m Model) refContextMenuItems() []contextMenuItem {
+	ref := m.contextMenuRef
+	if ref == nil {
+		return nil
+	}
+	var items []contextMenuItem
+
+	// Push to origin.
+	items = append(items, menuItem("push to origin", "p", func(m Model) (tea.Model, tea.Cmd) {
+		r := m.runner
+		if r == nil {
+			return m, nil
+		}
+		if ref.kind == "bookmark" {
+			return m.busySimpleCmd("pushing "+ref.name+"…",
+				func() error { return r.GitPush("--bookmark", ref.name) },
+				"pushed "+ref.name)
+		}
+		return m.busySimpleCmd("pushing tag "+ref.name+"…",
+			func() error { return r.GitPush("--tag", ref.name) },
+			"pushed tag "+ref.name)
+	}))
+
+	// Forget (delete for tags).
+	forgetLabel := "forget"
+	if ref.kind == "tag" {
+		forgetLabel = "delete"
+	}
+	items = append(items, menuItem(forgetLabel, "f", func(m Model) (tea.Model, tea.Cmd) {
+		r := m.runner
+		if r == nil {
+			return m, nil
+		}
+		var spec actionSpec
+		if ref.kind == "bookmark" {
+			spec = actionSpec{
+				run:     func() error { return r.BookmarkForget(ref.name) },
+				okMsg:   "forgot bookmark: " + ref.name,
+				elevate: func(flag string) func() error { return func() error { return r.BookmarkForget(ref.name, flag) } },
+			}
+		} else {
+			spec = actionSpec{
+				run:     func() error { return r.TagDelete(ref.name) },
+				okMsg:   "deleted tag: " + ref.name,
+				elevate: func(flag string) func() error { return func() error { return r.TagDelete(ref.name, flag) } },
+			}
+		}
+		return m.busyActionCmd(forgetLabel+"ing "+ref.name+"…", spec)
+	}))
+
+	// Rename.
+	items = append(items, menuItem("rename", "r", func(m Model) (tea.Model, tea.Cmd) {
+		m.renameMode = true
+		m.renameInput = ""
+		m.renameTarget = renameRef{kind: ref.kind, oldName: ref.name, rev: ref.rev}
+		return m, nil
+	}))
+
+	return items
 }
