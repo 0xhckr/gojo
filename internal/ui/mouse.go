@@ -299,6 +299,15 @@ func (m Model) handleHistoryClick(mouseY int) (tea.Model, tea.Cmd) {
 // even if no motion event preceded the press.
 func (m Model) updateHover(x, y int) Model {
 	m.hover = hoverState{valid: true, logIdx: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1}
+
+	// Check shortcut hover (help bar / status bar menus) first — this works
+	// regardless of content area bounds.
+	if span, ok := m.shortcutSpanAt(x, y); ok {
+		m.hoverShortcut = span.keyHint
+	} else {
+		m.hoverShortcut = ""
+	}
+
 	if x >= m.width-scrollbarWidth || x < 0 {
 		m.hover.valid = false
 		return m
@@ -584,40 +593,23 @@ func keyMsgFromHint(hint string) (tea.KeyMsg, string) {
 
 // ── Shortcuts hover highlighting ─────────────────────────────────────────────
 
-// hoverShortcutLeft returns true if the mouse position (x, y) is over a
-// shortcut in the status or help bar.  Used to suppress the content area
-// hover highlight so a hover on a shortcut doesn't also highlight a content
-// row at the same Y.
-func (m Model) shortcutAtMouse(x, y int) bool {
-	// Status bar menus.
+// shortcutSpanAt returns the menu span under the mouse position (x, y), if
+// the mouse is over a shortcut in the status or help bar.
+func (m Model) shortcutSpanAt(x, y int) (menuSpan, bool) {
+	// Status bar menus (sub-menu modes).
 	switch {
 	case m.bookmarkMode && m.bookmarkAction == "":
-		if ok := hitMenuSpanBool(computeMenuSpans(m.width, " [bookmark mode] ", " ", bookmarkMenuItems, m.statusBarStartY()), x, y); ok {
-			return true
-		}
+		return hitMenuSpan(computeMenuSpans(m.width, " [bookmark mode] ", " ", bookmarkMenuItems, m.statusBarStartY()), x, y)
 	case m.tagMode && m.tagAction == "":
-		if ok := hitMenuSpanBool(computeMenuSpans(m.width, " [tag mode] ", " ", tagMenuItems, m.statusBarStartY()), x, y); ok {
-			return true
-		}
+		return hitMenuSpan(computeMenuSpans(m.width, " [tag mode] ", " ", tagMenuItems, m.statusBarStartY()), x, y)
 	case m.gitMode && m.remoteMode && m.remoteAction == "":
-		if ok := hitMenuSpanBool(computeMenuSpans(m.width, " [git > remote] ", " ", remoteMenuItems, m.statusBarStartY()), x, y); ok {
-			return true
-		}
+		return hitMenuSpan(computeMenuSpans(m.width, " [git > remote] ", " ", remoteMenuItems, m.statusBarStartY()), x, y)
 	case m.gitMode && !m.remoteMode:
-		if ok := hitMenuSpanBool(computeMenuSpans(m.width, " [git mode] ", " ", gitMenuItems, m.statusBarStartY()), x, y); ok {
-			return true
-		}
+		return hitMenuSpan(computeMenuSpans(m.width, " [git mode] ", " ", gitMenuItems, m.statusBarStartY()), x, y)
 	}
 	// Help bar.
 	if helpItems := m.helpBarItems(); helpItems != nil {
-		if ok := hitMenuSpanBool(computeMenuSpans(m.width, " ", "  ", helpItems, m.helpBarStartY()), x, y); ok {
-			return true
-		}
+		return hitMenuSpan(computeMenuSpans(m.width, " ", "  ", helpItems, m.helpBarStartY()), x, y)
 	}
-	return false
-}
-
-func hitMenuSpanBool(spans []menuSpan, x, y int) bool {
-	_, ok := hitMenuSpan(spans, x, y)
-	return ok
+	return menuSpan{}, false
 }

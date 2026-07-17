@@ -173,6 +173,10 @@ type Model struct {
 
 	// hover tracks the row/item under the mouse for visual hover highlighting.
 	hover hoverState
+
+	// hoverShortcut is the key hint of the shortcut button currently under
+	// the mouse (in the help bar or status bar menu). Empty when none.
+	hoverShortcut string
 }
 
 // NewModel builds the initial model.
@@ -889,6 +893,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// its next tick when it sees !focused.
 		m.focused = false
 		m.hover.valid = false
+		m.hoverShortcut = ""
 		return m, nil
 
 	case pollMsg:
@@ -997,13 +1002,13 @@ func (m Model) contentHeight() int {
 func (m Model) statusBarHeight() int {
 	switch {
 	case m.bookmarkMode && m.bookmarkAction == "":
-		return len(wrapMenu(m.width, " [bookmark mode] ", colCyan, colPurple, " ", bookmarkMenuItems))
+		return len(wrapMenu(m.width, " [bookmark mode] ", colCyan, colPurple, nil, " ", bookmarkMenuItems, ""))
 	case m.tagMode && m.tagAction == "":
-		return len(wrapMenu(m.width, " [tag mode] ", colTeal, colPurple, " ", tagMenuItems))
+		return len(wrapMenu(m.width, " [tag mode] ", colTeal, colPurple, nil, " ", tagMenuItems, ""))
 	case m.gitMode && m.remoteMode && m.remoteAction == "":
-		return len(wrapMenu(m.width, " [git > remote] ", colPink, colPurple, " ", remoteMenuItems))
+		return len(wrapMenu(m.width, " [git > remote] ", colPink, colPurple, nil, " ", remoteMenuItems, ""))
 	case m.gitMode && !m.remoteMode:
-		return len(wrapMenu(m.width, " [git mode] ", colDarkOrange, colPurple, " ", gitMenuItems))
+		return len(wrapMenu(m.width, " [git mode] ", colDarkOrange, colPurple, nil, " ", gitMenuItems, ""))
 	default:
 		return 1
 	}
@@ -3308,7 +3313,7 @@ func (m Model) renderStatusBar() []string {
 // renderMenuRows renders a subcommand menu, wrapping onto extra rows when the
 // terminal is too narrow to fit all items on one line.
 func (m Model) renderMenuRows(prefix string, base, hl lipgloss.TerminalColor, items [][2]string) []string {
-	packed := wrapMenu(m.width, prefix, base, hl, " ", items)
+	packed := wrapMenu(m.width, prefix, base, hl, colDarkerGray, " ", items, m.hoverShortcut)
 	out := make([]string, len(packed))
 	for i, row := range packed {
 		out[i] = bgRow(m.width, colDarkerGray, row...)
@@ -3426,9 +3431,11 @@ var (
 // width, returning the segment slices per row. The first row is prefixed with
 // `prefix`; every subsequent (wrapped) row begins with a single leading space.
 // Items are separated by `sep`. base colors the item text, hl colors (and
-// underlines) the matched key substring. A lone item wider than the terminal is
-// allowed to overflow and is clipped by the caller.
-func wrapMenu(width int, prefix string, base, hl lipgloss.TerminalColor, sep string, items [][2]string) [][]seg {
+// underlines) the matched key substring. When an item's key matches hoverKey
+// and barBg is non-nil, the item's fg/bg are inverted (bg becomes base, fg
+// becomes barBg) so it reads as a hovered button. A lone item wider than the
+// terminal is allowed to overflow and is clipped by the caller.
+func wrapMenu(width int, prefix string, base, hl, barBg lipgloss.TerminalColor, sep string, items [][2]string, hoverKey string) [][]seg {
 	if width <= 1 {
 		return [][]seg{{}}
 	}
@@ -3460,7 +3467,15 @@ func wrapMenu(width int, prefix string, base, hl lipgloss.TerminalColor, sep str
 			cur = append(cur, seg{text: sep, fg: base})
 			curW += len(sep)
 		}
-		cur = append(cur, hlSegs([][2]string{it}, base, hl, "")...)
+		// On hover, invert fg/bg so the item reads as a pressed button.
+		itemBase := base
+		itemHl := hl
+		var itemBg lipgloss.TerminalColor
+		if it[1] == hoverKey && barBg != nil {
+			itemBase, itemBg = barBg, base
+			itemHl = barBg
+		}
+		cur = append(cur, hlSegs([][2]string{it}, itemBase, itemHl, "", itemBg)...)
 		curW += itemW
 		hasItem = true
 	}
@@ -3476,7 +3491,7 @@ func (m Model) helpBarHeight() int {
 	if items == nil {
 		return 0
 	}
-	return len(wrapMenu(m.width, " ", colTextMuted, colPurple, "  ", items))
+	return len(wrapMenu(m.width, " ", colTextMuted, colPurple, nil, "  ", items, ""))
 }
 
 // renderHelpBar renders the context-specific shortcut hints, wrapping onto
@@ -3486,7 +3501,7 @@ func (m Model) renderHelpBar() []string {
 	if items == nil {
 		return nil
 	}
-	packed := wrapMenu(m.width, " ", colTextMuted, colPurple, "  ", items)
+	packed := wrapMenu(m.width, " ", colTextMuted, colPurple, colPanel, "  ", items, m.hoverShortcut)
 	out := make([]string, len(packed))
 	for i, row := range packed {
 		out[i] = bgRow(m.width, colPanel, row...)
@@ -3494,24 +3509,24 @@ func (m Model) renderHelpBar() []string {
 	return out
 }
 
-func hlSegs(items [][2]string, base, hlc lipgloss.TerminalColor, sep string) []seg {
+func hlSegs(items [][2]string, base, hlc lipgloss.TerminalColor, sep string, bg lipgloss.TerminalColor) []seg {
 	var out []seg
 	for i, it := range items {
 		text, match := it[0], it[1]
 		idx := strings.Index(text, match)
 		if idx < 0 {
-			out = append(out, seg{text: text, fg: base})
+			out = append(out, seg{text: text, fg: base, bg: bg})
 		} else {
 			if idx > 0 {
-				out = append(out, seg{text: text[:idx], fg: base})
+				out = append(out, seg{text: text[:idx], fg: base, bg: bg})
 			}
-			out = append(out, seg{text: match, fg: hlc, underline: true})
+			out = append(out, seg{text: match, fg: hlc, underline: true, bg: bg})
 			if idx+len(match) < len(text) {
-				out = append(out, seg{text: text[idx+len(match):], fg: base})
+				out = append(out, seg{text: text[idx+len(match):], fg: base, bg: bg})
 			}
 		}
 		if i < len(items)-1 {
-			out = append(out, seg{text: sep, fg: base})
+			out = append(out, seg{text: sep, fg: base, bg: bg})
 		}
 	}
 	return out

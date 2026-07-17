@@ -192,4 +192,61 @@ func TestKeyMsgFromHint(t *testing.T) {
 	}
 }
 
+// TestShortcutHover verifies that moving the mouse over a help bar shortcut
+// sets the hoverShortcut field for visual highlighting.
+func TestShortcutHover(t *testing.T) {
+	m := mouseTestModel()
+	helpItems := m.helpBarItems()
+	spans := computeMenuSpans(m.width, " ", "  ", helpItems, m.helpBarStartY())
+
+	var dSpan menuSpan
+	for _, s := range spans {
+		if s.keyHint == "d" {
+			dSpan = s
+			break
+		}
+	}
+	if dSpan.keyHint == "" {
+		t.Fatal("no 'd' shortcut found in help bar")
+	}
+
+	m2, _ := m.Update(motion(dSpan.x1, dSpan.y))
+	m = m2.(Model)
+	if m.hoverShortcut != "d" {
+		t.Fatalf("hoverShortcut = %q, want 'd'", m.hoverShortcut)
+	}
+
+	// Move away — hover should clear.
+	m2, _ = m.Update(motion(0, 0))
+	m = m2.(Model)
+	if m.hoverShortcut != "" {
+		t.Fatalf("hoverShortcut = %q, want empty after moving away", m.hoverShortcut)
+	}
+}
+
+// TestShortcutHoverBookmarkMenu verifies hover works on status bar menu items
+// in sub-menu modes.
+func TestShortcutHoverBookmarkMenu(t *testing.T) {
+	m := mouseTestModel()
+	m.bookmarkMode = true
+	spans := computeMenuSpans(m.width, " [bookmark mode] ", " ", bookmarkMenuItems, m.statusBarStartY())
+
+	var cSpan menuSpan
+	for _, s := range spans {
+		if s.keyHint == "c" {
+			cSpan = s
+			break
+		}
+	}
+	if cSpan.keyHint == "" {
+		t.Fatal("no 'c' shortcut found in bookmark menu")
+	}
+
+	m2, _ := m.Update(motion(cSpan.x1, cSpan.y))
+	m = m2.(Model)
+	if m.hoverShortcut != "c" {
+		t.Fatalf("hoverShortcut = %q, want 'c'", m.hoverShortcut)
+	}
+}
+
 var _ tea.KeyMsg
