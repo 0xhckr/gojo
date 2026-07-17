@@ -76,16 +76,6 @@ func isElidedEdgeLine(s string) bool {
 	return strings.HasPrefix(s, "~")
 }
 
-// hasElidedEdgeLines reports whether an entry has any "~" elided edge lines.
-func hasElidedEdgeLines(e *jj.LogEntry) bool {
-	for _, el := range e.EdgeLines {
-		if isElidedEdgeLine(el) {
-			return true
-		}
-	}
-	return false
-}
-
 // logElidedAtContentY reports whether the content line at contentY (0-based,
 // relative to the top of the log list area) falls on a "~" elided edge line.
 // When it does, it returns the index of the entry the edge line belongs to.
@@ -144,6 +134,7 @@ func (m Model) handleLogClick(mouseY int) (tea.Model, tea.Cmd) {
 
 	// Check for a click on a "~" elided edge line first.
 	if _, elided := logElidedAtContentY(m.entries, focus, m.offset, contentY, m.contentHeight()); elided {
+		m.logEdgeCursor = -1
 		return m.toggleShowAllRev()
 	}
 
@@ -163,11 +154,13 @@ func (m Model) handleLogClick(mouseY int) (tea.Model, tea.Cmd) {
 	}
 	if idx == m.cursor {
 		if e := m.selectedEntry(); e != nil {
+			m.logEdgeCursor = -1
 			return m.openRevisionDiff(e.ChangeID, e.CommitID, e.ChangeIDPrefixLen, e.Subject)
 		}
 		return m, nil
 	}
 	m.cursor = idx
+	m.logEdgeCursor = -1
 	m.recomputeOffset()
 	return m, nil
 }

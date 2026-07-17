@@ -215,10 +215,9 @@ func TestViewBootAndLayout(t *testing.T) {
 	}
 }
 
-// TestEnterOnElidedEntryTogglesAllRevs verifies that pressing enter on an
-// entry with "~" elided edge lines toggles the all-revisions mode instead of
-// opening the diff.
-func TestEnterOnElidedEntryTogglesAllRevs(t *testing.T) {
+// TestEnterOnElidedEdgeLineTogglesAllRevs verifies that navigating down onto
+// a "~" elided edge line and pressing enter toggles the all-revisions mode.
+func TestEnterOnElidedEdgeLineTogglesAllRevs(t *testing.T) {
 	m := NewModel()
 	m.ready = true
 	m.width = 100
@@ -230,20 +229,55 @@ func TestEnterOnElidedEntryTogglesAllRevs(t *testing.T) {
 		{ChangeID: "bbbb1111", CommitID: "c0ffee02", Subject: "second"},
 	}
 
-	// Cursor is on entry 0 which has elided edge lines.
+	// Cursor starts on entry 0. Press j to step onto the ~ edge line.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if m.logEdgeCursor != 0 {
+		t.Fatalf("logEdgeCursor = %d, want 0 after stepping onto ~ line", m.logEdgeCursor)
+	}
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0 (should not have moved to next entry)", m.cursor)
+	}
+
+	// Now enter should toggle all-revisions, not open the diff.
 	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = m2.(Model)
 	if !m.showAllRev {
-		t.Fatal("enter on elided entry did not toggle showAllRev on")
+		t.Fatal("enter on ~ edge line did not toggle showAllRev on")
 	}
 	if m.diffOpen {
-		t.Error("enter on elided entry should not open the diff")
+		t.Error("enter on ~ edge line should not open the diff")
 	}
 	if m.message != "showing all revisions" {
 		t.Errorf("message = %q, want %q", m.message, "showing all revisions")
 	}
 	if cmd == nil {
 		t.Error("toggling showAllRev should produce a refresh command")
+	}
+}
+
+// TestEnterOnElidedEntryOpensDiff verifies that enter on an entry that has
+// elided edge lines but whose edge cursor is not active opens the diff as
+// usual (the toggle only happens when the ~ line is highlighted).
+func TestEnterOnElidedEntryOpensDiff(t *testing.T) {
+	m := NewModel()
+	m.ready = true
+	m.width = 100
+	m.height = 30
+	m.view = viewLog
+	m.entries = []jj.LogEntry{
+		{ChangeID: "aaaa0000", CommitID: "c0ffee01", Subject: "first",
+			EdgeLines: []string{"~  (elided revisions)"}},
+		{ChangeID: "bbbb1111", CommitID: "c0ffee02", Subject: "second"},
+	}
+
+	// logEdgeCursor is -1 (on the entry, not the edge line).
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = m2.(Model)
+	if !m.diffOpen {
+		t.Fatal("enter on entry with elided lines but no edge cursor should open the diff")
+	}
+	if m.showAllRev {
+		t.Error("enter on entry (not edge line) should not toggle showAllRev")
 	}
 }
 
@@ -267,6 +301,71 @@ func TestEnterOnNonElidedEntryOpensDiff(t *testing.T) {
 	}
 	if m.showAllRev {
 		t.Error("enter on non-elided entry should not toggle showAllRev")
+	}
+}
+
+// TestLogEdgeCursorNavigation verifies the j/k stepping onto and off of "~"
+// elided edge lines: j from entry → edge line, k from edge line → entry,
+// j from edge line → next entry, k from next entry → previous entry.
+func TestLogEdgeCursorNavigation(t *testing.T) {
+	m := NewModel()
+	m.ready = true
+	m.width = 100
+	m.height = 30
+	m.view = viewLog
+	m.entries = []jj.LogEntry{
+		{ChangeID: "aaaa0000", CommitID: "c0ffee01", Subject: "first",
+			EdgeLines: []string{"~  (elided revisions)"}},
+		{ChangeID: "bbbb1111", CommitID: "c0ffee02", Subject: "second"},
+	}
+
+	// j from entry 0 → step onto ~ edge line (cursor stays, edgeCursor=0).
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if m.cursor != 0 || m.logEdgeCursor != 0 {
+		t.Fatalf("after j onto ~: cursor=%d edgeCursor=%d, want 0/0", m.cursor, m.logEdgeCursor)
+	}
+
+	// k from edge line → back to entry (edgeCursor=-1, cursor stays).
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	if m.cursor != 0 || m.logEdgeCursor != -1 {
+		t.Fatalf("after k back: cursor=%d edgeCursor=%d, want 0/-1", m.cursor, m.logEdgeCursor)
+	}
+
+	// j onto edge line again, then j → next entry (cursor=1, edgeCursor=-1).
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if m.cursor != 1 || m.logEdgeCursor != -1 {
+		t.Fatalf("after j past ~: cursor=%d edgeCursor=%d, want 1/-1", m.cursor, m.logEdgeCursor)
+	}
+}
+
+// TestLogEdgeCursorResetsOnOtherKeys verifies that pressing any key other than
+// j/k/enter resets the edge cursor to -1.
+func TestLogEdgeCursorResetsOnOtherKeys(t *testing.T) {
+	m := NewModel()
+	m.ready = true
+	m.width = 100
+	m.height = 30
+	m.view = viewLog
+	m.entries = []jj.LogEntry{
+		{ChangeID: "aaaa0000", CommitID: "c0ffee01", Subject: "first",
+			EdgeLines: []string{"~  (elided revisions)"}},
+		{ChangeID: "bbbb1111", CommitID: "c0ffee02", Subject: "second"},
+	}
+
+	// Step onto ~ edge line.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if m.logEdgeCursor != 0 {
+		t.Fatalf("edgeCursor = %d, want 0", m.logEdgeCursor)
+	}
+
+	// Press 'd' (describe) — should reset edge cursor.
+	// (We can't actually run the editor, but the key should be handled and
+	// edge cursor reset.)
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m = m2.(Model)
+	if m.logEdgeCursor != -1 {
+		t.Errorf("edgeCursor = %d after non-nav key, want -1", m.logEdgeCursor)
 	}
 }
 

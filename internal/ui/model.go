@@ -50,6 +50,11 @@ type Model struct {
 	entries       []jj.LogEntry
 	cursor        int
 	offset        int
+	// logEdgeCursor is the index of the highlighted edge line within the
+	// selected entry, or -1 when the cursor is on the entry itself (header +
+	// body). Stepping j/k onto a "~" elided edge line sets this so enter can
+	// toggle all-revisions mode; any other key resets it to -1.
+	logEdgeCursor int
 	statusEntries []jj.StatusEntry
 	message       string
 	errMsg        string
@@ -188,11 +193,10 @@ type Model struct {
 func NewModel() Model {
 	cwd, _ := os.Getwd()
 	return Model{
-		view: viewLog,
-		cwd:  cwd,
-		home: os.Getenv("HOME"),
-		// Terminal is focused at launch and the OS may not emit an initial
-		// FocusMsg, so the poll loop (started in Init) runs from the start.
+		view:           viewLog,
+		cwd:            cwd,
+		home:           os.Getenv("HOME"),
+		logEdgeCursor:  -1,
 		focused:         true,
 		polling:         true,
 		aiLoading:       map[string]bool{},
@@ -982,6 +986,65 @@ func (m *Model) recomputeOffset() {
 	}
 	avail := m.contentHeight() - 1
 	m.offset, _ = logWindow(m.entries, cur, m.offset, avail)
+}
+
+// logMoveDown advances the log cursor: if the current entry has "~" elided
+// edge lines and the cursor is on the entry itself (-1), it steps onto the
+// first "~" line; otherwise it advances to the next entry and resets the
+// edge cursor.
+func (m *Model) logMoveDown() {
+	if len(m.entries) == 0 {
+		return
+	}
+	e := &m.entries[m.cursor]
+	if m.logEdgeCursor == -1 {
+		for i, el := range e.EdgeLines {
+			if isElidedEdgeLine(el) {
+				m.logEdgeCursor = i
+				m.recomputeOffset()
+				return
+			}
+		}
+	} else {
+		for i := m.logEdgeCursor + 1; i < len(e.EdgeLines); i++ {
+			if isElidedEdgeLine(e.EdgeLines[i]) {
+				m.logEdgeCursor = i
+				m.recomputeOffset()
+				return
+			}
+		}
+	}
+	if m.cursor < len(m.entries)-1 {
+		m.cursor++
+	}
+	m.logEdgeCursor = -1
+	m.recomputeOffset()
+}
+
+// logMoveUp is the mirror of logMoveDown: steps back from a "~" edge line to
+// the entry, or moves to the previous entry.
+func (m *Model) logMoveUp() {
+	if len(m.entries) == 0 {
+		return
+	}
+	if m.logEdgeCursor >= 0 {
+		e := &m.entries[m.cursor]
+		for i := m.logEdgeCursor - 1; i >= 0; i-- {
+			if isElidedEdgeLine(e.EdgeLines[i]) {
+				m.logEdgeCursor = i
+				m.recomputeOffset()
+				return
+			}
+		}
+		m.logEdgeCursor = -1
+		m.recomputeOffset()
+		return
+	}
+	if m.cursor > 0 {
+		m.cursor--
+	}
+	m.logEdgeCursor = -1
+	m.recomputeOffset()
 }
 
 // bottomBarHeight is the 1-line blank strip drawn below the help bar, coloured
@@ -1875,15 +1938,10 @@ func (m Model) handleWheel(dir int) (tea.Model, tea.Cmd) {
 	default:
 		// Log view.
 		if dir > 0 {
-			if m.cursor < len(m.entries)-1 {
-				m.cursor++
-			}
+			m.logMoveDown()
 		} else {
-			if m.cursor > 0 {
-				m.cursor--
-			}
+			m.logMoveUp()
 		}
-		m.recomputeOffset()
 	}
 
 	return m, nil
@@ -2334,18 +2392,19 @@ func (m Model) handleFileKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+	// Any key other than navigation and enter leaves the edge-line cursor.
+	switch k {
+	case "j", "down", "k", "up", "enter":
+	default:
+		m.logEdgeCursor = -1
+	}
+
 	switch k {
 	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-		m.recomputeOffset()
+		m.logMoveUp()
 		return m, nil
 	case "down", "j":
-		if m.cursor < len(m.entries)-1 {
-			m.cursor++
-		}
-		m.recomputeOffset()
+		m.logMoveDown()
 		return m, nil
 	case "home":
 		m.cursor = 0
@@ -2356,10 +2415,10 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		m.recomputeOffset()
 		return m, nil
 	case "enter":
+		if m.logEdgeCursor >= 0 {
+			return m.toggleShowAllRev()
+		}
 		if e := m.selectedEntry(); e != nil {
-			if hasElidedEdgeLines(e) {
-				return m.toggleShowAllRev()
-			}
 			return m.openRevisionDiff(e.ChangeID, e.CommitID, e.ChangeIDPrefixLen, e.Subject)
 		}
 		return m, nil
@@ -3188,7 +3247,7 @@ func (m Model) View() string {
 				destIdx:   m.bookmarkDrag.targetIdx,
 			}
 		}
-		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.aiLoading, m.spinnerFrame, rb, sq, bd, m.hover.logIdx)...)
+		lines = append(lines, renderLog(m.width, ch, m.entries, m.cursor, m.offset, m.logEdgeCursor, m.aiLoading, m.spinnerFrame, rb, sq, bd, m.hover.logIdx)...)
 	}
 
 	// Autocomplete suggestions.

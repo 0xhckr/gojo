@@ -11,10 +11,11 @@ import (
 // mouseTestModel builds a ready log-view model with three synthetic commits.
 func mouseTestModel() Model {
 	return Model{
-		ready:  true,
-		width:  100,
-		height: 30,
-		view:   viewLog,
+		ready:         true,
+		width:         100,
+		height:        30,
+		view:          viewLog,
+		logEdgeCursor: -1,
 		entries: []jj.LogEntry{
 			{ChangeID: "aaaa0000", CommitID: "c0ffee01", Subject: "first"},
 			{ChangeID: "bbbb1111", CommitID: "c0ffee02", Subject: "second"},

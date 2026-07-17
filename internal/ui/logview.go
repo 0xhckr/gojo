@@ -118,7 +118,7 @@ func scrollbarThumb(total, firstVis, visLines, trackH int) (int, int) {
 // renderLog produces up to height lines for the commit log. The content area
 // gets a subtle panel background, and a scrollbar indicator on the right edge
 // shows position when the log overflows.
-func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView, sq squashView, bd bookmarkDragView, hoverIdx int) []string {
+func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCursor int, aiLoading map[string]bool, spinnerFrame int, rb rebaseView, sq squashView, bd bookmarkDragView, hoverIdx int) []string {
 	if len(entries) == 0 {
 		return padLines([]string{bgRow(width, colPanel, seg{text: "  no revisions found", fg: colTextMuted})}, height, width)
 	}
@@ -167,8 +167,13 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 		e := entries[i]
 		highlighted := i == focus
 		hovered := i == hoverIdx && !highlighted
+		// When the edge cursor is active, the entry's header/body lose their
+		// highlight and the selected edge line gets it instead.
+		edgeHighlighted := highlighted && edgeCursor >= 0 && edgeCursor < len(e.EdgeLines)
 		var bg lipgloss.TerminalColor = colPanel
-		if highlighted {
+		if edgeHighlighted {
+			bg = colPanel
+		} else if highlighted {
 			bg = colElement
 		} else if hovered {
 			bg = colHover
@@ -250,11 +255,16 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset int, aiL
 		lines = append(lines, renderRowWithBar(scrollW, width, bg, hasBar, contentLine, thumbStart, thumbEnd, bs))
 		contentLine++
 
-		// Graph-only edge lines (merge connectors, elided "~" rows) always use
-		// the panel background, not the selection highlight.
-		edgeBg := colPanel
-		for _, edge := range e.EdgeLines {
-			lines = append(lines, renderRowWithBar(scrollW, width, edgeBg, hasBar, contentLine, thumbStart, thumbEnd, []seg{{text: " ", bg: edgeBg}, {text: edge, fg: colGraph, bg: edgeBg}}))
+		// Graph-only edge lines (merge connectors, elided "~" rows) use the
+		// panel background, except when the edge cursor highlights one.
+		for ei, edge := range e.EdgeLines {
+			edgeBg := colPanel
+			edgeFg := colGraph
+			if edgeHighlighted && ei == edgeCursor {
+				edgeBg = colElement
+				edgeFg = colText
+			}
+			lines = append(lines, renderRowWithBar(scrollW, width, edgeBg, hasBar, contentLine, thumbStart, thumbEnd, []seg{{text: " ", bg: edgeBg}, {text: edge, fg: edgeFg, bold: edgeHighlighted, bg: edgeBg}}))
 			contentLine++
 		}
 	}
