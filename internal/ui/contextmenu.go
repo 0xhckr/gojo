@@ -1,0 +1,645 @@
+package ui
+
+import (
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+)
+
+// contextMenuItem is one entry in the right-click context menu.
+type contextMenuItem struct {
+	label   string
+	keyHint string
+	action  func(Model) (tea.Model, tea.Cmd)
+}
+
+const (
+	contextMenuMinWidth = 24
+	contextMenuMaxHeight = 16
+	contextMenuHPadding  = 2 // one space on each side
+)
+
+// menuItem is a convenience constructor for contextMenuItem.
+func menuItem(label, keyHint string, action func(Model) (tea.Model, tea.Cmd)) contextMenuItem {
+	return contextMenuItem{label: label, keyHint: keyHint, action: action}
+}
+
+// openContextMenu builds and positions the context menu for the current view.
+// The clicked row is selected first (without activation) so the menu applies
+// to it.
+func (m *Model) openContextMenu(x, y int) {
+	items := m.buildContextMenuItems()
+	if len(items) == 0 {
+		return
+	}
+	mw := m.contextMenuWidth(items)
+	mh := min(len(items), contextMenuMaxHeight)
+
+	// Clamp position so the whole menu stays inside the terminal.
+	if x+mw > m.width {
+		x = m.width - mw
+	}
+	if x < 0 {
+		x = 0
+	}
+	contentBottom := contentTopBarHeight + m.contentHeight()
+	if y+mh > contentBottom {
+		y = contentBottom - mh
+	}
+	if y < contentTopBarHeight {
+		y = contentTopBarHeight
+	}
+
+	m.contextMenuOpen = true
+	m.contextMenuItems = items
+	m.contextMenuCursor = 0
+	m.contextMenuOffset = 0
+	m.contextMenuX = x
+	m.contextMenuY = y
+}
+
+// closeContextMenu dismisses the menu and clears its state.
+func (m *Model) closeContextMenu() {
+	m.contextMenuOpen = false
+	m.contextMenuItems = nil
+	m.contextMenuCursor = 0
+	m.contextMenuOffset = 0
+	m.contextMenuX = 0
+	m.contextMenuY = 0
+}
+
+// contextMenuWidth returns the rendered width of the menu, capped to the
+// terminal width.
+func (m Model) contextMenuWidth(items []contextMenuItem) int {
+	maxW := contextMenuMinWidth
+	for _, it := range items {
+		w := lipgloss.Width(it.label) + lipgloss.Width(it.keyHint) + contextMenuHPadding*2 + 1
+		if w > maxW {
+			maxW = w
+		}
+	}
+	if maxW > m.width {
+		maxW = m.width
+	}
+	return maxW
+}
+
+// openContextMenuCmd is the MouseMsg handler entry point for right-clicks.
+func (m Model) openContextMenuCmd(x, y int) (tea.Model, tea.Cmd) {
+	if !m.ready || m.modalInputActive() {
+		return m, nil
+	}
+	// Right-clicking while the menu is open closes it.
+	if m.contextMenuOpen {
+		m.closeContextMenu()
+		return m, nil
+	}
+	// Select the row under the click (but do not activate it).
+	if x < m.width-scrollbarWidth {
+		m = m.rightClickSelect(y)
+	}
+	m.openContextMenu(x, y)
+	return m, nil
+}
+
+// buildContextMenuItems returns the context-sensitive actions for the current
+// view/state.
+func (m Model) buildContextMenuItems() []contextMenuItem {
+	switch {
+	case m.rebaseMode:
+		return m.rebaseContextMenuItems()
+	case m.squashMode:
+		return m.squashContextMenuItems()
+	case m.diffOpen && m.splitMode:
+		return m.splitContextMenuItems()
+	case m.diffOpen:
+		return m.diffContextMenuItems()
+	case m.view == viewFile:
+		switch m.fileView.phase {
+		case fileBlame:
+			return m.blameContextMenuItems()
+		case fileHistory:
+			return m.historyContextMenuItems()
+		default:
+			return m.pickerContextMenuItems()
+		}
+	case m.view == viewHelp:
+		return m.helpContextMenuItems()
+	default:
+		return m.logContextMenuItems()
+	}
+}
+
+// rightClickSelect moves the cursor/selection to the row under the click
+// without activating it, mirroring the left-click selection logic.
+func (m Model) rightClickSelect(mouseY int) Model {
+	switch {
+	case m.diffOpen:
+		return m.rightClickSelectDiff(mouseY)
+	case m.view == viewFile:
+		switch m.fileView.phase {
+		case fileBlame:
+			return m.rightClickSelectBlame(mouseY)
+		case fileHistory:
+			return m.rightClickSelectHistory(mouseY)
+		default:
+			return m.rightClickSelectPicker(mouseY)
+		}
+	case m.view == viewHelp:
+		return m
+	default:
+		return m.rightClickSelectLog(mouseY)
+	}
+}
+
+// rightClickSelectLog selects the commit under the mouse in the log view (or
+// the rebase/squash destination indicator when those modes are active).
+func (m Model) rightClickSelectLog(mouseY int) Model {
+	focus := m.cursor
+	if m.rebaseMode {
+		focus = m.rebaseDest
+	}
+	if m.squashMode {
+		focus = m.squashDest
+	}
+	idx, ok := logEntryAtContentY(m.entries, focus, m.offset, mouseY-contentTopBarHeight, m.contentHeight())
+	if !ok {
+		return m
+	}
+	if m.rebaseMode {
+		m.rebaseDest = idx
+		m.recomputeOffset()
+		return m
+	}
+	if m.squashMode {
+		m.squashDest = idx
+		m.recomputeOffset()
+		return m
+	}
+	m.cursor = idx
+	m.recomputeOffset()
+	return m
+}
+
+// rightClickSelectDiff moves the diff chunk cursor to the row under the mouse.
+func (m Model) rightClickSelectDiff(mouseY int) Model {
+	rowIdx, ok := m.diffRowAtMouseY(mouseY)
+	if !ok {
+		return m
+	}
+	m.setDiffCursorToRow(rowIdx)
+	return m
+}
+
+// rightClickSelectPicker moves the file-picker cursor to the row under the
+// mouse, including the fzf overlay.
+func (m Model) rightClickSelectPicker(mouseY int) Model {
+	fv := &m.fileView
+	rowIdx := mouseY - contentTopBarHeight - 1
+	if rowIdx < 0 {
+		return m
+	}
+	if fv.fzfActive {
+		resIdx := rowIdx - 2
+		if resIdx < 0 {
+			return m
+		}
+		contentH := m.contentHeight() - 3
+		if contentH < 0 {
+			contentH = 0
+		}
+		start, end := fv.fzfVisibleRange(contentH)
+		i := start + resIdx
+		if i >= end || i >= len(fv.fzfResults) {
+			return m
+		}
+		fv.fzfCursor = i
+		return m
+	}
+	contentH := m.contentHeight() - 1
+	if contentH < 0 {
+		contentH = 0
+	}
+	start, end := fv.pickerVisibleRange(contentH)
+	i := start + rowIdx
+	if i >= end || i >= len(fv.rows) {
+		return m
+	}
+	fv.cursor = i
+	return m
+}
+
+// rightClickSelectBlame moves the blame cursor to the source line under the
+// mouse.
+func (m Model) rightClickSelectBlame(mouseY int) Model {
+	fv := &m.fileView
+	if fv.err != "" || len(fv.lines) == 0 {
+		return m
+	}
+	bodyLine := mouseY - contentTopBarHeight - 1 - 3
+	if bodyLine < 0 {
+		return m
+	}
+	bodyH := fileViewContentH(m)
+	layout := fv.blameLayout
+	if !fv.blameCacheValid(m.width, bodyH) {
+		fv.buildBlameCache(m.width, bodyH)
+		layout = fv.blameLayout
+	}
+	if len(layout.starts) == 0 {
+		return m
+	}
+	cursorY := min(fv.cursorY, len(fv.lines)-1)
+	cursorBodyRow := -1
+	if cursorY >= 0 && cursorY < len(layout.starts) {
+		cursorBodyRow = layout.starts[cursorY]
+	}
+	termScrollY := 0
+	if cursorBodyRow >= 0 {
+		termScrollY = cursorBodyRow - bodyH/2
+	}
+	termScrollY = max(0, min(termScrollY, max(0, layout.total-bodyH)))
+	rowIdx, _ := layout.rowAt(bodyLine + termScrollY)
+	if rowIdx < 0 || rowIdx >= len(fv.lines) {
+		return m
+	}
+	fv.cursorY = rowIdx
+	return m
+}
+
+// rightClickSelectHistory selects the commit under the mouse in the file
+// history view.
+func (m Model) rightClickSelectHistory(mouseY int) Model {
+	fv := &m.fileView
+	contentY := mouseY - contentTopBarHeight - 1
+	idx, ok := logEntryAtContentY(fv.hist, fv.histCur, fv.histOff, contentY, m.contentHeight()-1)
+	if !ok {
+		return m
+	}
+	fv.histCur = idx
+	m.recomputeFileHistOffset()
+	return m
+}
+
+// handleContextMenuKey drives keyboard navigation and activation while the
+// context menu is open.
+func (m Model) handleContextMenuKey(k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "esc", "q":
+		m.closeContextMenu()
+		return m, nil
+	case "enter":
+		return m.activateContextMenuItem()
+	case "up", "k":
+		if m.contextMenuCursor > 0 {
+			m.contextMenuCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.contextMenuCursor < len(m.contextMenuItems)-1 {
+			m.contextMenuCursor++
+		}
+		return m, nil
+	case "home", "g":
+		m.contextMenuCursor = 0
+		return m, nil
+	case "end", "G":
+		m.contextMenuCursor = len(m.contextMenuItems) - 1
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleContextMenuMouse handles mouse events while the menu is open: item
+// hover/click, wheel scrolling, and dismissal on clicks outside the menu.
+func (m Model) handleContextMenuMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	mw := m.contextMenuWidth(m.contextMenuItems)
+	mh := min(len(m.contextMenuItems), contextMenuMaxHeight)
+	inMenu := msg.X >= m.contextMenuX && msg.X < m.contextMenuX+mw &&
+		msg.Y >= m.contextMenuY && msg.Y < m.contextMenuY+mh
+
+	switch msg.Action {
+	case tea.MouseActionPress:
+		switch msg.Button {
+		case tea.MouseButtonLeft:
+			if inMenu {
+				idx := m.contextMenuOffset + (msg.Y - m.contextMenuY)
+				if idx >= 0 && idx < len(m.contextMenuItems) {
+					m.contextMenuCursor = idx
+					return m.activateContextMenuItem()
+				}
+			}
+			m.closeContextMenu()
+			return m, nil
+		case tea.MouseButtonRight:
+			m.closeContextMenu()
+			return m, nil
+		case tea.MouseButtonWheelUp:
+			if m.contextMenuCursor > 0 {
+				m.contextMenuCursor--
+			}
+			return m, nil
+		case tea.MouseButtonWheelDown:
+			if m.contextMenuCursor < len(m.contextMenuItems)-1 {
+				m.contextMenuCursor++
+			}
+			return m, nil
+		}
+	case tea.MouseActionMotion:
+		if inMenu {
+			idx := m.contextMenuOffset + (msg.Y - m.contextMenuY)
+			if idx >= 0 && idx < len(m.contextMenuItems) {
+				m.contextMenuCursor = idx
+			}
+		}
+	}
+	return m, nil
+}
+
+// activateContextMenuItem executes the currently selected menu item and closes
+// the menu.
+func (m Model) activateContextMenuItem() (tea.Model, tea.Cmd) {
+	if m.contextMenuCursor < 0 || m.contextMenuCursor >= len(m.contextMenuItems) {
+		return m, nil
+	}
+	item := m.contextMenuItems[m.contextMenuCursor]
+	m.closeContextMenu()
+	return item.action(m)
+}
+
+// renderContextMenu overlays the open menu onto the rendered lines.
+func (m Model) renderContextMenu(lines []string) []string {
+	if !m.contextMenuOpen || len(m.contextMenuItems) == 0 {
+		return lines
+	}
+	mw := m.contextMenuWidth(m.contextMenuItems)
+	mh := min(len(m.contextMenuItems), contextMenuMaxHeight)
+
+	// Keep the cursor inside the visible window.
+	if m.contextMenuCursor < m.contextMenuOffset {
+		m.contextMenuOffset = m.contextMenuCursor
+	}
+	if m.contextMenuCursor >= m.contextMenuOffset+mh {
+		m.contextMenuOffset = m.contextMenuCursor - mh + 1
+	}
+
+	for i := 0; i < mh; i++ {
+		idx := m.contextMenuOffset + i
+		if idx >= len(m.contextMenuItems) {
+			break
+		}
+		row := m.contextMenuY + i
+		if row < 0 || row >= len(lines) {
+			break
+		}
+		item := m.contextMenuItems[idx]
+		selected := idx == m.contextMenuCursor
+		menuLine := m.renderContextMenuItem(mw, item, selected)
+
+		// Splice the menu line into the underlying rendered row.
+		left := ansi.Truncate(lines[row], m.contextMenuX, "")
+		right := ansi.TruncateLeft(lines[row], m.contextMenuX+mw, "")
+		lines[row] = left + menuLine + right
+	}
+	return lines
+}
+
+// renderContextMenuItem renders a single menu row of width mw.
+func (m Model) renderContextMenuItem(mw int, item contextMenuItem, selected bool) string {
+	bg := colPanel
+	fg := colText
+	if selected {
+		bg = colElement
+		fg = colYellow
+	}
+	keyW := lipgloss.Width(item.keyHint)
+	labelW := mw - keyW - contextMenuHPadding*2
+	label := item.label
+	if lipgloss.Width(label) > labelW {
+		label = ansi.Truncate(label, labelW, "…")
+	}
+	pad := labelW - lipgloss.Width(label)
+	if pad < 0 {
+		pad = 0
+	}
+	return bgRow(mw, bg,
+		seg{text: " " + label + strings.Repeat(" ", pad) + " ", fg: fg, bg: bg},
+		seg{text: item.keyHint + " ", fg: colGray, bg: bg},
+	)
+}
+
+// ── Per-view context menu builders ──────────────────────────────────────────
+
+func (m Model) logContextMenuItems() []contextMenuItem {
+	var items []contextMenuItem
+	hasSel := m.selectedEntry() != nil
+
+	if hasSel {
+		items = append(items, menuItem("open diff", "enter", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleLogKey(tea.KeyMsg{Type: tea.KeyEnter}, "enter")
+		}))
+	}
+	if hasSel {
+		items = append(items, menuItem("describe", "d", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}, "d")
+		}))
+	}
+	if hasSel {
+		items = append(items, menuItem("AI describe", "D", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}, "D")
+		}))
+	}
+	if hasSel {
+		items = append(items, menuItem("edit", "e", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}}, "e")
+		}))
+	}
+	items = append(items, menuItem("new change", "n", func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}, "n")
+	}))
+	if hasSel {
+		items = append(items, menuItem("abandon", "a", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}, "a")
+		}))
+	}
+	if hasSel {
+		items = append(items, menuItem("absorb", "x", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}, "x")
+		}))
+	}
+	items = append(items, menuItem("rebase", "r", func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}, "r")
+	}))
+	items = append(items, menuItem("squash", "s", func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}, "s")
+	}))
+	items = append(items, menuItem("bookmark", "b", func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}}, "b")
+	}))
+	items = append(items, menuItem("tag", "t", func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}}, "t")
+	}))
+	items = append(items, menuItem("git", "g", func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}}, "g")
+	}))
+	items = append(items, menuItem("file view", "f", func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}}, "f")
+	}))
+	items = append(items, menuItem("toggle all revisions", "A", func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}}, "A")
+	}))
+	items = append(items, menuItem("undo", "u", func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}}, "u")
+	}))
+	items = append(items, menuItem("redo", "R", func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}}, "R")
+	}))
+	return items
+}
+
+func (m Model) rebaseContextMenuItems() []contextMenuItem {
+	return []contextMenuItem{
+		menuItem("confirm rebase", "enter", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleRebaseKey("enter")
+		}),
+		menuItem("toggle scope", "s", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleRebaseKey("s")
+		}),
+		menuItem("cycle placement", "tab", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleRebaseKey("tab")
+		}),
+		menuItem("cancel", "esc", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleRebaseKey("esc")
+		}),
+	}
+}
+
+func (m Model) squashContextMenuItems() []contextMenuItem {
+	return []contextMenuItem{
+		menuItem("confirm squash", "enter", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleSquashKey("enter")
+		}),
+		menuItem("cancel", "esc", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleSquashKey("esc")
+		}),
+	}
+}
+
+func (m Model) diffContextMenuItems() []contextMenuItem {
+	var items []contextMenuItem
+	items = append(items, menuItem("close diff", "q", func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleDiffKey("q")
+	}))
+	if m.diffIsRevision && m.diffRev != "" {
+		items = append(items, menuItem("describe", "d", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleDiffKey("d")
+		}))
+		items = append(items, menuItem("AI describe", "D", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleDiffKey("D")
+		}))
+		items = append(items, menuItem("new change", "n", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleDiffKey("n")
+		}))
+		items = append(items, menuItem("split", "s", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleDiffKey("s")
+		}))
+		items = append(items, menuItem("absorb", "x", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleDiffKey("x")
+		}))
+	}
+	if fileIdx, ok := m.cursorFileHeader(); ok {
+		path := m.diffRows[fileIdx].path
+		collapsed := m.diffCollapsed != nil && m.diffCollapsed[path]
+		if collapsed {
+			items = append(items, menuItem("expand file", "l", func(m Model) (tea.Model, tea.Cmd) {
+				return m.handleDiffKey("l")
+			}))
+		} else {
+			items = append(items, menuItem("collapse file", "h", func(m Model) (tea.Model, tea.Cmd) {
+				return m.handleDiffKey("h")
+			}))
+		}
+	}
+	return items
+}
+
+func (m Model) splitContextMenuItems() []contextMenuItem {
+	return []contextMenuItem{
+		menuItem("toggle mark", "space", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleSplitKey(" ")
+		}),
+		menuItem("confirm split", "c", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleSplitKey("c")
+		}),
+		menuItem("cancel", "q", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleSplitKey("q")
+		}),
+	}
+}
+
+func (m Model) pickerContextMenuItems() []contextMenuItem {
+	fv := &m.fileView
+	if fv.fzfActive {
+		var items []contextMenuItem
+		if fv.fzfCursor >= 0 && fv.fzfCursor < len(fv.fzfResults) {
+			items = append(items, menuItem("open file", "enter", func(m Model) (tea.Model, tea.Cmd) {
+				return m.handleFzfKey(tea.KeyMsg{Type: tea.KeyEnter}, "enter")
+			}))
+		}
+		items = append(items, menuItem("close finder", "esc", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleFzfKey(tea.KeyMsg{Type: tea.KeyEscape}, "esc")
+		}))
+		return items
+	}
+	var items []contextMenuItem
+	if row := fv.curRow(); row != nil {
+		if row.node.isDir {
+			items = append(items, menuItem("expand/collapse", "enter", func(m Model) (tea.Model, tea.Cmd) {
+				return m.handleFilePickerKey(tea.KeyMsg{Type: tea.KeyEnter}, "enter")
+			}))
+		} else {
+			items = append(items, menuItem("open file", "enter", func(m Model) (tea.Model, tea.Cmd) {
+				return m.handleFilePickerKey(tea.KeyMsg{Type: tea.KeyEnter}, "enter")
+			}))
+		}
+	}
+	items = append(items, menuItem("leave file view", "q", func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleFilePickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}, "q")
+	}))
+	return items
+}
+
+func (m Model) blameContextMenuItems() []contextMenuItem {
+	return []contextMenuItem{
+		menuItem("open commit", "enter", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleFileBlameKey("enter")
+		}),
+		menuItem("file history", "h", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleFileBlameKey("h")
+		}),
+		menuItem("back", "q", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleFileBlameKey("q")
+		}),
+	}
+}
+
+func (m Model) historyContextMenuItems() []contextMenuItem {
+	return []contextMenuItem{
+		menuItem("open commit", "enter", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleFileHistoryKey("enter")
+		}),
+		menuItem("back", "q", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleFileHistoryKey("q")
+		}),
+	}
+}
+
+func (m Model) helpContextMenuItems() []contextMenuItem {
+	return []contextMenuItem{
+		menuItem("close help", "q", func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleHelpKey("q"), nil
+		}),
+	}
+}

@@ -31,6 +31,7 @@ var helpSections = []helpSection{
 		{"click file header", "diff: toggle collapse · split: toggle file"},
 		{"click diff line", "split: toggle mark · diff: move cursor"},
 		{"drag scrollbar", "scroll any view"},
+		{"right-click", "open context menu"},
 	}},
 	{title: "Log View", color: colBlue, bindings: []helpBinding{
 		{"↑/k, ↓/j", "navigate commits"},

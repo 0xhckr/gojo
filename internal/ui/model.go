@@ -161,6 +161,15 @@ type Model struct {
 	// scrollbar thumb. Set on MouseActionPress inside the scrollbar area,
 	// cleared on MouseActionRelease.
 	scrollDragging bool
+
+	// contextMenuOpen is true while the right-click context menu is displayed.
+	// The menu is built per-view and rendered as a floating overlay.
+	contextMenuOpen   bool
+	contextMenuItems  []contextMenuItem
+	contextMenuCursor int
+	contextMenuOffset int
+	contextMenuX      int
+	contextMenuY      int
 }
 
 // NewModel builds the initial model.
@@ -925,6 +934,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
+		if m.contextMenuOpen {
+			return m.handleContextMenuMouse(msg)
+		}
 		return m.handleMouse(msg)
 
 	case tea.KeyMsg:
@@ -1429,6 +1441,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// The context menu captures input while open.
+	if m.contextMenuOpen {
+		return m.handleContextMenuKey(k)
+	}
+
 	// A pending elevation prompt captures all keys until answered.
 	if m.pendingElev != nil {
 		return m.handleElevKey(k)
@@ -1525,6 +1542,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m.handleWheel(-1)
 		case tea.MouseButtonWheelDown:
 			return m.handleWheel(1)
+		case tea.MouseButtonRight:
+			return m.openContextMenuCmd(msg.X, msg.Y)
 		}
 	}
 
@@ -3071,6 +3090,10 @@ func (m Model) View() string {
 	lines = append(lines, m.renderStatusBar()...)
 	lines = append(lines, m.renderHelpBar()...)
 	lines = append(lines, blankRow(m.width, colPanel))
+
+	if m.contextMenuOpen {
+		lines = m.renderContextMenu(lines)
+	}
 
 	return strings.Join(padLines(lines, m.height, m.width), "\n")
 }
