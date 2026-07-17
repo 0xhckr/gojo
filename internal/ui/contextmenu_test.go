@@ -99,6 +99,29 @@ func TestContextMenuEnterActivates(t *testing.T) {
 	}
 }
 
+// TestContextMenuMouseClickItem verifies that clicking a menu item via mouse
+// activates it, accounting for the border offset (items start one row below
+// the top border).
+func TestContextMenuMouseClickItem(t *testing.T) {
+	m := mouseTestModel()
+	m2, _ := m.Update(rightClick(10, 5))
+	m = m2.(Model)
+
+	// The first item is at contextMenuY + 1 (below the top border).
+	itemY := m.contextMenuY + 1
+	m2, cmd := m.Update(leftClick(m.contextMenuX+1, itemY))
+	m = m2.(Model)
+	if m.contextMenuOpen {
+		t.Fatal("menu stayed open after mouse activation")
+	}
+	if !m.diffOpen {
+		t.Fatal("clicking first menu item did not open the diff panel")
+	}
+	if cmd == nil {
+		t.Error("mouse activation did not produce a load command")
+	}
+}
+
 // TestContextMenuDownNavigation verifies the down arrow moves the cursor
 // through the menu.
 func TestContextMenuDownNavigation(t *testing.T) {

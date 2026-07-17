@@ -31,7 +31,6 @@ type contextMenuItem struct {
 const (
 	contextMenuMinWidth  = 24
 	contextMenuMaxHeight = 16
-	contextMenuHPadding  = 2 // one space on each side
 )
 
 // menuItem is a convenience constructor for contextMenuItem.
@@ -50,16 +49,20 @@ func (m *Model) openContextMenu(x, y int) {
 	mw := m.contextMenuWidth(items)
 	mh := min(len(items), contextMenuMaxHeight)
 
+	// The border adds one cell on each side (left/right) and one row on
+	// top/bottom.
+	fw, fh := mw+2, mh+2
+
 	// Clamp position so the whole menu stays inside the terminal.
-	if x+mw > m.width {
-		x = m.width - mw
+	if x+fw > m.width {
+		x = m.width - fw
 	}
 	if x < 0 {
 		x = 0
 	}
 	contentBottom := contentTopBarHeight + m.contentHeight()
-	if y+mh > contentBottom {
-		y = contentBottom - mh
+	if y+fh > contentBottom {
+		y = contentBottom - fh
 	}
 	if y < contentTopBarHeight {
 		y = contentTopBarHeight
@@ -83,18 +86,20 @@ func (m *Model) closeContextMenu() {
 	m.contextMenuY = 0
 }
 
-// contextMenuWidth returns the rendered width of the menu, capped to the
-// terminal width.
+// contextMenuWidth returns the rendered inner width of the menu (excluding
+// borders), capped to the terminal width.
 func (m Model) contextMenuWidth(items []contextMenuItem) int {
 	maxW := contextMenuMinWidth
 	for _, it := range items {
-		w := lipgloss.Width(it.label) + lipgloss.Width(it.keyHint) + contextMenuHPadding*2 + 1
+		// Inner layout: " " + label + " " + keyHint + " " = label + key + 3.
+		w := lipgloss.Width(it.label) + lipgloss.Width(it.keyHint) + 3
 		if w > maxW {
 			maxW = w
 		}
 	}
-	if maxW > m.width {
-		maxW = m.width
+	// Reserve 2 columns for the left/right borders.
+	if maxW > m.width-2 {
+		maxW = m.width - 2
 	}
 	return maxW
 }
@@ -327,21 +332,29 @@ func (m Model) handleContextMenuKey(k string) (tea.Model, tea.Cmd) {
 
 // handleContextMenuMouse handles mouse events while the menu is open: item
 // hover/click, wheel scrolling, and dismissal on clicks outside the menu.
+// The menu's clickable item area starts one row below the top border and one
+// column inside the left/right borders.
 func (m Model) handleContextMenuMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	mw := m.contextMenuWidth(m.contextMenuItems)
 	mh := min(len(m.contextMenuItems), contextMenuMaxHeight)
-	inMenu := msg.X >= m.contextMenuX && msg.X < m.contextMenuX+mw &&
-		msg.Y >= m.contextMenuY && msg.Y < m.contextMenuY+mh
+	menuTop := m.contextMenuY
+	menuBottom := m.contextMenuY + mh + 1 // +1 top border, inclusive bottom border
+	menuRight := m.contextMenuX + mw + 2
+	inMenu := msg.X >= m.contextMenuX && msg.X < menuRight &&
+		msg.Y >= menuTop && msg.Y <= menuBottom
 
 	switch msg.Action {
 	case tea.MouseActionPress:
 		switch msg.Button {
 		case tea.MouseButtonLeft:
 			if inMenu {
-				idx := m.contextMenuOffset + (msg.Y - m.contextMenuY)
-				if idx >= 0 && idx < len(m.contextMenuItems) {
-					m.contextMenuCursor = idx
-					return m.activateContextMenuItem()
+				itemY := msg.Y - m.contextMenuY - 1 // -1 for top border
+				if itemY >= 0 && itemY < mh {
+					idx := m.contextMenuOffset + itemY
+					if idx >= 0 && idx < len(m.contextMenuItems) {
+						m.contextMenuCursor = idx
+						return m.activateContextMenuItem()
+					}
 				}
 			}
 			m.closeContextMenu()
@@ -362,9 +375,12 @@ func (m Model) handleContextMenuMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	case tea.MouseActionMotion:
 		if inMenu {
-			idx := m.contextMenuOffset + (msg.Y - m.contextMenuY)
-			if idx >= 0 && idx < len(m.contextMenuItems) {
-				m.contextMenuCursor = idx
+			itemY := msg.Y - m.contextMenuY - 1
+			if itemY >= 0 && itemY < mh {
+				idx := m.contextMenuOffset + itemY
+				if idx >= 0 && idx < len(m.contextMenuItems) {
+					m.contextMenuCursor = idx
+				}
 			}
 		}
 	}
@@ -382,7 +398,8 @@ func (m Model) activateContextMenuItem() (tea.Model, tea.Cmd) {
 	return item.action(m)
 }
 
-// renderContextMenu overlays the open menu onto the rendered lines.
+// renderContextMenu overlays the open menu onto the rendered lines. The menu
+// is drawn with a thin border: ┌─┐ top, │ │ sides, └─┘ bottom.
 func (m Model) renderContextMenu(lines []string) []string {
 	if !m.contextMenuOpen || len(m.contextMenuItems) == 0 {
 		return lines
@@ -398,28 +415,53 @@ func (m Model) renderContextMenu(lines []string) []string {
 		m.contextMenuOffset = m.contextMenuCursor - mh + 1
 	}
 
+	fw := mw + 2 // full width including borders
+
+	// Top border: ┌───┐
+	m.overlayMenuLine(lines, m.contextMenuY, m.contextMenuX, fw,
+		bgRow(fw, colPanel,
+			seg{text: "┌" + strings.Repeat("─", mw) + "┐", fg: colBorder, bg: colPanel},
+		))
+
+	// Item rows.
 	for i := 0; i < mh; i++ {
 		idx := m.contextMenuOffset + i
 		if idx >= len(m.contextMenuItems) {
 			break
 		}
-		row := m.contextMenuY + i
+		row := m.contextMenuY + 1 + i
 		if row < 0 || row >= len(lines) {
 			break
 		}
 		item := m.contextMenuItems[idx]
 		selected := idx == m.contextMenuCursor
 		menuLine := m.renderContextMenuItem(mw, item, selected)
-
-		// Splice the menu line into the underlying rendered row.
-		left := ansi.Truncate(lines[row], m.contextMenuX, "")
-		right := ansi.TruncateLeft(lines[row], m.contextMenuX+mw, "")
-		lines[row] = left + menuLine + right
+		m.overlayMenuLine(lines, row, m.contextMenuX, fw, menuLine)
 	}
+
+	// Bottom border: └───┘
+	m.overlayMenuLine(lines, m.contextMenuY+1+mh, m.contextMenuX, fw,
+		bgRow(fw, colPanel,
+			seg{text: "└" + strings.Repeat("─", mw) + "┘", fg: colBorder, bg: colPanel},
+		))
+
 	return lines
 }
 
-// renderContextMenuItem renders a single menu row of width mw.
+// overlayMenuLine splices a rendered menu line (of width w) into an existing
+// terminal line at column x. The line is clipped/padded as needed.
+func (m Model) overlayMenuLine(lines []string, row, x, w int, menuLine string) []string {
+	if row < 0 || row >= len(lines) {
+		return lines
+	}
+	left := ansi.Truncate(lines[row], x, "")
+	right := ansi.TruncateLeft(lines[row], x+w, "")
+	lines[row] = left + menuLine + right
+	return lines
+}
+
+// renderContextMenuItem renders a single menu row of inner width mw, flanked
+// by left/right border characters. Inner layout: " " + label + " " + key + " ".
 func (m Model) renderContextMenuItem(mw int, item contextMenuItem, selected bool) string {
 	bg := colPanel
 	fg := colText
@@ -428,7 +470,7 @@ func (m Model) renderContextMenuItem(mw int, item contextMenuItem, selected bool
 		fg = colYellow
 	}
 	keyW := lipgloss.Width(item.keyHint)
-	labelW := mw - keyW - contextMenuHPadding*2
+	labelW := mw - keyW - 3 // 3 padding columns: space, space, space
 	label := item.label
 	if lipgloss.Width(label) > labelW {
 		label = ansi.Truncate(label, labelW, "…")
@@ -437,9 +479,11 @@ func (m Model) renderContextMenuItem(mw int, item contextMenuItem, selected bool
 	if pad < 0 {
 		pad = 0
 	}
-	return bgRow(mw, bg,
+	return bgRow(mw+2, bg,
+		seg{text: "│", fg: colBorder, bg: colPanel},
 		seg{text: " " + label + strings.Repeat(" ", pad) + " ", fg: fg, bg: bg},
 		seg{text: item.keyHint + " ", fg: colGray, bg: bg},
+		seg{text: "│", fg: colBorder, bg: colPanel},
 	)
 }
 
