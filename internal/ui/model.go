@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -72,8 +73,9 @@ type Model struct {
 	diffDesc       string // revision description shown above the status section
 	diffStatus     []jj.StatusEntry
 	diffRows       []diffRow
-	diffDigits     int // gutter width, computed once when the diff loads
-	diffRaw        string
+	diffDigits     int    // gutter width, computed once when the diff loads
+	diffRaw        string // raw list-view content (non-revision diffs)
+	diffSrcRaw     string // git-format diff text behind diffRows (revision diffs)
 	diffScrollY    int
 
 	// diffCollapsed tracks which file diffs are collapsed, keyed by file path.
@@ -92,10 +94,14 @@ type Model struct {
 	// Chunk cursor — navigates change chunks (contiguous add/del runs) in the
 	// diff panel. diffChunks holds body-row indices per chunk; diffCurChunk /
 	// diffCurLine track the focused line. Empty when the diff has no chunks or
-	// is showing raw list output.
-	diffChunks   [][]int
-	diffCurChunk int
-	diffCurLine  int
+	// is showing raw list output. diffChunksHead records the diffHeadLen() the
+	// chunk indices were computed against — chunk rows embed the head length,
+	// so head-length changes (status resize, AI spinner showing) invalidate
+	// them.
+	diffChunks     [][]int
+	diffCurChunk   int
+	diffCurLine    int
+	diffChunksHead int
 
 	helpScrollY int
 
@@ -240,6 +246,12 @@ type diffLoadedMsg struct {
 	status []jj.StatusEntry
 	rows   []diffRow
 	err    error
+	// raw is the git-format diff text the rows were built from; kept on the
+	// model so refresh reloads can be cheaply detected as unchanged.
+	raw string
+	// unchanged means the reload produced identical content to what is
+	// already displayed; rows/raw/desc are unset and must be preserved.
+	unchanged bool
 }
 
 type actionDoneMsg struct {
@@ -355,18 +367,28 @@ func boot() tea.Msg {
 func (m Model) refreshCmd() tea.Cmd {
 	r := m.runner
 	return func() tea.Msg {
+		// jj log and jj status are independent subprocesses; run them
+		// concurrently to halve the latency of each refresh.
 		var (
 			entries []jj.LogEntry
 			logErr  error
+			status  []jj.StatusEntry
+			statErr error
 		)
-		if m.showAllRev {
-			// No -n cap: stream every revision down to the root. Rendering is
-			// windowed (logview.go), so only visible rows are styled.
-			entries, logErr = r.LogRevset("all()", 0)
-		} else {
-			entries, logErr = r.Log(50)
-		}
-		status, statErr := r.Status()
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if m.showAllRev {
+				// No -n cap: stream every revision down to the root. Rendering is
+				// windowed (logview.go), so only visible rows are styled.
+				entries, logErr = r.LogRevset("all()", 0)
+			} else {
+				entries, logErr = r.Log(50)
+			}
+		}()
+		go func() { defer wg.Done(); status, statErr = r.Status() }()
+		wg.Wait()
 		return refreshMsg{entries: entries, logErr: logErr, status: status, statErr: statErr}
 	}
 }
@@ -374,13 +396,33 @@ func (m Model) refreshCmd() tea.Cmd {
 func (m Model) openDiffCmd(commitID, changeID string) tea.Cmd {
 	r := m.runner
 	return func() tea.Msg {
-		status, _ := r.DiffSummary(commitID)
+		// The three queries are independent subprocesses; run them
+		// concurrently to cut the diff-open latency.
+		var (
+			status []jj.StatusEntry
+			desc   string
+		)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); status, _ = r.DiffSummary(commitID) }()
+		go func() { defer wg.Done(); desc, _ = r.Description(commitID) }()
 		diff, err := r.Diff(commitID)
+		wg.Wait()
 		if err != nil {
 			return diffLoadedMsg{rev: changeID, err: err}
 		}
-		desc, _ := r.Description(commitID)
-		return diffLoadedMsg{rev: changeID, desc: desc, status: status, rows: renderDiff(diff)}
+
+		// Detect no-change reloads: the auto-refresh poll reloads the open
+		// diff every couple of seconds and almost always finds it identical.
+		// Skipping re-parsing, chroma re-highlighting, and the layout/chunk
+		// recompute saves substantial background CPU. Only safe for a refresh
+		// of the currently open, fully loaded revision — a fresh open
+		// (diffLoading) must always render, even when the text matches.
+		if !m.diffLoading && m.diffIsRevision && changeID == m.diffRev &&
+			diff == m.diffSrcRaw && (desc == "" || desc == m.diffDesc) {
+			return diffLoadedMsg{rev: changeID, status: status, unchanged: true}
+		}
+		return diffLoadedMsg{rev: changeID, desc: desc, status: status, rows: renderDiff(diff), raw: diff}
 	}
 }
 
@@ -396,6 +438,7 @@ func (m Model) openRevisionDiff(changeID, commitID string, prefixLen int, subjec
 	m.diffScrollY = 0
 	m.diffDesc = subject
 	m.diffRaw = ""
+	m.diffSrcRaw = ""
 	m.diffRows = nil
 	m.diffStatus = nil
 	m.diffChunks = nil
@@ -702,6 +745,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// a refresh (not a fresh open) so the user's cursor position survives —
 		// otherwise the 2s poll yanks navigation back to the first chunk.
 		isRefresh := m.diffIsRevision && msg.rev == m.diffRev && len(m.diffRows) > 0
+
+		// Content identical to what's displayed: keep rows, layout, collapsed
+		// state, cursor, and scroll. Only the status summary may differ.
+		if msg.unchanged {
+			if !isRefresh {
+				// The command was created against a previously open revision;
+				// the current view's own load is in flight. Drop it.
+				return m, nil
+			}
+			m.diffStatus = msg.status
+			// Chunk indices embed the head length; recompute if the head
+			// shifted (status row count change, AI spinner shown/hidden).
+			if head := m.diffHeadLen(); head != m.diffChunksHead {
+				m.diffChunks = computeDiffChunks(m.diffRows, head, m.diffCollapsed)
+				m.diffChunksHead = head
+				if len(m.diffChunks) > 0 {
+					if m.diffCurChunk >= len(m.diffChunks) {
+						m.diffCurChunk = len(m.diffChunks) - 1
+					}
+					if m.diffCurLine >= len(m.diffChunks[m.diffCurChunk]) {
+						m.diffCurLine = len(m.diffChunks[m.diffCurChunk]) - 1
+					}
+				}
+				m.diffClampMax()
+				if r := m.diffCursorBodyRow(); r >= 0 && (r < m.diffScrollY || r >= m.diffScrollY+m.diffBodyHeight()) {
+					m.diffFollowCursor()
+				}
+			}
+			return m, nil
+		}
+
 		if !isRefresh {
 			m.diffCollapsed = nil
 		}
@@ -712,9 +786,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.diffStatus = msg.status
 		m.diffRows = msg.rows
+		m.diffSrcRaw = msg.raw
 		m.diffDigits = maxLineDigits(msg.rows)
 		m.computeDiffLayout()
 		m.diffChunks = computeDiffChunks(msg.rows, m.diffHeadLen(), m.diffCollapsed)
+		m.diffChunksHead = m.diffHeadLen()
 		if !isRefresh {
 			m.diffCurChunk = 0
 			m.diffCurLine = 0
@@ -765,6 +841,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diffRevPrefix = 0
 		m.diffIsRevision = false
 		m.diffRaw = msg.content
+		m.diffSrcRaw = ""
 		m.diffRows = nil
 		m.diffStatus = nil
 		m.diffChunks = nil
@@ -853,6 +930,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.diffScrollY = 0
 			m.diffDesc = ""
 			m.diffRaw = ""
+			m.diffSrcRaw = ""
 			m.diffRows = nil
 			m.diffStatus = nil
 			m.diffChunks = nil
@@ -881,6 +959,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.diffScrollY = 0
 			m.diffDesc = msg.entry.Subject
 			m.diffRaw = ""
+			m.diffSrcRaw = ""
 			m.diffRows = nil
 			m.diffStatus = nil
 			m.diffChunks = nil
@@ -1086,13 +1165,13 @@ func (m Model) contentHeight() int {
 func (m Model) statusBarHeight() int {
 	switch {
 	case m.bookmarkMode && m.bookmarkAction == "":
-		return len(wrapMenu(m.width, " [bookmark mode] ", colCyan, colPurple, nil, " ", bookmarkMenuItems, ""))
+		return menuRowCount(m.width, " [bookmark mode] ", " ", bookmarkMenuItems)
 	case m.tagMode && m.tagAction == "":
-		return len(wrapMenu(m.width, " [tag mode] ", colTeal, colPurple, nil, " ", tagMenuItems, ""))
+		return menuRowCount(m.width, " [tag mode] ", " ", tagMenuItems)
 	case m.gitMode && m.remoteMode && m.remoteAction == "":
-		return len(wrapMenu(m.width, " [git > remote] ", colPink, colPurple, nil, " ", remoteMenuItems, ""))
+		return menuRowCount(m.width, " [git > remote] ", " ", remoteMenuItems)
 	case m.gitMode && !m.remoteMode:
-		return len(wrapMenu(m.width, " [git mode] ", colDarkOrange, colPurple, nil, " ", gitMenuItems, ""))
+		return menuRowCount(m.width, " [git mode] ", " ", gitMenuItems)
 	default:
 		return 1
 	}
@@ -1136,9 +1215,16 @@ func (m Model) rowCountTerm(rowIdx int) int {
 
 // computeDiffLayout (re)builds the wrapped-line layout for the current diff
 // body from the terminal size and content. Called on diff/raw load and on
-// resize so navigation and rendering agree on where wrapped lines land.
+// resize so navigation and rendering agree on where wrapped lines land. The
+// height probe uses the body region below the sticky title (contentHeight()-1)
+// — the same value renderDiffPanel uses — so the layout's scrollbar-width
+// reservation matches what is actually drawn.
 func (m *Model) computeDiffLayout() {
-	m.diffLayout = computeDiffLayoutPure(m.width, m.contentHeight(), m.diffHeadLen(), m.diffRows, m.diffRaw, m.diffDigits, m.diffCollapsed, m.splitMode, false)
+	bodyH := m.contentHeight() - 1
+	if bodyH < 0 {
+		bodyH = 0
+	}
+	m.diffLayout = computeDiffLayoutPure(m.width, bodyH, m.diffHeadLen(), m.diffRows, m.diffRaw, m.diffDigits, m.diffCollapsed, m.splitMode, false)
 }
 
 // diffHeadLen is the number of body rows occupied by the description header,
@@ -1146,19 +1232,7 @@ func (m *Model) computeDiffLayout() {
 // the first diff/raw line. The description section only appears for revision
 // diffs.
 func (m Model) diffHeadLen() int {
-	statusCount := len(m.diffStatus)
-	if statusCount == 0 {
-		statusCount = 1 // "(no changes)" row
-	}
-	descLen := 0
-	if m.diffIsRevision {
-		if m.aiLoading[m.diffRev] {
-			descLen = 3 // label + spinner line + divider
-		} else {
-			descLen = descHeadLen(m.diffDesc)
-		}
-	}
-	return descLen + statusCount + 2 + 1 // +1 for the "changes" label
+	return diffHeadLineCount(m.diffDesc, m.diffIsRevision, m.aiLoading[m.diffRev], m.diffStatus)
 }
 
 // diffBodyHeight is the number of visible rows below the sticky diff title.
@@ -1187,17 +1261,16 @@ func (m Model) diffCursorBodyRow() int {
 	return headLen + m.rowStartTerm(rowIdx)
 }
 
-// diffChunkRows returns a set of the body-row indices in the focused chunk,
-// for rendering the dim extent bar. Returns nil when there is no cursor.
-func (m Model) diffChunkRows() map[int]bool {
+// diffChunkRange returns the inclusive range of body-row indices (headLen +
+// rowIdx) spanned by the focused chunk, for rendering the dim extent bar.
+// Chunk rows are always contiguous, so a range suffices — no set is needed.
+// (-1, -1) means there is no cursor.
+func (m Model) diffChunkRange() (int, int) {
 	if len(m.diffChunks) == 0 || m.diffCurChunk < 0 || m.diffCurChunk >= len(m.diffChunks) {
-		return nil
+		return -1, -1
 	}
-	out := make(map[int]bool, len(m.diffChunks[m.diffCurChunk]))
-	for _, r := range m.diffChunks[m.diffCurChunk] {
-		out[r] = true
-	}
-	return out
+	cur := m.diffChunks[m.diffCurChunk]
+	return cur[0], cur[len(cur)-1]
 }
 
 // diffClampMax keeps diffScrollY within the scrollable range.
@@ -1437,6 +1510,7 @@ func (m *Model) toggleDiffCollapse(fileHeaderIdx int) {
 	m.diffCollapsed[path] = !m.diffCollapsed[path]
 	m.computeDiffLayout()
 	m.diffChunks = computeDiffChunks(m.diffRows, m.diffHeadLen(), m.diffCollapsed)
+	m.diffChunksHead = m.diffHeadLen()
 
 	// Find the file header in the new chunk list and keep the cursor on it.
 	headLen := m.diffHeadLen()
@@ -2355,6 +2429,8 @@ func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
 			m.splitMarked = map[int]bool{}
 			m.errMsg = ""
 			m.message = ""
+			// Split mode widens line prefixes, so wrapping changes.
+			m.computeDiffLayout()
 			return m, nil
 		}
 	case "x":
@@ -2380,6 +2456,8 @@ func (m Model) handleSplitKey(k string) (tea.Model, tea.Cmd) {
 		m.splitMode = false
 		m.splitMarked = nil
 		m.message = "split cancelled"
+		// Back to the non-split line prefixes: restore the layout.
+		m.computeDiffLayout()
 		return m, nil
 	case "c":
 		return m.execSplit()
@@ -3398,7 +3476,8 @@ func (m Model) View() string {
 		lines = append(lines, renderHelp(m.width, ch, m.helpScrollY)...)
 	case m.diffOpen:
 		sv := splitView{active: m.splitMode, marked: m.splitMarked}
-		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), m.diffCollapsed, sv, false, nil, nil, m.hover.diffRow)...)
+		chunkFirst, chunkLast := m.diffChunkRange()
+		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), chunkFirst, chunkLast, m.diffCollapsed, sv, false, nil, &m.diffLayout, m.hover.diffRow)...)
 	case m.view == viewFile:
 		lines = append(lines, m.renderFileView(m.width, ch)...)
 	case m.searchMode:
@@ -3843,7 +3922,38 @@ func (m Model) helpBarHeight() int {
 	if items == nil {
 		return 0
 	}
-	return len(wrapMenu(m.width, " ", colTextMuted, colPurple, nil, "  ", items, ""))
+	return menuRowCount(m.width, " ", "  ", items)
+}
+
+// menuRowCount is the number of wrapped rows wrapMenu would produce for the
+// same inputs, computed arithmetically (no segment building). It must mirror
+// wrapMenu's greedy packing exactly — call sites like contentHeight depend on
+// the two agreeing.
+func menuRowCount(width int, prefix, sep string, items [][2]string) int {
+	if width <= 1 {
+		return 1
+	}
+	curW := lipgloss.Width(prefix)
+	rows := 1
+	hasItem := false
+	for _, it := range items {
+		itemW := lipgloss.Width(it[0])
+		addW := itemW
+		if hasItem {
+			addW += len(sep)
+		}
+		if curW+addW > width && hasItem {
+			rows++
+			curW = 1
+			hasItem = false
+		}
+		if hasItem {
+			curW += len(sep)
+		}
+		curW += itemW
+		hasItem = true
+	}
+	return rows
 }
 
 // renderHelpBar renders the context-specific shortcut hints, wrapping onto

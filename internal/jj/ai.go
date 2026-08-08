@@ -8,7 +8,13 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
+
+// aiHTTPClient is shared across AI describe calls so connections are pooled,
+// and carries a timeout so a wedged endpoint can't hang a generation request
+// (and its spinner) forever.
+var aiHTTPClient = &http.Client{Timeout: 90 * time.Second}
 
 const defaultCommitPrompt = "Write a clear, concise commit message (subject line only, no body) for this diff. Reply with ONLY the commit message text, nothing else:\n\n"
 
@@ -77,7 +83,7 @@ func (r *Runner) AIDescribe(rev string) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+r.cfg.AIAPIKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := aiHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}

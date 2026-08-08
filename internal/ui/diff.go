@@ -307,13 +307,40 @@ func chromaStyle() *chroma.Style {
 	return chromaStyleVal
 }
 
+// matchLexer resolves a chroma lexer for filename, caching the result
+// (including "no match"). lexers.Match walks the entire lexer registry doing
+// filepath-glob matching per call — it's the single biggest cost of diff
+// rendering, and every file is resolved twice per diff (old and new sides).
+var (
+	lexerCacheMu sync.RWMutex
+	lexerCache   = map[string]chroma.Lexer{}
+)
+
+func matchLexer(filename string) chroma.Lexer {
+	lexerCacheMu.RLock()
+	l, ok := lexerCache[filename]
+	lexerCacheMu.RUnlock()
+	if ok {
+		return l
+	}
+	l = lexers.Match(filename) // nil when nothing matches — cached too
+	lexerCacheMu.Lock()
+	// Bound memory; every entry is cheap to recompute.
+	if len(lexerCache) >= 4096 {
+		clear(lexerCache)
+	}
+	lexerCache[filename] = l
+	lexerCacheMu.Unlock()
+	return l
+}
+
 // highlightLines syntax-highlights each source line, returning per-line spans.
 // Returns nil when no lexer matches (caller falls back to plain text).
 func highlightLines(filename string, lines []string) [][]span {
 	if len(lines) == 0 {
 		return [][]span{}
 	}
-	lexer := lexers.Match(filename)
+	lexer := matchLexer(filename)
 	if lexer == nil {
 		return nil
 	}
@@ -341,10 +368,7 @@ func highlightLines(filename string, lines []string) [][]span {
 			if text == "" {
 				continue
 			}
-			fg := ""
-			if c := chromaStyle().Get(t.Type).Colour; c.IsSet() {
-				fg = c.String()
-			}
+			fg := chromaFgFor(t.Type)
 			if n := len(spans); n > 0 && spans[n-1].fg == fg {
 				spans[n-1].text += text
 			} else {
@@ -354,6 +378,30 @@ func highlightLines(filename string, lines []string) [][]span {
 		out[i] = spans
 	}
 	return out
+}
+
+// chromaFgCache caches the hex foreground for a token type under the chosen
+// chroma style — Style.Get walks the type hierarchy and Colour.String()
+// formats hex, both per token otherwise.
+var (
+	chromaFgCacheMu sync.RWMutex
+	chromaFgCache   = map[chroma.TokenType]string{}
+)
+
+func chromaFgFor(t chroma.TokenType) string {
+	chromaFgCacheMu.RLock()
+	fg, ok := chromaFgCache[t]
+	chromaFgCacheMu.RUnlock()
+	if ok {
+		return fg
+	}
+	if c := chromaStyle().Get(t).Colour; c.IsSet() {
+		fg = c.String()
+	}
+	chromaFgCacheMu.Lock()
+	chromaFgCache[t] = fg
+	chromaFgCacheMu.Unlock()
+	return fg
 }
 
 // ── word-level diff highlighting ────────────────────────────────────────────
@@ -397,29 +445,19 @@ const (
 	wordRemoved                     // token is only in old
 )
 
-// computeWordDiff computes a word-level diff between old and new text using
-// longest common subsequence (LCS) on word tokens. Returns per-token
-// classifications for old and new.
-func computeWordDiff(oldText, newText string) ([]wordDiffClass, []wordDiffClass) {
-	oldTokens := tokenizeWords(oldText)
-	newTokens := tokenizeWords(newText)
-	m, n := len(oldTokens), len(newTokens)
+// maxWordDiffCells caps the LCS matrix size for word-level diffing. Lines
+// whose token middle exceeds this budget keep plain line-level highlighting
+// (the middle stays classified removed/added).
+const maxWordDiffCells = 1 << 16
 
-	dp := make([][]int, m+1)
-	for i := range dp {
-		dp[i] = make([]int, n+1)
-	}
-	for i := 1; i <= m; i++ {
-		for j := 1; j <= n; j++ {
-			if oldTokens[i-1].text == newTokens[j-1].text {
-				dp[i][j] = dp[i-1][j-1] + 1
-			} else if dp[i-1][j] >= dp[i][j-1] {
-				dp[i][j] = dp[i-1][j]
-			} else {
-				dp[i][j] = dp[i][j-1]
-			}
-		}
-	}
+// computeWordDiff computes a word-level diff between old and new token streams
+// using longest common subsequence (LCS) on word tokens. Returns per-token
+// classifications for old and new.
+//
+// Common leading/trailing tokens are matched without the LCS matrix (the
+// classic prefix/suffix trim), and the matrix itself is one flat allocation.
+func computeWordDiff(oldTokens, newTokens []wordToken) ([]wordDiffClass, []wordDiffClass) {
+	m, n := len(oldTokens), len(newTokens)
 
 	oldClass := make([]wordDiffClass, m)
 	newClass := make([]wordDiffClass, n)
@@ -430,14 +468,55 @@ func computeWordDiff(oldText, newText string) ([]wordDiffClass, []wordDiffClass)
 		newClass[i] = wordAdded
 	}
 
-	i, j := m, n
+	// Trim the common prefix; those tokens belong to every optimal LCS.
+	lo := 0
+	for lo < m && lo < n && oldTokens[lo].text == newTokens[lo].text {
+		oldClass[lo] = wordCommon
+		newClass[lo] = wordCommon
+		lo++
+	}
+	// Trim the common suffix.
+	hiM, hiN := m, n
+	for hiM > lo && hiN > lo && oldTokens[hiM-1].text == newTokens[hiN-1].text {
+		hiM--
+		hiN--
+		oldClass[hiM] = wordCommon
+		newClass[hiN] = wordCommon
+	}
+
+	mm, nn := hiM-lo, hiN-lo
+	if mm == 0 || nn == 0 {
+		return oldClass, newClass
+	}
+	if mm*nn > maxWordDiffCells {
+		// Too large to diff cheaply: leave the middle as removed/added.
+		return oldClass, newClass
+	}
+
+	// Flat LCS matrix, (mm+1) rows x (nn+1) cols, single allocation.
+	H := nn + 1
+	dp := make([]int32, (mm+1)*H)
+	for i := 1; i <= mm; i++ {
+		row := i * H
+		for j := 1; j <= nn; j++ {
+			if oldTokens[lo+i-1].text == newTokens[lo+j-1].text {
+				dp[row+j] = dp[row-H+j-1] + 1
+			} else if dp[row-H+j] >= dp[row+j-1] {
+				dp[row+j] = dp[row-H+j]
+			} else {
+				dp[row+j] = dp[row+j-1]
+			}
+		}
+	}
+
+	i, j := mm, nn
 	for i > 0 && j > 0 {
-		if oldTokens[i-1].text == newTokens[j-1].text {
-			oldClass[i-1] = wordCommon
-			newClass[j-1] = wordCommon
+		if oldTokens[lo+i-1].text == newTokens[lo+j-1].text {
+			oldClass[lo+i-1] = wordCommon
+			newClass[lo+j-1] = wordCommon
 			i--
 			j--
-		} else if dp[i-1][j] >= dp[i][j-1] {
+		} else if dp[i*H+j-H] >= dp[i*H+j-1] {
 			i--
 		} else {
 			j--
@@ -602,9 +681,9 @@ func applyWordDiffToRows(rows []diffRow) {
 				continue
 			}
 
-			oldClass, newClass := computeWordDiff(oldText, newText)
 			oldTokens := tokenizeWords(oldText)
 			newTokens := tokenizeWords(newText)
+			oldClass, newClass := computeWordDiff(oldTokens, newTokens)
 
 			oldRanges := highlightRanges(oldTokens, oldClass)
 			newRanges := highlightRanges(newTokens, newClass)

@@ -2,10 +2,13 @@ package ui
 
 import (
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
+	"github.com/muesli/termenv"
 )
 
 // seg is a styled run of text used to compose a single terminal line.
@@ -18,29 +21,218 @@ type seg struct {
 	faint     bool
 }
 
+// ── Style cache ─────────────────────────────────────────────────────────────
+//
+// Building a fresh lipgloss.Style per segment and calling Render was the
+// dominant per-frame cost: Render resolves the color profile, rebuilds the
+// SGR sequence, and walks the text on every call. The set of distinct styles
+// the UI uses is tiny and the terminal profile is fixed for the process
+// lifetime, so the rendered byte shape of a style is a pure function of the
+// style attributes. We probe it once per unique combination (validating the
+// fast path against real Render output) and reuse the escape sequences.
+
+type styleKey struct {
+	fg, bg    lipgloss.TerminalColor
+	bold      bool
+	underline bool
+	faint     bool
+	profile   termenv.Profile
+	dark      bool
+}
+
+type renderMode uint8
+
+const (
+	modePassthrough renderMode = iota // style renders text unchanged
+	modeBulk                          // prefix + text + suffix
+	modePerRune                       // prefix + rune + suffix, per rune (space styler)
+	modeLipgloss                      // unexpected shape: defer to lipgloss Render
+)
+
+type cachedStyle struct {
+	mode           renderMode
+	prefix, suffix string
+	style          lipgloss.Style // modeLipgloss fallback
+}
+
+var (
+	// styleCacheAtomic holds an immutable map[styleKey]cachedStyle snapshot.
+	// Reads are a plain atomic load + map access (no mutex); the rare miss
+	// path takes styleMu, fills, and publishes a fresh snapshot. The set of
+	// styles in use is small and fixed after warm-up.
+	styleCacheAtomic atomic.Value
+	styleMu          sync.Mutex
+)
+
+func styleFor(s seg) cachedStyle {
+	r := lipgloss.DefaultRenderer()
+	k := styleKey{
+		fg: s.fg, bg: s.bg, bold: s.bold, underline: s.underline, faint: s.faint,
+		profile: r.ColorProfile(), dark: r.HasDarkBackground(),
+	}
+	if v := styleCacheAtomic.Load(); v != nil {
+		if cs, ok := v.(map[styleKey]cachedStyle)[k]; ok {
+			return cs
+		}
+	}
+
+	styleMu.Lock()
+	defer styleMu.Unlock()
+	// Re-check under the write lock.
+	if v := styleCacheAtomic.Load(); v != nil {
+		if cs, ok := v.(map[styleKey]cachedStyle)[k]; ok {
+			return cs
+		}
+	}
+
+	st := lipgloss.NewStyle()
+	if k.fg != nil {
+		st = st.Foreground(k.fg)
+	}
+	if k.bg != nil {
+		st = st.Background(k.bg)
+	}
+	if k.bold {
+		st = st.Bold(true)
+	}
+	if k.underline {
+		st = st.Underline(true)
+	}
+	if k.faint {
+		st = st.Faint(true)
+	}
+
+	cs := probeStyle(st)
+
+	next := map[styleKey]cachedStyle{k: cs}
+	if v := styleCacheAtomic.Load(); v != nil {
+		for k2, cs2 := range v.(map[styleKey]cachedStyle) {
+			next[k2] = cs2
+		}
+	}
+	styleCacheAtomic.Store(next)
+	return cs
+}
+
+// probeStyle determines the byte shape lipgloss gives a style and validates
+// the fast rendering path against real Render output. Any deviation falls
+// back to modeLipgloss (always correct).
+func probeStyle(st lipgloss.Style) cachedStyle {
+	cs := cachedStyle{mode: modeLipgloss, style: st}
+
+	rA := st.Render("A")
+	i := strings.IndexByte(rA, 'A')
+	if i < 0 {
+		return cs
+	}
+	prefix, suffix := rA[:i], rA[i+1:]
+
+	// Passthrough: no styling bytes at all.
+	if prefix == "" && suffix == "" {
+		if st.Render("AB") == "AB" && st.Render("A B") == "A B" {
+			cs.mode = modePassthrough
+		}
+		return cs
+	}
+
+	wrap := func(s string) string { return prefix + s + suffix }
+	perRune := func(s string) string {
+		var b strings.Builder
+		for _, r := range s {
+			b.WriteString(prefix)
+			b.WriteString(string(r))
+			b.WriteString(suffix)
+		}
+		return b.String()
+	}
+
+	// Note: "" is excluded — lipgloss emits bare escape sequences for an
+	// empty string under a colored style (bulk/perRune differ there), but
+	// empty segment texts never occur in practice.
+	samples := []string{"AB", "A B", "→x y", "  tail  ", "   "}
+	bulkOK, perRuneOK := true, true
+	for _, s := range samples {
+		want := st.Render(s)
+		if wrap(s) != want {
+			bulkOK = false
+		}
+		if perRune(s) != want {
+			perRuneOK = false
+		}
+	}
+	switch {
+	case bulkOK:
+		cs.mode, cs.prefix, cs.suffix = modeBulk, prefix, suffix
+	case perRuneOK:
+		cs.mode, cs.prefix, cs.suffix = modePerRune, prefix, suffix
+	}
+	return cs
+}
+
+// apply writes the text with this style's escape sequences to b.
+func (cs cachedStyle) apply(b *strings.Builder, text string) {
+	switch cs.mode {
+	case modePassthrough:
+		b.WriteString(text)
+	case modeBulk:
+		b.WriteString(cs.prefix)
+		b.WriteString(text)
+		b.WriteString(cs.suffix)
+	case modePerRune:
+		for _, r := range text {
+			b.WriteString(cs.prefix)
+			b.WriteString(string(r))
+			b.WriteString(cs.suffix)
+		}
+	default:
+		b.WriteString(cs.style.Render(text))
+	}
+}
+
+// render returns the styled text as a new string.
+func (cs cachedStyle) render(text string) string {
+	switch cs.mode {
+	case modePassthrough:
+		return text
+	case modeBulk:
+		return cs.prefix + text + cs.suffix
+	case modePerRune:
+		var b strings.Builder
+		cs.apply(&b, text)
+		return b.String()
+	default:
+		return cs.style.Render(text)
+	}
+}
+
+// segTextWidth is the display cell width of plain segment text (no ANSI).
+// Pure-ASCII text (the very common case: IDs, dates, emails, most subjects)
+// is just len(s) — the grapheme-cluster-aware x/ansi path is only taken for
+// non-ASCII text.
+func segTextWidth(s string) int {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c >= 0x7f || c < 0x20 {
+			return ansi.StringWidth(s)
+		}
+	}
+	return len(s)
+}
+
+// bgStyler returns the cached style that carries only a background color —
+// used for full-width fills and padding. A nil bg means "no styling".
+func bgStyler(bg lipgloss.TerminalColor) cachedStyle {
+	return styleFor(seg{bg: bg})
+}
+
+// ── Line composition ────────────────────────────────────────────────────────
+
 // renderSegs renders a sequence of styled segments into one ANSI string.
 // Each segment carries its own background so resets between segments never
 // leave a visible gap in a filled row.
 func renderSegs(segs []seg) string {
 	var b strings.Builder
 	for _, s := range segs {
-		st := lipgloss.NewStyle()
-		if s.fg != nil {
-			st = st.Foreground(s.fg)
-		}
-		if s.bg != nil {
-			st = st.Background(s.bg)
-		}
-		if s.bold {
-			st = st.Bold(true)
-		}
-		if s.underline {
-			st = st.Underline(true)
-		}
-		if s.faint {
-			st = st.Faint(true)
-		}
-		b.WriteString(st.Render(s.text))
+		styleFor(s).apply(&b, s.text)
 	}
 	return b.String()
 }
@@ -60,28 +252,68 @@ func plainRow(width int, segs ...seg) string {
 
 // bgRow renders segments over a full-width background, padding then clipping.
 // Segments without an explicit background inherit bg.
+//
+// The visible width is accumulated while rendering (the sum of per-segment
+// ANSI-aware widths equals the width of the concatenation for all text the UI
+// produces), avoiding a second ANSI-stripping scan of the rendered row; the
+// clip is skipped entirely when nothing overflows (the common case).
 func bgRow(width int, bg lipgloss.TerminalColor, segs ...seg) string {
 	for i := range segs {
 		if segs[i].bg == nil {
 			segs[i].bg = bg
 		}
 	}
-	rendered := renderSegs(segs)
-	w := lipgloss.Width(rendered)
-	if w < width {
-		pad := lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", width-w))
-		rendered += pad
+	var b strings.Builder
+	w := 0
+	for _, s := range segs {
+		styleFor(s).apply(&b, s.text)
+		if w <= width {
+			w += segTextWidth(s.text)
+		}
 	}
-	return clip(rendered, width)
+	if w < width {
+		bgStyler(bg).apply(&b, strings.Repeat(" ", width-w))
+		return b.String()
+	}
+	if w == width {
+		return b.String()
+	}
+	return clip(b.String(), width)
 }
 
 // blankRow returns a width-wide row filled with bg (or empty if bg == nil).
+// Rendered rows are cached: padding to full height re-requests the same blank
+// row many times per frame.
 func blankRow(width int, bg lipgloss.TerminalColor) string {
-	if bg == nil {
+	if bg == nil || width <= 0 {
 		return ""
 	}
-	return lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", width))
+	r := lipgloss.DefaultRenderer()
+	k := blankKey{width: width, bg: bg, profile: r.ColorProfile(), dark: r.HasDarkBackground()}
+	blankMu.RLock()
+	s, ok := blankCache[k]
+	blankMu.RUnlock()
+	if ok {
+		return s
+	}
+	s = bgStyler(bg).render(strings.Repeat(" ", width))
+	blankMu.Lock()
+	blankCache[k] = s
+	blankMu.Unlock()
+	return s
 }
+
+type blankKey struct {
+	width   int
+	bg      lipgloss.TerminalColor
+	profile termenv.Profile
+	dark    bool
+}
+
+var (
+	blankMu    sync.RWMutex
+	blankCache = make(map[blankKey]string)
+)
 
 // runeWidth returns the display cell width of a rune (0 for combining marks).
 func runeWidth(r rune) int { return runewidth.RuneWidth(r) }
@@ -106,35 +338,52 @@ func wrapSegs(segs []seg, width int) [][]seg {
 	}
 	var lines [][]seg
 	var cur []seg
+	// buf accumulates runes of the pending segment; curStyle is its style.
+	// Runes are buffered so merged segments pay one string conversion per run
+	// instead of one allocation per rune.
+	var buf []rune
+	var curStyle seg
 	w := 0
-	// push appends rune r (carrying style st) to the current line, merging with
-	// the previous segment when the style matches.
-	push := func(r rune, st seg) {
+
+	// flush pushes the buffered runes into cur, merging with the previous
+	// segment when the style matches.
+	flush := func() {
+		if len(buf) == 0 {
+			return
+		}
 		if n := len(cur); n > 0 {
 			last := &cur[n-1]
-			if last.fg == st.fg && last.bg == st.bg && last.bold == st.bold && last.underline == st.underline && last.faint == st.faint {
-				last.text += string(r)
-				w += runeWidth(r)
+			if last.fg == curStyle.fg && last.bg == curStyle.bg && last.bold == curStyle.bold && last.underline == curStyle.underline && last.faint == curStyle.faint {
+				last.text += string(buf)
+				buf = buf[:0]
 				return
 			}
 		}
-		cur = append(cur, seg{text: string(r), fg: st.fg, bg: st.bg, bold: st.bold, underline: st.underline, faint: st.faint})
-		w += runeWidth(r)
+		cur = append(cur, seg{text: string(buf), fg: curStyle.fg, bg: curStyle.bg, bold: curStyle.bold, underline: curStyle.underline, faint: curStyle.faint})
+		buf = buf[:0]
 	}
+
 	for _, s := range segs {
 		if s.text == "" {
 			continue
 		}
+		if s != curStyle && len(buf) > 0 {
+			flush()
+		}
+		curStyle = s
 		for _, r := range s.text {
 			rw := runeWidth(r)
 			if w+rw > width && w > 0 {
+				flush()
 				lines = append(lines, cur)
 				cur = nil
 				w = 0
 			}
-			push(r, s)
+			buf = append(buf, r)
+			w += rw
 		}
 	}
+	flush()
 	lines = append(lines, cur) // flush final line (empty → one empty line)
 	return lines
 }

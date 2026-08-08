@@ -183,7 +183,10 @@ type helpRow struct {
 	binding helpBinding
 }
 
-func helpRows() []helpRow {
+// helpRowsStatic is the fully-expanded help row table. It's a pure function
+// of the package-static helpSections, so it's built once (it was previously
+// rebuilt on every render and every scroll-event max-scroll computation).
+var helpRowsStatic = func() []helpRow {
 	var rows []helpRow
 	for i := range helpSections {
 		s := &helpSections[i]
@@ -195,6 +198,10 @@ func helpRows() []helpRow {
 		}
 	}
 	return rows
+}()
+
+func helpRows() []helpRow {
+	return helpRowsStatic
 }
 
 func helpTotalRows() int { return len(helpRows()) }

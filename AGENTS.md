@@ -18,10 +18,14 @@ internal/
     ai.go               — AIDescribe: OpenAI-compatible chat-completions client (net/http)
   ui/
     model.go            — Bubble Tea Model: state, Update (msgs + keys), View, commands
-    render.go           — seg/renderSegs/clip/bgRow: styled-line composition helpers
+    render.go           — seg/renderSegs/clip/bgRow + the lipgloss style cache
+                          (escape sequences probed once per style combo),
+                          blankRow cache, ASCII fast path for segTextWidth
     styles.go           — color palette, spinner frames, diff colors
     logview.go          — commit list rendering + variable-height scroll windowing
     diff.go             — git unified-diff parser + chroma highlighting → diffRow
+                          (lexer + token-fg caches; LCS word diff with prefix/
+                          suffix trim, flat matrix, cell-count budget)
     diffpanel.go        — diff viewer rendering (gutter, status, file/hunk/line rows)
     helpview.go         — keybinding reference + scroll
 go.mod / go.sum         — module `gojo`, deps: bubbletea, lipgloss, chroma, x/ansi

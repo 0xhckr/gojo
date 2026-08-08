@@ -284,63 +284,58 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 // the 0-based index within the content area (excluding top padding), used to
 // determine thumb position.
 func renderRowWithBar(scrollW, fullW int, bg lipgloss.TerminalColor, hasBar bool, lineIdx, thumbStart, thumbEnd int, segs []seg) string {
-	row := renderRow(scrollW, bg, segs)
 	if !hasBar {
 		return bgRow(fullW, bg, segs...)
 	}
-	// Scrollbar columns: a 1-column gap + the bar glyph.
-	var sbSegs []seg
-	if lineIdx >= thumbStart && lineIdx < thumbEnd {
-		sbSegs = []seg{{text: " ", bg: bg}, {text: "┃", fg: colBorderActive, bg: bg}}
-	} else {
-		sbSegs = []seg{{text: " ", bg: bg}, {text: "│", fg: colBorderSubtle, bg: bg}}
-	}
-	scrollbar := renderSegs(sbSegs)
-	// Pad row to scrollW if needed.
-	rw := lipgloss.Width(row)
-	if rw < scrollW {
-		if bg != nil {
-			row += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", scrollW-rw))
-		} else {
-			row += strings.Repeat(" ", scrollW-rw)
+	for i := range segs {
+		if segs[i].bg == nil {
+			segs[i].bg = bg
 		}
 	}
-	result := row + scrollbar
-	return clip(result, fullW)
+	var b strings.Builder
+	w := 0
+	for _, s := range segs {
+		styleFor(s).apply(&b, s.text)
+		if w <= scrollW {
+			w += segTextWidth(s.text)
+		}
+	}
+	if w < scrollW {
+		if bg != nil {
+			bgStyler(bg).apply(&b, strings.Repeat(" ", scrollW-w))
+		} else {
+			b.WriteString(strings.Repeat(" ", scrollW-w))
+		}
+	} else if w > scrollW {
+		// Overflow: clip the content, then append the bar.
+		row := clip(b.String(), scrollW)
+		return row + scrollbarSegs(bg, lineIdx, thumbStart, thumbEnd)
+	}
+	// Scrollbar columns: a 1-column gap + the bar glyph.
+	b.WriteString(scrollbarSegs(bg, lineIdx, thumbStart, thumbEnd))
+	return clip(b.String(), fullW)
 }
 
-// renderRowWithBarFromString is like renderRowWithBar but takes a pre-rendered
-// string instead of []seg. Used by the diff panel and help view where rows are
-// already styled with their own backgrounds.
+// scrollbarSegs renders the scrollbarWidth-wide track cell for one row: the
+// thumb glyph where the thumb covers the row, the track glyph elsewhere.
+func scrollbarSegs(bg lipgloss.TerminalColor, lineIdx, thumbStart, thumbEnd int) string {
+	if lineIdx >= thumbStart && lineIdx < thumbEnd {
+		return renderSegs([]seg{{text: " ", bg: bg}, {text: "┃", fg: colBorderActive, bg: bg}})
+	}
+	return renderSegs([]seg{{text: " ", bg: bg}, {text: "│", fg: colBorderSubtle, bg: bg}})
+}
+
+// renderRowWithBarFromString appends the scrollbar track to a pre-rendered
+// row. Callers must pass rows that are exactly scrollW cells wide (all the
+// row builders pad to their width via bgRow, which also clips any overflow) —
+// that makes the two ANSI width scans the old implementation did per row
+// unnecessary.
 func renderRowWithBarFromString(scrollW, fullW int, bg lipgloss.TerminalColor, hasBar bool, lineIdx, thumbStart, thumbEnd int, row string) string {
 	if !hasBar {
-		return clip(row, fullW)
+		// scrollW == fullW here, and the row is already exactly that wide.
+		return row
 	}
-	row = clip(row, scrollW)
-	var sbSegs []seg
-	if lineIdx >= thumbStart && lineIdx < thumbEnd {
-		sbSegs = []seg{{text: " ", bg: bg}, {text: "┃", fg: colBorderActive, bg: bg}}
-	} else {
-		sbSegs = []seg{{text: " ", bg: bg}, {text: "│", fg: colBorderSubtle, bg: bg}}
-	}
-	scrollbar := renderSegs(sbSegs)
-	rw := lipgloss.Width(row)
-	if rw < scrollW {
-		if bg != nil {
-			row += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", scrollW-rw))
-		} else {
-			row += strings.Repeat(" ", scrollW-rw)
-		}
-	}
-	return clip(row+scrollbar, fullW)
-}
-
-// renderRow renders a row with an optional background fill.
-func renderRow(width int, bg lipgloss.TerminalColor, segs []seg) string {
-	if bg == nil {
-		return plainRow(width, segs...)
-	}
-	return bgRow(width, bg, segs...)
+	return row + scrollbarSegs(bg, lineIdx, thumbStart, thumbEnd)
 }
 
 // padLines pads (or truncates) a slice to exactly n lines. Padding rows are

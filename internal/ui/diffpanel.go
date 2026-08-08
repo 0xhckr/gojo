@@ -236,10 +236,12 @@ func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw str
 // aligned with the actual on-screen row positions.
 //
 // cursorBodyRow is the terminal body-line index of the focused change line
-// (-1 if none); chunkRows is the set of body-row indices (headLen + rowIdx)
-// that belong to the focused chunk. A thin left-edge bar is drawn for those
-// rows: bright for the cursor line, dim for the rest of the chunk.
-func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, aiLoading bool, spinnerFrame int, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkRows map[int]bool, collapsed map[string]bool, sv splitView, fileMode bool, fileHead []string, preLayout *diffLayout, hoverRow int) []string {
+// (-1 if none); chunkFirst/chunkLast delimit the inclusive range of body-row
+// indices (headLen + rowIdx) that belong to the focused chunk (a chunk's rows
+// are always contiguous; chunkFirst < 0 means no chunk). A thin left-edge bar
+// is drawn for those rows: bright for the cursor line, dim for the rest of
+// the chunk.
+func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, aiLoading bool, spinnerFrame int, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkFirst, chunkLast int, collapsed map[string]bool, sv splitView, fileMode bool, fileHead []string, preLayout *diffLayout, hoverRow int) []string {
 	// Title bar — the only sticky chrome; description + status + separator +
 	// diff all scroll together below it as one body. The revision ID uses the
 	// same two-tone highlighting as the log view: the shortest-unique prefix
@@ -283,15 +285,14 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 	// items + separators + diff. The head lines themselves do not wrap; only
 	// the diff/raw body wraps. In file mode the body is just the file's lines
 	// (the blame header is rendered as sticky chrome above).
-	var head []string
+	//
+	// Head rows are produced on demand via diffHeadLine (indexed, body-row
+	// aligned) rather than building the whole head up front: the status
+	// section can be long, and only the visible window is ever rendered.
+	headLen := 0
 	if !fileMode {
-		if showDesc {
-			head = append(head, buildDescHead(width, desc, aiLoading, spinnerFrame)...)
-		}
-		head = append(head, buildStatusHead(width, status)...)
-		head = append(head, buildChangesHead(width)...)
+		headLen = diffHeadLineCount(desc, showDesc, aiLoading, status)
 	}
-	headLen := len(head)
 
 	var layout diffLayout
 	if preLayout != nil && len(preLayout.starts) > 0 {
@@ -326,7 +327,8 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 	for i := start; i < end; i++ {
 		rowLine := i - start // 0-based index within the visible window
 		if i < headLen {
-			content = append(content, renderRowWithBarFromString(scrollW, width, colPanel, hasBar, rowLine, thumbStart, thumbEnd, head[i]))
+			row := diffHeadLine(scrollW, i, desc, showDesc, aiLoading, spinnerFrame, status)
+			content = append(content, renderRowWithBarFromString(scrollW, width, colPanel, hasBar, rowLine, thumbStart, thumbEnd, row))
 			continue
 		}
 		bodyLine := i - headLen
@@ -338,7 +340,7 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 			ri, sub := layout.rowAt(bodyLine)
 			r := rows[ri]
 			isCursor := ri == cursorRowIdx
-			inChunk := chunkRows != nil && chunkRows[headLen+ri]
+			inChunk := chunkFirst >= 0 && headLen+ri >= chunkFirst && headLen+ri <= chunkLast
 			isCollapsed := r.kind == rowFileHeader && collapsed != nil && collapsed[r.path]
 			splitInd := splitIndicatorForRow(rows, ri, sv)
 			var barColor lipgloss.TerminalColor
@@ -649,29 +651,6 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 	}
 }
 
-// buildDescHead renders the description label, the description text (one row
-// buildDescHead renders the description label, the description text (one row
-// per line), and a horizontal divider — shown above the status section. When
-// the description is empty, a "(no description set)" placeholder is shown.
-// When aiLoading is true, a spinner replaces the description text.
-func buildDescHead(width int, desc string, aiLoading bool, spinnerFrame int) []string {
-	head := []string{bgRow(width, colPanel, seg{text: "┃ ", fg: colCyan, bold: true, bg: colPanel}, seg{text: "description", fg: colTextMuted, bg: colPanel})}
-	if aiLoading {
-		frame := spinnerFrames[spinnerFrame%len(spinnerFrames)]
-		head = append(head, bgRow(width, colPanel, seg{text: "  " + frame + " generating…", fg: colMagenta, bold: true, bg: colPanel}))
-	} else {
-		text := desc
-		if text == "" {
-			text = "(no description set)"
-		}
-		for _, line := range strings.Split(text, "\n") {
-			head = append(head, bgRow(width, colPanel, seg{text: "  " + line, fg: colText, bg: colPanel}))
-		}
-	}
-	head = append(head, bgRow(width, colPanel, seg{text: strings.Repeat("─", width), fg: colBorder, bg: colPanel}))
-	return head
-}
-
 // descHeadLen is the number of body rows a description header occupies: the
 // label, one row per description line (at least one), and the divider.
 func descHeadLen(desc string) int {
@@ -682,27 +661,109 @@ func descHeadLen(desc string) int {
 	return 1 + lines + 1
 }
 
-// buildStatusHead renders the status header, items, and separator — the small
-// fixed-size top of the scrollable body.
-func buildStatusHead(width int, status []jj.StatusEntry) []string {
-	head := []string{bgRow(width, colPanel, seg{text: "┃ ", fg: colCyan, bold: true, bg: colPanel}, seg{text: "status", fg: colTextMuted, bg: colPanel})}
+// statusItemCount is the number of status rows rendered (one placeholder row
+// when the list is empty).
+func statusItemCount(status []jj.StatusEntry) int {
 	if len(status) == 0 {
-		head = append(head, bgRow(width, colPanel, seg{text: "  (no changes)", fg: colTextMuted, bg: colPanel}))
-	} else {
-		for _, e := range status {
-			color := statusColors[e.Status]
-			if color == nil {
-				color = colTextMuted
-			}
-			head = append(head, bgRow(width, colPanel,
-				seg{text: "┃ ", fg: color, bg: colPanel},
-				seg{text: statusSym(e.Status) + " ", fg: color, bg: colPanel},
-				seg{text: e.Path, fg: color, bg: colPanel},
-			))
+		return 1
+	}
+	return len(status)
+}
+
+// diffHeadLineCount returns the number of head rows in the diff panel body:
+// the description block (revision diffs only: label, one row per description
+// line — or a spinner row while AI-generating — and a divider), the status
+// block (label, items, divider), and the "changes" label. Must stay in
+// lockstep with diffHeadLine's indexing.
+func diffHeadLineCount(desc string, showDesc, aiLoading bool, status []jj.StatusEntry) int {
+	descLen := 0
+	if showDesc {
+		if aiLoading {
+			descLen = 3 // label + spinner line + divider
+		} else {
+			descLen = descHeadLen(desc)
 		}
 	}
-	head = append(head, bgRow(width, colPanel, seg{text: strings.Repeat("─", width), fg: colBorder, bg: colPanel}))
-	return head
+	return descLen + statusItemCount(status) + 2 + 1 // +2 status label+divider, +1 changes label
+}
+
+// diffHeadLine renders head row i of the diff panel body. Indexed rendering
+// lets the panel build only the visible window of the head — important when
+// the status section lists many changed files.
+func diffHeadLine(width, i int, desc string, showDesc, aiLoading bool, spinnerFrame int, status []jj.StatusEntry) string {
+	divider := func() string {
+		return bgRow(width, colPanel, seg{text: strings.Repeat("─", width), fg: colBorder, bg: colPanel})
+	}
+
+	// Description block (revision diffs only).
+	if showDesc {
+		descLen := descHeadLen(desc)
+		if aiLoading {
+			descLen = 3
+		}
+		if i < descLen {
+			switch {
+			case i == 0:
+				return bgRow(width, colPanel, seg{text: "┃ ", fg: colCyan, bold: true, bg: colPanel}, seg{text: "description", fg: colTextMuted, bg: colPanel})
+			case aiLoading && i == 1:
+				frame := spinnerFrames[spinnerFrame%len(spinnerFrames)]
+				return bgRow(width, colPanel, seg{text: "  " + frame + " generating…", fg: colMagenta, bold: true, bg: colPanel})
+			case aiLoading: // i == 2
+				return divider()
+			case i < descLen-1:
+				text := desc
+				if text == "" {
+					text = "(no description set)"
+				}
+				return bgRow(width, colPanel, seg{text: "  " + nthLine(text, i-1), fg: colText, bg: colPanel})
+			default: // i == descLen-1
+				return divider()
+			}
+		}
+		i -= descLen
+	}
+
+	// Status block.
+	switch {
+	case i == 0:
+		return bgRow(width, colPanel, seg{text: "┃ ", fg: colCyan, bold: true, bg: colPanel}, seg{text: "status", fg: colTextMuted, bg: colPanel})
+	case i <= statusItemCount(status):
+		if len(status) == 0 {
+			return bgRow(width, colPanel, seg{text: "  (no changes)", fg: colTextMuted, bg: colPanel})
+		}
+		e := status[i-1]
+		color := statusColors[e.Status]
+		if color == nil {
+			color = colTextMuted
+		}
+		return bgRow(width, colPanel,
+			seg{text: "┃ ", fg: color, bg: colPanel},
+			seg{text: statusSym(e.Status) + " ", fg: color, bg: colPanel},
+			seg{text: e.Path, fg: color, bg: colPanel},
+		)
+	case i == statusItemCount(status)+1:
+		return divider()
+	}
+
+	// "changes" label.
+	return bgRow(width, colPanel, seg{text: "┃ ", fg: colCyan, bold: true, bg: colPanel}, seg{text: "changes", fg: colTextMuted, bg: colPanel})
+}
+
+// nthLine returns the 0-based n-th "\n"-delimited line of s ("" when s has
+// fewer lines).
+func nthLine(s string, n int) string {
+	for n > 0 {
+		idx := strings.IndexByte(s, '\n')
+		if idx < 0 {
+			return ""
+		}
+		s = s[idx+1:]
+		n--
+	}
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		return s[:idx]
+	}
+	return s
 }
 
 // diffBodyLen is the number of diff (or raw) lines below the status head.
@@ -711,11 +772,6 @@ func diffBodyLen(rows []diffRow, rawContent string) int {
 		return strings.Count(rawContent, "\n") + 1
 	}
 	return len(rows)
-}
-
-// buildChangesHead renders the "changes" label that precedes the diff body.
-func buildChangesHead(width int) []string {
-	return []string{bgRow(width, colPanel, seg{text: "┃ ", fg: colCyan, bold: true, bg: colPanel}, seg{text: "changes", fg: colTextMuted, bg: colPanel})}
 }
 
 // visibleRange clamps a scroll offset to a [start, end) window of at most

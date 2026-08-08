@@ -200,6 +200,7 @@ func (m Model) execSplit() (tea.Model, tea.Cmd) {
 	if !m.diffIsRevision || m.diffRev == "" || len(m.diffRows) == 0 {
 		m.splitMode = false
 		m.splitMarked = nil
+		m.computeDiffLayout() // leaving split mode: restore non-split prefixes
 		return m, nil
 	}
 
@@ -226,6 +227,7 @@ func (m Model) execSplit() (tea.Model, tea.Cmd) {
 	marked := m.splitMarked
 	m.splitMode = false
 	m.splitMarked = nil
+	m.computeDiffLayout() // leaving split mode: restore non-split prefixes
 
 	m, tick := m.startBusy("splitting…")
 	if !hasPartial {

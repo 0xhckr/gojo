@@ -6,6 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
+
+	"gojo/internal/jj"
 )
 
 const sampleDiff = `diff --git a/foo.go b/foo.go
@@ -74,7 +76,7 @@ func TestRenderDiff(t *testing.T) {
 	}
 
 	// Ensure renderDiffPanel produces exactly the requested height.
-	out := renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, maxLineDigits(rows), nil, "", 0, -1, nil, nil, splitView{}, false, nil, nil, -1)
+	out := renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, maxLineDigits(rows), nil, "", 0, -1, -1, -1, nil, splitView{}, false, nil, nil, -1)
 	if len(out) != 24 {
 		t.Errorf("diff panel lines = %d, want 24", len(out))
 	}
@@ -206,7 +208,7 @@ func TestWordDiffSplitSpans(t *testing.T) {
 
 // TestWordDiffCompute verifies the LCS-based word diff classification.
 func TestWordDiffCompute(t *testing.T) {
-	oldClass, newClass := computeWordDiff("hello world", "hello earth")
+	oldClass, newClass := computeWordDiff(tokenizeWords("hello world"), tokenizeWords("hello earth"))
 
 	// Old: "hello"(common) " "(common) "world"(removed)
 	if len(oldClass) != 3 {
@@ -380,6 +382,78 @@ func TestDiffCursorRefresh(t *testing.T) {
 	}
 }
 
+// TestDiffUnchangedReloadKeepsState verifies the no-change poll fast path: an
+// unchanged diffLoadedMsg keeps rows, cursor, and scroll intact while still
+// accepting status updates.
+func TestDiffUnchangedReloadKeepsState(t *testing.T) {
+	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,1 +1,4 @@\n+p\n+q\n+r\n+s\n"
+	m := Model{width: 80, height: 24, view: viewLog, diffOpen: true, diffIsRevision: true, diffRev: "abc"}
+	m.diffRows = renderDiff(raw)
+	m.diffSrcRaw = raw
+	m.diffStatus = nil
+	m.diffDigits = maxLineDigits(m.diffRows)
+	m.diffChunks = computeDiffChunks(m.diffRows, m.diffHeadLen(), nil)
+	m.diffChunksHead = m.diffHeadLen()
+	m.diffCurChunk, m.diffCurLine = 1, 2
+	m.diffScrollY = 3
+
+	nm, _ := m.Update(diffLoadedMsg{
+		rev:       "abc",
+		status:    []jj.StatusEntry{{Path: "a", Status: jj.StatusModified}},
+		unchanged: true,
+	})
+	m = nm.(Model)
+
+	if len(m.diffRows) == 0 {
+		t.Error("rows were dropped on unchanged reload")
+	}
+	if m.diffSrcRaw != raw {
+		t.Error("diffSrcRaw changed on unchanged reload")
+	}
+	if m.diffCurChunk != 1 || m.diffCurLine != 2 {
+		t.Errorf("cursor moved to chunk=%d line=%d, want 1,2", m.diffCurChunk, m.diffCurLine)
+	}
+	if m.diffScrollY != 3 {
+		t.Errorf("scrollY = %d, want 3", m.diffScrollY)
+	}
+	if len(m.diffStatus) != 1 || m.diffStatus[0].Path != "a" {
+		t.Errorf("status not updated: %+v", m.diffStatus)
+	}
+}
+
+// TestDiffUnchangedReloadStatusResize verifies that a same-size class change
+// in the status list keeps the cached chunk indices, while a size change
+// recomputes them (chunk rows embed the head length).
+func TestDiffUnchangedReloadStatusResize(t *testing.T) {
+	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,1 +1,4 @@\n+p\n+q\n+r\n+s\n"
+	m := Model{width: 80, height: 24, view: viewLog, diffOpen: true, diffIsRevision: true, diffRev: "abc"}
+	m.diffRows = renderDiff(raw)
+	m.diffSrcRaw = raw
+	m.diffStatus = nil
+	m.diffDigits = maxLineDigits(m.diffRows)
+	m.diffChunks = computeDiffChunks(m.diffRows, m.diffHeadLen(), nil)
+	m.diffChunksHead = m.diffHeadLen()
+
+	// No status → 1 placeholder row; two entries → head grows by one row.
+	firstAdditionRowOld := m.diffChunks[1][0]
+
+	nm, _ := m.Update(diffLoadedMsg{
+		rev: "abc",
+		status: []jj.StatusEntry{
+			{Path: "a", Status: jj.StatusModified},
+			{Path: "b", Status: jj.StatusAdded},
+		},
+		unchanged: true,
+	})
+	m = nm.(Model)
+
+	firstAdditionRowNew := m.diffChunks[1][0]
+	if firstAdditionRowNew != firstAdditionRowOld+1 {
+		t.Errorf("chunk start = %d, want %d (shifted by +1 for the extra status row)",
+			firstAdditionRowNew, firstAdditionRowOld+1)
+	}
+}
+
 // TestDiffCursorShowsContext confirms that a chunk which fits in the viewport
 // keeps the whole chunk visible while stepping, so surrounding context (hunk
 // header) stays on screen rather than being pinned to the top edge.
@@ -457,7 +531,8 @@ func TestDiffWrap(t *testing.T) {
 	}
 
 	// The panel must still emit exactly `height` lines at this width.
-	out := renderDiffPanel(m.width, m.height, m.diffRev, 0, false, false, 0, m.diffDesc, true, rows, m.diffDigits, m.diffStatus, "", m.diffScrollY, m.diffCursorBodyRow(), m.diffChunkRows(), nil, splitView{}, false, nil, nil, -1)
+	chunkFirst, chunkLast := m.diffChunkRange()
+	out := renderDiffPanel(m.width, m.height, m.diffRev, 0, false, false, 0, m.diffDesc, true, rows, m.diffDigits, m.diffStatus, "", m.diffScrollY, m.diffCursorBodyRow(), chunkFirst, chunkLast, nil, splitView{}, false, nil, nil, -1)
 	if len(out) != m.height {
 		t.Errorf("wrapped panel lines = %d, want %d", len(out), m.height)
 	}
@@ -654,7 +729,7 @@ func TestDiffCollapseLayout(t *testing.T) {
 func TestDiffCollapseRendering(t *testing.T) {
 	rows := renderDiff(sampleDiff)
 	collapsed := map[string]bool{"foo.go": true}
-	out := renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, maxLineDigits(rows), nil, "", 0, -1, nil, collapsed, splitView{}, false, nil, nil, -1)
+	out := renderDiffPanel(80, 24, "abcd", 0, false, false, 0, "", false, rows, maxLineDigits(rows), nil, "", 0, -1, -1, -1, collapsed, splitView{}, false, nil, nil, -1)
 	if len(out) != 24 {
 		t.Errorf("collapsed panel lines = %d, want 24", len(out))
 	}

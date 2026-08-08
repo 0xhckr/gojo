@@ -56,14 +56,33 @@ func isWordBoundary(r rune) bool {
 // fuzzyMatch performs case-insensitive subsequence matching of query against
 // path. It returns a score (higher is better), a per-rune matched mask for
 // highlighting, and ok=false when the query is not a subsequence.
+//
+// A no-allocation gate runs first — most candidates don't match (a fuzzy
+// filter runs this per entry per keystroke), so the rune slices and the
+// matched mask are only built once the subsequence check passes.
 func fuzzyMatch(query, path string) (fzfResult, bool) {
 	if query == "" {
 		return fzfResult{path: path}, true
 	}
 	qr := []rune(query)
+
+	// Gate: greedy subsequence check without building []rune(path).
+	qi := 0
+	for _, r := range path {
+		if unicode.ToLower(r) == unicode.ToLower(qr[qi]) {
+			qi++
+			if qi == len(qr) {
+				break
+			}
+		}
+	}
+	if qi < len(qr) {
+		return fzfResult{}, false
+	}
+
 	sr := []rune(path)
 	matched := make([]bool, len(sr))
-	qi := 0
+	qi = 0
 	score := 0
 	prevMatch := -10
 	for si := 0; si < len(sr) && qi < len(qr); si++ {
@@ -80,9 +99,6 @@ func fuzzyMatch(query, path string) (fzfResult, bool) {
 			prevMatch = si
 			qi++
 		}
-	}
-	if qi < len(qr) {
-		return fzfResult{}, false
 	}
 	score -= len(sr) / 10 // mild preference for shorter paths
 	return fzfResult{path: path, score: score, matched: matched}, true
@@ -701,11 +717,11 @@ func (m Model) renderFileBlame(width, height int) []string {
 		layout = computeDiffLayoutPure(width, contentH, 0, rows, "", digits, nil, false, true)
 	}
 
-	// Compute the set of row indices that belong to the cursor's current
+	// Compute the range of row indices that belong to the cursor's current
 	// section (contiguous run of the same ChangeID) so the ┃ bar can
 	// highlight the entire hunk. Scan outward from the cursor rather than
 	// iterating the entire file.
-	sectionRows := computeSectionRows(fv.lines, cursorY)
+	sectionFirst, sectionLast := computeSectionRows(fv.lines, cursorY)
 
 	// Map the cursor (source line) to a terminal body line (body-relative;
 	// the head is not part of the body).
@@ -732,7 +748,7 @@ func (m Model) renderFileBlame(width, height int) []string {
 		termScrollY = maxScroll
 	}
 
-	return renderDiffPanel(width, height, fv.path, 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, sectionRows, nil, splitView{}, true, head, &layout, m.hover.blameLine)
+	return renderDiffPanel(width, height, fv.path, 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, sectionFirst, sectionLast, nil, splitView{}, true, head, &layout, m.hover.blameLine)
 }
 
 func lineDigits(n int) int {
@@ -755,23 +771,24 @@ func fileViewContentH(m Model) int {
 	return ch
 }
 
-// computeSectionRows returns the set of line indices that belong to the same
-// blame section (contiguous run of the same ChangeID) as the cursor line.
-// Scans outward from cursorY instead of iterating the entire file, so cost
-// is proportional to the section size, not the file size.
-func computeSectionRows(lines []jj.AnnotateLine, cursorY int) map[int]bool {
+// computeSectionRows returns the inclusive range of line indices that belong
+// to the same blame section (contiguous run of the same ChangeID) as the
+// cursor line. Scans outward from cursorY instead of iterating the entire
+// file, so cost is proportional to the section size, not the file size.
+// Returns (-1, -1) when cursorY is out of range.
+func computeSectionRows(lines []jj.AnnotateLine, cursorY int) (int, int) {
 	if cursorY < 0 || cursorY >= len(lines) {
-		return nil
+		return -1, -1
 	}
 	target := lines[cursorY].ChangeID
-	rows := map[int]bool{}
-	for i := cursorY; i >= 0 && lines[i].ChangeID == target; i-- {
-		rows[i] = true
+	first, last := cursorY, cursorY
+	for first > 0 && lines[first-1].ChangeID == target {
+		first--
 	}
-	for i := cursorY + 1; i < len(lines) && lines[i].ChangeID == target; i++ {
-		rows[i] = true
+	for last+1 < len(lines) && lines[last+1].ChangeID == target {
+		last++
 	}
-	return rows
+	return first, last
 }
 
 func (m Model) renderFileHistory(width, height int) []string {
