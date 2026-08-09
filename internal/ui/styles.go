@@ -99,6 +99,13 @@ var (
 	splitMarked   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#3d9a57", Dark: "#7fd88f"}
 	splitPartial  lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#b0851f", Dark: "#f5a742"}
 	splitUnmarked lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#999999", Dark: "#555560"}
+
+	// Conflict view — side-by-side pane tints (blue = side 1, green = side 2).
+	confLeftBg       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#dde5f4", Dark: "#192230"}
+	confLeftFocusBg  lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#ccdaf2", Dark: "#213144"}
+	confRightBg      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#dcf0dc", Dark: "#1a291d"}
+	confRightFocusBg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#cbeacc", Dark: "#233a28"}
+	confLoserBg      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#eaeaef", Dark: "#17171d"}
 )
 
 // spinnerFrames cycles a braille spinner.

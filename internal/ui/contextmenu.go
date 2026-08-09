@@ -21,8 +21,13 @@ type hoverState struct {
 	blameLine int
 	histIdx   int
 	searchRow int
-	refName   string // bookmark/tag name under the mouse, or ""
-	refKind   string // "bookmark" | "tag", or ""
+	// Conflict view: the conflict block under the mouse (-1 = none) and which
+	// pane (left = true) the pointer is over; conflict lines underline on
+	// hover to signal click-to-pick.
+	conflictBlock int
+	conflictLeft  bool
+	refName       string // bookmark/tag name under the mouse, or ""
+	refKind       string // "bookmark" | "tag", or ""
 }
 
 // bookmarkDragState tracks an in-progress mouse drag of a bookmark from its

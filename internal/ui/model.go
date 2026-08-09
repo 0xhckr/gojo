@@ -143,6 +143,13 @@ type Model struct {
 	splitMode   bool
 	splitMarked map[int]bool // diff row indices of marked addition/deletion lines
 
+	// Conflict resolution view. Entered from the log/diff panel with `c` on
+	// a conflicted revision: a side-by-side viewer showing side #1 vs side #2
+	// of each conflicted file, resolved hunk by hunk and applied through
+	// `jj resolve` with a throwaway merge tool.
+	conflictOpen bool
+	conflict     conflictState
+
 	// AI describe. Generation (HTTP, read-only) runs concurrently; the jj
 	// describe apply step is serialized via aiDescribeQueue so only one
 	// mutating subprocess is in flight at a time — concurrent describes on
@@ -730,6 +737,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewFile && m.fileView.phase == fileBlame {
 			m.fileView.buildBlameCache(m.width, fileViewContentH(m))
 		}
+		if m.conflictOpen {
+			m.conflictClampScroll()
+			m.conflictFollowCursor()
+		}
 		return m, nil
 
 	case bootMsg:
@@ -967,6 +978,75 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.diffChunks = nil
 			m.diffLayout = diffLayout{}
 			return m, tea.Batch(m.refreshCmd(), m.openDiffCmd(msg.selectedRev, msg.selectedRev))
+		}
+		return m, m.refreshCmd()
+
+	case conflictLoadedMsg:
+		m.popBusy()
+		if msg.err != nil {
+			m.errMsg = msg.err.Error()
+			return m, nil
+		}
+		if len(msg.files) == 0 {
+			m.message = "no conflicts at " + msg.rev
+			return m, nil
+		}
+		m.conflict = conflictState{rev: msg.rev, revPrefix: msg.revPrefix, files: msg.files}
+		m.conflictOpen = true
+		m.errMsg = ""
+		m.message = ""
+		// Land on the first resolvable file and its first conflict.
+		for i := range m.conflict.files {
+			if m.conflict.files[i].resolvable() {
+				m.conflict.cur = i
+				break
+			}
+		}
+		if f := m.curConflictFile(); f != nil && len(f.conflicts) > 0 {
+			m.conflict.cursor = 0
+			m.conflictFollowCursor()
+		}
+		return m, nil
+
+	case resolveFinishedMsg:
+		m.popBusy()
+		if msg.err != nil {
+			if msg.elev != nil {
+				// Surface the elevation prompt instead of the bare error.
+				m.pendingElev = msg.elev
+				m.errMsg = ""
+				return m, nil
+			}
+			m.errMsg = msg.err.Error()
+			return m, m.refreshCmd()
+		}
+		for i := range m.conflict.files {
+			if m.conflict.files[i].path == msg.path {
+				m.conflict.files[i].done = true
+			}
+		}
+		m.message = "resolved " + msg.path
+		// Advance to the next resolvable-but-unapplied file, or close the
+		// view when every conflicted file is done.
+		next, hasPending := -1, false
+		for i := range m.conflict.files {
+			if m.conflict.files[i].resolvable() && !m.conflict.files[i].done {
+				hasPending = true
+				if next < 0 {
+					next = i
+				}
+			}
+		}
+		if !hasPending {
+			m.conflictOpen = false
+			m.message = "resolved " + msg.path + " — all conflicts done"
+			return m, m.refreshCmd()
+		}
+		if next >= 0 && next != m.conflict.cur {
+			m.conflict.cur = next
+			m.conflict.scrollY = 0
+			m.conflict.cursor = 0
+			m.conflictFollowCursor()
 		}
 		return m, m.refreshCmd()
 
@@ -1682,6 +1762,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSquashKey(k)
 	}
 
+	// The conflict view handles its own keys (including q/esc to close).
+	if m.conflictOpen {
+		return m.handleConflictKey(k)
+	}
+
 	// Split mode handles its own keys (including q/esc to leave) while the
 	// diff panel stays open.
 	if m.splitMode {
@@ -1806,7 +1891,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			return m.handleClick(msg.Y)
+			return m.handleClick(msg.X, msg.Y)
 		}
 	}
 
@@ -1937,6 +2022,15 @@ func (m Model) applyScrollBarDrag(mouseY int) (tea.Model, tea.Cmd) {
 	}
 
 	switch {
+	case m.conflictOpen:
+		maxScroll := m.conflictMaxScroll()
+		if maxScroll > 0 {
+			m.conflict.scrollY = trackY * maxScroll / max(1, trackH-1)
+		} else {
+			m.conflict.scrollY = 0
+		}
+		m.conflictClampScroll()
+
 	case m.diffOpen:
 		maxScroll := m.diffMaxScroll()
 		if maxScroll > 0 {
@@ -2076,6 +2170,10 @@ func (m Model) flushWheel() (tea.Model, tea.Cmd) {
 // (−1 = up, +1 = down). Mutates in place; flushWheel loops it for batches.
 func (m *Model) wheelStep(dir int) {
 	switch {
+	case m.conflictOpen:
+		m.conflict.scrollY += dir
+		m.conflictClampScroll()
+
 	case m.diffOpen:
 		if dir > 0 {
 			m.diffMoveDown()
@@ -2463,6 +2561,12 @@ func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
 				m.toggleDiffCollapse(fileIdx)
 			}
 		}
+	case "c":
+		if m.diffIsRevision && m.diffRev != "" {
+			m, tick := m.startBusy("loading conflicts…")
+			return m, tea.Batch(tick, m.openConflictCmd(m.diffRev, m.diffRevPrefix))
+		}
+		return m, nil
 	case "d":
 		if m.diffIsRevision && m.diffRev != "" {
 			changeID := m.diffRev
@@ -2715,6 +2819,12 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "A":
 		return m.toggleShowAllRev()
+	case "c":
+		if e := m.selectedEntry(); e != nil {
+			m, tick := m.startBusy("loading conflicts…")
+			return m, tea.Batch(tick, m.openConflictCmd(e.ChangeID, e.ChangeIDPrefixLen))
+		}
+		return m, nil
 	case "b":
 		m.bookmarkMode = true
 		m.bookmarkAction = ""
@@ -3547,6 +3657,8 @@ func (m Model) View() string {
 	// Content area.
 	ch := m.contentHeight()
 	switch {
+	case m.conflictOpen:
+		lines = append(lines, m.renderConflictView(m.width, ch)...)
 	case m.view == viewHelp:
 		lines = append(lines, renderHelp(m.width, ch, m.helpScrollY)...)
 	case m.diffOpen:
@@ -3748,6 +3860,40 @@ func (m Model) renderStatusBar() []string {
 		}
 		return m.renderMenuRows(" [git mode] ", colDarkOrange, colPurple, gitMenuItems)
 
+	case m.conflictOpen:
+		f := m.curConflictFile()
+		if m.errMsg != "" {
+			return []string{bgRow(m.width, colDarkerGray, seg{text: " ✖ " + m.errMsg, fg: colRed})}
+		}
+		segs := []seg{
+			{text: " ⚡ ", fg: colYellow, bold: true},
+			{text: m.conflict.rev, fg: colMagenta, bold: true},
+		}
+		if f == nil {
+			segs = append(segs, seg{text: " · no conflicted files", fg: colGray})
+			return []string{bgRow(m.width, colDarkerGray, segs...)}
+		}
+		segs = append(segs, seg{text: fmt.Sprintf(" · %d/%d ", m.conflict.cur+1, len(m.conflict.files)), fg: colGray})
+		segs = append(segs, seg{text: f.path, fg: colCyan})
+		switch {
+		case f.done:
+			segs = append(segs, seg{text: " · ✓ applied", fg: colGreen})
+		case !f.resolvable():
+			segs = append(segs, seg{text: " · ✗ not 3-way resolvable", fg: colRed})
+		case len(f.conflicts) == 0:
+			segs = append(segs, seg{text: " · fully auto-merged", fg: colGreen})
+		default:
+			if n := f.unresolved(); n > 0 {
+				segs = append(segs, seg{text: fmt.Sprintf(" · %d of %d hunks open", n, len(f.conflicts)), fg: colYellow})
+			} else {
+				segs = append(segs, seg{text: " · all hunks picked — ⏎ apply", fg: colGreen})
+			}
+		}
+		if m.message != "" {
+			segs = append(segs, seg{text: " · " + m.message, fg: colGray})
+		}
+		return []string{bgRow(m.width, colDarkerGray, segs...)}
+
 	case m.rebaseMode:
 		scope := "-r"
 		if m.rebaseSubtree {
@@ -3844,7 +3990,7 @@ var defaultHelpBarItems = [][2]string{
 	{"⏎diff", "⏎"}, {"describe", "d"},
 	{"AI Desc", "D"}, {"bookmark", "b"}, {"tag", "t"}, {"git", "g"},
 	{"undo", "u"}, {"rebase", "r"}, {"squash", "s"}, {"absorb", "x"}, {"edit", "e"}, {"new", "n"},
-	{"abandon", "a"}, {"file", "f"}, {"/search", "/"}, {"?help", "?"}, {"quit", "q"},
+	{"conflicts", "c"}, {"abandon", "a"}, {"file", "f"}, {"/search", "/"}, {"?help", "?"}, {"quit", "q"},
 }
 
 // helpBarItems returns the shortcut hints shown in the bottom help bar for the
@@ -3853,6 +3999,12 @@ var defaultHelpBarItems = [][2]string{
 // bar), so the content area can reclaim that row.
 func (m Model) helpBarItems() [][2]string {
 	switch {
+	case m.conflictOpen:
+		return [][2]string{
+			{"l left", "l"}, {"r right", "r"}, {"b both", "b"},
+			{"u undo", "u"}, {"↑/k hunk↑", "↑"}, {"↓/j hunk↓", "↓"},
+			{"[/] file", "["}, {"⏎ apply", "⏎"}, {"esc abort", "esc"},
+		}
 	case m.splitMode:
 		return [][2]string{
 			{"space toggle", "space"}, {"c confirm", "c"}, {"esc cancel", "esc"},

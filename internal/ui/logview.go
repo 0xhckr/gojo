@@ -207,6 +207,10 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 			hovered := hoverRefKind == "tag" && hoverRefName == tg
 			hs = append(hs, seg{text: expandTabs(tg), fg: colTeal, bold: true, underline: hovered, bg: bg})
 		}
+		if e.HasConflict {
+			hs = append(hs, seg{text: " ", bg: bg})
+			hs = append(hs, seg{text: "⚡ conflict", fg: colRed, bold: true, bg: bg})
+		}
 		if bd.active && i == bd.sourceIdx {
 			hs = append(hs, seg{text: "  ● dragging " + bd.name, fg: colMagenta, bold: true, bg: bg})
 		}

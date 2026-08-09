@@ -7,13 +7,15 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
 
 // logTemplate is a two-line jj template using a \x01 marker byte to separate
 // the graph prefix from structured field data. See parseLog for the layout.
-const logTemplate = `"\x01" ++ change_id.short(8) ++ "|" ++ change_id.shortest() ++ "|" ++ commit_id.short(8) ++ "|" ++ commit_id.shortest() ++ "|" ++ author.email() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "|" ++ tags.join(",") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"`
+const logTemplate = `"\x01" ++ change_id.short(8) ++ "|" ++ change_id.shortest() ++ "|" ++ commit_id.short(8) ++ "|" ++ commit_id.shortest() ++ "|" ++ author.email() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "|" ++ tags.join(",") ++ "|" ++ if(conflict, "Y", "N") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"`
 
 // LogEntry is one commit in the log, plus the surrounding graph rendering.
 type LogEntry struct {
@@ -28,6 +30,7 @@ type LogEntry struct {
 	Tags              []string
 	IsWorkingCopy     bool
 	IsImmutable       bool
+	HasConflict       bool
 	HeaderPrefix      string
 	BodyPrefix        string
 	EdgeLines         []string
@@ -566,6 +569,177 @@ func parseSplitSelected(out string) string {
 	return ""
 }
 
+// ── Conflict resolution ─────────────────────────────────────────────────────
+
+// ConflictEntry is one conflicted path from `jj resolve --list`.
+type ConflictEntry struct {
+	Path string
+	// Sides is the conflict arity (2 for a normal two-sided conflict).
+	// Only 2-sided conflicts can be fed to a merge tool.
+	Sides int
+}
+
+// Conflicts lists the conflicted paths at a revision ("" = @). Returns nil
+// when the revision has no conflicts (jj exits non-zero with "No conflicts
+// found at this revision" in that case, which is not an error for us).
+func (r *Runner) Conflicts(rev string) ([]ConflictEntry, error) {
+	args := []string{"resolve", "--list"}
+	if rev != "" {
+		args = append(args, "-r", rev)
+	}
+	out, err := r.run(args...)
+	if err != nil {
+		if strings.Contains(err.Error(), "No conflicts found") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return parseConflicts(out), nil
+}
+
+// ConflictSides holds the three full file versions jj materializes for a
+// 3-way merge tool: side #1 (left), the merge base, and side #2 (right).
+type ConflictSides struct {
+	Left  string
+	Base  string
+	Right string
+}
+
+// mergeToolConfig renders the --config args that register a throwaway merge
+// tool under the name gojo-resolve.
+func mergeToolConfig(program string) []string {
+	return []string{
+		"merge-tools.gojo-resolve.program=" + strconv.Quote(program),
+		`merge-tools.gojo-resolve.merge-args=["$left", "$base", "$right", "$output"]`,
+	}
+}
+
+// FetchConflictSides materializes the two sides and the common base of one
+// conflicted path. It runs `jj resolve` with a probe merge tool that copies
+// $left/$base/$right out of jj's temp dir and intentionally leaves $output
+// empty: jj then aborts the resolution ("output unchanged or empty"),
+// leaving the conflict fully intact.
+//
+// The probe reports success by writing a "done" marker file after copying;
+// FetchConflictSides treats the jj invocation as failed only when the marker
+// is absent (e.g. the conflict is of a kind jj won't feed to a merge tool,
+// like a symlink/modify conflict).
+func (r *Runner) FetchConflictSides(rev, path string) (ConflictSides, error) {
+	tmpDir, err := os.MkdirTemp("", "gojo-conflict-*")
+	if err != nil {
+		return ConflictSides{}, err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	toolPath := filepath.Join(tmpDir, "gojo-probe.sh")
+	if err := os.WriteFile(toolPath, []byte(conflictProbeScript), 0755); err != nil {
+		return ConflictSides{}, err
+	}
+
+	args := []string{}
+	for _, c := range mergeToolConfig(toolPath) {
+		args = append(args, "--config", c)
+	}
+	args = append(args, "resolve", "--tool", "gojo-resolve")
+	if rev != "" {
+		args = append(args, "-r", rev)
+	}
+	args = append(args, path)
+
+	cmd := exec.Command(r.cfg.JJPath, args...)
+	cmd.Dir = r.cfg.RepoRoot
+	cmd.Env = append(os.Environ(), "GOJO_PROBE_OUT="+tmpDir)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	_ = cmd.Run() // expected to fail: the probe leaves $output empty
+
+	if _, err := os.Stat(filepath.Join(tmpDir, "done")); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = "merge tool was not invoked"
+		}
+		return ConflictSides{}, fmt.Errorf("jj resolve %s: %s", path, msg)
+	}
+
+	read := func(name string) string {
+		b, _ := os.ReadFile(filepath.Join(tmpDir, name))
+		return string(b)
+	}
+	return ConflictSides{Left: read("left"), Base: read("base"), Right: read("right")}, nil
+}
+
+// Resolve applies a pre-computed resolution to one conflicted path at rev
+// via `jj resolve --tool gojo-resolve`: the tool script copies the resolved
+// content (stored in a temp file, passed to the script through $GOJO_RESOLVED)
+// into $output. Extra flags are appended for elevation retries.
+//
+// jj refuses to accept a resolution that leaves $output empty or unchanged —
+// composing an empty file therefore surfaces as an error here.
+func (r *Runner) Resolve(rev, path, resolved string, extra ...string) error {
+	tmpDir, err := os.MkdirTemp("", "gojo-resolve-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	resolvedPath := filepath.Join(tmpDir, "resolved")
+	if err := os.WriteFile(resolvedPath, []byte(resolved), 0644); err != nil {
+		return err
+	}
+	toolPath := filepath.Join(tmpDir, "gojo-resolve.sh")
+	if err := os.WriteFile(toolPath, []byte(conflictResolveScript), 0755); err != nil {
+		return err
+	}
+
+	args := []string{}
+	for _, c := range mergeToolConfig(toolPath) {
+		args = append(args, "--config", c)
+	}
+	args = append(args, "resolve", "--tool", "gojo-resolve")
+	if rev != "" {
+		args = append(args, "-r", rev)
+	}
+	args = append(args, path)
+	args = appendExtra(args, extra)
+
+	cmd := exec.Command(r.cfg.JJPath, args...)
+	cmd.Dir = r.cfg.RepoRoot
+	cmd.Env = append(os.Environ(), "GOJO_RESOLVED="+resolvedPath)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("jj resolve %s: %s", path, msg)
+	}
+	return nil
+}
+
+// conflictProbeScript steals the three temp files jj materializes for a merge
+// tool, then leaves $output empty so jj aborts the resolution untouched. A
+// "done" marker proves the tool ran (jj exits non-zero either way). Missing
+// inputs (a side that deleted the file) materialize as empty.
+const conflictProbeScript = `#!/bin/sh
+# args: $left $base $right $output
+[ -f "$1" ] && cp "$1" "$GOJO_PROBE_OUT/left" || : > "$GOJO_PROBE_OUT/left"
+[ -f "$2" ] && cp "$2" "$GOJO_PROBE_OUT/base" || : > "$GOJO_PROBE_OUT/base"
+[ -f "$3" ] && cp "$3" "$GOJO_PROBE_OUT/right" || : > "$GOJO_PROBE_OUT/right"
+: > "$GOJO_PROBE_OUT/done"
+exit 0
+`
+
+// conflictResolveScript is the merge tool that applies a gojo-computed
+// resolution: copy the staged content over $output.
+const conflictResolveScript = `#!/bin/sh
+# args: $left $base $right $output
+cp "$GOJO_RESOLVED" "$4"
+exit 0
+`
+
 // ── Elevation ─────────────────────────────────────────────────────────────
 
 // DetectElevation inspects a jj error message. If it matches a known
@@ -631,7 +805,7 @@ func parseLog(raw string) []LogEntry {
 		}
 
 		fields := strings.Split(p.data, "|")
-		if len(fields) < 10 {
+		if len(fields) < 11 {
 			i++
 			continue
 		}
@@ -670,6 +844,7 @@ func parseLog(raw string) []LogEntry {
 			Date:              fields[5],
 			IsWorkingCopy:     fields[6] == "Y",
 			IsImmutable:       fields[7] == "Y",
+			HasConflict:       fields[10] == "Y",
 			Bookmarks:         bookmarks,
 			Tags:              tags,
 		}
@@ -725,6 +900,29 @@ func parseAnnotate(raw string) []AnnotateLine {
 		})
 	}
 	return lines
+}
+
+// conflictListRe matches the trailing "N-sided conflict" of a `jj resolve
+// --list` line. Lines look like "src/foo.go    2-sided conflict" — the path
+// is space-padded before the suffix, so parsing anchors at the end and strips
+// from the right (paths may themselves contain spaces).
+var conflictListRe = regexp.MustCompile(`\s+(\d+)-sided conflict\s*$`)
+
+func parseConflicts(raw string) []ConflictEntry {
+	var entries []ConflictEntry
+	for _, line := range strings.Split(raw, "\n") {
+		m := conflictListRe.FindStringSubmatchIndex(line)
+		if m == nil {
+			continue
+		}
+		path := strings.TrimRight(line[:m[0]], " \t")
+		if path == "" {
+			continue
+		}
+		n, _ := strconv.Atoi(line[m[2]:m[3]])
+		entries = append(entries, ConflictEntry{Path: path, Sides: n})
+	}
+	return entries
 }
 
 func parseStatus(raw string) []StatusEntry {

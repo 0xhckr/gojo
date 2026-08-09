@@ -22,11 +22,13 @@ func (m Model) modalInputActive() bool {
 	return m.pendingElev != nil || m.bookmarkMode || m.tagMode || m.renameMode || m.gitMode || m.searchMode
 }
 
-// handleClick dispatches a left-press at the given terminal Y (0-based) to
-// the active view. The caller has already verified the X is outside the
-// scrollbar area.
-func (m Model) handleClick(mouseY int) (tea.Model, tea.Cmd) {
+// handleClick dispatches a left-press at the given terminal coordinates
+// (0-based) to the active view. The caller has already verified the X is
+// outside the scrollbar area.
+func (m Model) handleClick(x, mouseY int) (tea.Model, tea.Cmd) {
 	switch {
+	case m.conflictOpen:
+		return m.handleConflictClick(x, mouseY)
 	case m.diffOpen:
 		return m.handleDiffClick(mouseY)
 	case m.view == viewFile:
@@ -369,7 +371,7 @@ func (m Model) handleHistoryClick(mouseY int) (tea.Model, tea.Cmd) {
 // scrollbar. Clicks are also fed through here so pressing sets the highlight
 // even if no motion event preceded the press.
 func (m Model) updateHover(x, y int) Model {
-	m.hover = hoverState{valid: true, logIdx: -1, logEdge: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1, searchRow: -1, refName: "", refKind: ""}
+	m.hover = hoverState{valid: true, logIdx: -1, logEdge: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1, searchRow: -1, conflictBlock: -1, refName: "", refKind: ""}
 
 	// Check shortcut hover (help bar / status bar menus) first — this works
 	// regardless of content area bounds.
@@ -389,6 +391,8 @@ func (m Model) updateHover(x, y int) Model {
 	}
 
 	switch {
+	case m.conflictOpen:
+		m.conflictHover(x, y)
 	case m.diffOpen:
 		if rowIdx, ok := m.diffRowAtMouseY(y); ok {
 			m.hover.diffRow = rowIdx

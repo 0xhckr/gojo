@@ -15,7 +15,12 @@ main.go                 — entry point: tea.NewProgram(ui.NewModel(), WithAltSc
                           WithANSICompressor)
 internal/
   jj/
-    jj.go               — Runner: runs jj CLI commands, parses log/status output
+    jj.go               — Runner: runs jj CLI commands, parses log/status output;
+                          conflict ops: Conflicts (resolve --list),
+                          FetchConflictSides (throwaway probe merge tool steals
+                          $left/$base/$right, leaves $output empty so jj aborts
+                          — the conflict stays intact), Resolve (tool copies the
+                          gojo-composed content into $output)
     config.go           — Config struct, repo-root discovery, minimal TOML loader
     ai.go               — AIDescribe: OpenAI-compatible chat-completions client (net/http)
   ui/
@@ -25,12 +30,20 @@ internal/
                           blankRow cache, ASCII fast path for segTextWidth,
                           expandTabs (raw control chars never hit the terminal:
                           tabs render as tabStop=4 spaces everywhere)
-    styles.go           — color palette, spinner frames, diff colors
+    styles.go           — color palette, spinner frames, diff + conflict-pane colors
     logview.go          — commit list rendering + variable-height scroll windowing
     diff.go             — git unified-diff parser + chroma highlighting → diffRow
                           (lexer + token-fg caches; LCS word diff with prefix/
                           suffix trim, flat matrix, cell-count budget)
     diffpanel.go        — diff viewer rendering (gutter, status, file/hunk/line rows)
+    merge3.go           — 3-way merge on line slices: LCS line diff (prefix/suffix
+                          trim + cell budget) → context/auto/conflict blocks;
+                          composeResolved emits the file from per-block choices
+    conflictview.go     — side-by-side conflict resolution view (key `c`):
+                          left pane = side 1, right = side 2, per-hunk pick
+                          l/r/b/u (or click the pane), [ ] file tabs, ⏎ applies
+                          via jj resolve; rows cached per file, no wrapping
+    split.go            — split mode + intermediate-file computation + jj split tool
     helpview.go         — keybinding reference + scroll
 go.mod / go.sum         — module `gojo`, deps: bubbletea, lipgloss, chroma, x/ansi
 flake.nix               — nix flake: devShell (go, gopls, jujutsu) + buildGoModule package
@@ -81,12 +94,13 @@ by feeding messages to `Update` and asserting on `View()` (see
 
 A literal `\x01` marker byte precedes both the data line and the body line, so
 the graph prefix (everything before the marker) can be separated from the
-fields. Fields are `|`-separated (9 total):
+fields. Fields are `|`-separated (11 total):
 
 ```
 0: change_id.short(8) | 1: change_id.shortest() | 2: commit_id.short(8) |
 3: commit_id.shortest() | 4: author.email() | 5: date | 6: working_copy (Y/N) |
-7: immutable (Y/N) | 8: bookmarks (comma-separated) | 9: tags (comma-separated)
+7: immutable (Y/N) | 8: bookmarks (comma-separated) | 9: tags (comma-separated) |
+10: conflict (Y/N)
 ```
 
 Lines without a marker byte are graph edge lines, attached to the preceding
@@ -128,8 +142,9 @@ with `x/ansi` (preserving escape codes).
 
 | View | Key | Description |
 |------|-----|-------------|
-| Log  | default | Commit list, 2 lines + graph edges per commit. Variable-height scroll windowing in `logWindow`. |
+| Log  | default | Commit list, 2 lines + graph edges per commit. Variable-height scroll windowing in `logWindow`. Conflicted commits carry a red `⚡ conflict` badge. |
 | Diff | `enter` | Status summary + parsed/highlighted diff, scrolled via `diffScrollY`. |
+| Conflicts | `c` (log/diff) | Side-by-side 3-way conflict resolution; per-hunk l/r/b/u or pane click, per-file ⏎ apply via `jj resolve` with a probe/apply merge tool. |
 | Help | `?` | Keybinding reference, scrolled via `helpScrollY`. |
 
 ### Layout (top to bottom)
