@@ -51,7 +51,7 @@ var helpSections = []helpSection{
 		{"t", "tag mode"},
 		{"g", "git mode"},
 		{"u", "jj undo"},
-		{"R", "jj redo"},
+		{"U", "jj redo"},
 		{"r", "rebase mode"},
 		{"s", "squash mode"},
 		{"x", "jj absorb  (move changes into ancestors)"},

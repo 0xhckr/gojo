@@ -610,8 +610,8 @@ func (m Model) logContextMenuItems() []contextMenuItem {
 	items = append(items, menuItem("undo", "u", func(m Model) (tea.Model, tea.Cmd) {
 		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}}, "u")
 	}))
-	items = append(items, menuItem("redo", "R", func(m Model) (tea.Model, tea.Cmd) {
-		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}}, "R")
+	items = append(items, menuItem("redo", "U", func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'U'}}, "U")
 	}))
 	return items
 }

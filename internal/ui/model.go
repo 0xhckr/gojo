@@ -2860,7 +2860,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 	case "u":
 		r := m.runner
 		return m.busySimpleCmd("undoing…", func() error { return r.Undo() }, "undone")
-	case "R":
+	case "U":
 		r := m.runner
 		return m.busySimpleCmd("redoing…", func() error { return r.Redo() }, "redone")
 	case "r":
@@ -3989,7 +3989,7 @@ func (m Model) selChangeID() string {
 var defaultHelpBarItems = [][2]string{
 	{"⏎diff", "⏎"}, {"describe", "d"},
 	{"AI Desc", "D"}, {"bookmark", "b"}, {"tag", "t"}, {"git", "g"},
-	{"undo", "u"}, {"rebase", "r"}, {"squash", "s"}, {"absorb", "x"}, {"edit", "e"}, {"new", "n"},
+	{"undo", "u"}, {"redo", "U"}, {"rebase", "r"}, {"squash", "s"}, {"absorb", "x"}, {"edit", "e"}, {"new", "n"},
 	{"conflicts", "c"}, {"abandon", "a"}, {"file", "f"}, {"/search", "/"}, {"?help", "?"}, {"quit", "q"},
 }
 

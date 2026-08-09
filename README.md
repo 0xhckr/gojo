@@ -109,7 +109,7 @@ commit_prompt = "You are a software developer. Write a clear, concise commit mes
 | `b` | Bookmark mode |
 | `g` | Git mode |
 | `u` | `jj undo` |
-| `r` | `jj redo` |
+| `U` | `jj redo` |
 
 ### Diff panel
 
