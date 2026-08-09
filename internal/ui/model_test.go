@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -952,6 +953,81 @@ func TestDiffNewRevision(t *testing.T) {
 	}
 	if m.message != "created new change" {
 		t.Errorf("message = %q, want 'created new change'", m.message)
+	}
+}
+
+// TestDiffReopenLoadingFrameNoPanic reproduces the v1.3.0 crash: open a
+// massive diff, close it (closing keeps the loaded rows and wrapped-line
+// layout on the model), then reopen it. The reopen clears diffRows/diffRaw
+// for the loading frame; if the stale diffLayout survived, renderDiffPanel
+// trusted it and indexed rows[0] on the now-empty slice — "index out of
+// range [0] with length 0" (diffpanel.go r := rows[ri]).
+func TestDiffReopenLoadingFrameNoPanic(t *testing.T) {
+	m := NewModel()
+	m.ready = true
+	m.width = 100
+	m.height = 30
+	m.view = viewLog
+	m.entries = []jj.LogEntry{
+		{ChangeID: "aaaa0000", CommitID: "c0ffee01", Subject: "first"},
+	}
+
+	// Open the diff (the returned command loads it async; ignored here).
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = m2.(Model)
+	if !m.diffOpen {
+		t.Fatal("enter should open the diff")
+	}
+
+	// Simulate a massive diff finishing loading: 50 files x 200 long lines,
+	// so the wrapped layout far exceeds one screen.
+	var rows []diffRow
+	for f := 0; f < 50; f++ {
+		rows = append(rows, diffRow{
+			kind:       rowFileHeader,
+			path:       "src/deeply/nested/package/file" + strconv.Itoa(f) + ".go",
+			changeType: "modified",
+		})
+		rows = append(rows, diffRow{kind: rowHunkHeader, hunkText: "@@ -1,200 +1,200 @@"})
+		for l := 0; l < 200; l++ {
+			rows = append(rows, diffRow{
+				kind:     rowLine,
+				lineKind: "addition",
+				sign:     "+",
+				oldNum:   l + 1,
+				newNum:   l + 1,
+				spans:    []span{{text: "x := doSomething(with, a, fairly, long, argument, list, here) // padded to wrap"}},
+			})
+		}
+	}
+	m2, _ = m.Update(diffLoadedMsg{rev: "aaaa0000", desc: "first", rows: rows, raw: "raw-diff-text"})
+	m = m2.(Model)
+	if len(m.diffLayout.starts) != len(rows) {
+		t.Fatalf("layout not built for loaded diff: starts=%d rows=%d", len(m.diffLayout.starts), len(rows))
+	}
+	_ = m.View()
+
+	// Close: the rows and layout stay cached on the model.
+	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	m = m2.(Model)
+	if m.diffOpen {
+		t.Fatal("q should close the diff")
+	}
+
+	// Reopen: the loading frame renders with empty rows while the new diff is
+	// fetched. The stale layout must have been dropped, and rendering the
+	// loading frame must not panic.
+	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = m2.(Model)
+	if !m.diffOpen || !m.diffLoading {
+		t.Fatal("second enter should reopen the diff in loading state")
+	}
+	if len(m.diffRows) != 0 {
+		t.Fatal("reopen should clear diffRows")
+	}
+	_ = m.View() // panics (rows[0] on empty slice) on the v1.3.0 code path
+	if len(m.diffLayout.starts) != 0 {
+		t.Fatal("reopen should clear the stale diffLayout")
 	}
 }
 
