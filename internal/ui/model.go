@@ -123,6 +123,12 @@ type Model struct {
 	remoteAction string // "" | a l r m s
 	remoteInput  string
 
+	// pushMode is the custom-push input (git mode, key P): the user types a
+	// bookmark name (tab-completed) and optionally a remote, separated by a
+	// space; enter pushes via jj git push --bookmark <bm> [--remote <r>].
+	pushMode  bool
+	pushInput string
+
 	// Rebase mode. Pick up the selected commit, then move a destination
 	// indicator through the log to choose where it lands.
 	rebaseMode    bool
@@ -1286,7 +1292,10 @@ func (m Model) statusBarHeight() int {
 		return menuRowCount(m.width, " [tag mode] ", " ", tagMenuItems)
 	case m.gitMode && m.remoteMode && m.remoteAction == "":
 		return menuRowCount(m.width, " [git > remote] ", " ", remoteMenuItems)
-	case m.gitMode && !m.remoteMode:
+	case m.gitMode && (m.pushMode || m.remoteMode):
+		// Text-input prompts are always a single row.
+		return 1
+	case m.gitMode:
 		return menuRowCount(m.width, " [git mode] ", " ", gitMenuItems)
 	default:
 		return 1
@@ -3171,6 +3180,56 @@ func (m Model) handleBookmarkKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) 
 }
 
 func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+	if m.pushMode {
+		switch k {
+		case "esc":
+			if m.acOriginal != nil {
+				m.pushInput = *m.acOriginal
+				m.acOriginal = nil
+				m.acIdx = 0
+				return m, nil
+			}
+			m.pushMode = false
+			m.pushInput = ""
+			return m, nil
+		case "enter":
+			return m.startPush(m.pushInput)
+		case "tab":
+			// Complete the bookmark name (first word; remote is free-form).
+			if strings.Contains(m.pushInput, " ") {
+				return m, nil
+			}
+			prefix := m.pushInput
+			if m.acOriginal != nil {
+				prefix = *m.acOriginal
+			}
+			filtered := filterPrefix(m.bookmarkCandidates(), prefix)
+			if len(filtered) > 0 {
+				if m.acOriginal == nil {
+					orig := m.pushInput
+					m.acOriginal = &orig
+					m.acIdx = 0
+					m.pushInput = filtered[0]
+				} else {
+					m.acIdx = (m.acIdx + 1) % len(filtered)
+					m.pushInput = filtered[m.acIdx]
+				}
+			}
+			return m, nil
+		case "backspace", "delete":
+			m.pushInput = trimLastRune(m.pushInput)
+			m.acOriginal = nil
+			m.acIdx = 0
+			return m, nil
+		}
+		if s, ok := typed(msg); ok {
+			m.pushInput += s
+			m.acOriginal = nil
+			m.acIdx = 0
+		}
+		return m, nil
+	}
+
 	if m.remoteMode {
 		if m.remoteAction != "" {
 			switch k {
@@ -3234,6 +3293,12 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			okMsg:   "pushed",
 			elevate: func(flag string) func() error { return func() error { return r.GitPush(flag) } },
 		})
+	case "P":
+		m.pushMode = true
+		m.pushInput = ""
+		m.acOriginal = nil
+		m.acIdx = 0
+		return m, nil
 	case "r":
 		m.remoteMode = true
 		m.remoteAction = ""
@@ -3241,6 +3306,41 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// startPush leaves the push input and git modes and kicks off
+// `jj git push [--bookmark <bm>] [--remote <r>]` for the given input
+// ("<bookmark> [<remote>]"; empty input pushes with no extra flags, same as p).
+func (m Model) startPush(input string) (tea.Model, tea.Cmd) {
+	m.pushMode = false
+	m.pushInput = ""
+	m.gitMode = false
+	m.acOriginal = nil
+	m.acIdx = 0
+	fields := strings.Fields(input)
+	var args []string
+	label, okMsg := "pushing", "pushed"
+	if len(fields) > 0 {
+		args = append(args, "--bookmark", fields[0])
+		label += " " + fields[0]
+		okMsg += " " + fields[0]
+	}
+	if len(fields) > 1 {
+		args = append(args, "--remote", fields[1])
+		label += " → " + fields[1]
+		okMsg += " to " + fields[1]
+	}
+	label += "…"
+	r := m.runner
+	return m.busyActionCmd(label, actionSpec{
+		run:    func() error { return r.GitPush(args...) },
+		okMsg:  okMsg,
+		elevate: func(flag string) func() error {
+			return func() error {
+				return r.GitPush(append(append([]string{}, args...), flag)...)
+			}
+		},
+	})
 }
 
 func (m Model) execBookmark(action, input string) tea.Cmd {
@@ -3544,6 +3644,22 @@ func (m Model) candidates() []string {
 	return out
 }
 
+// bookmarkCandidates lists the local (non-remote) bookmark names, deduped —
+// the completable names for the custom-push input.
+func (m Model) bookmarkCandidates() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, e := range m.entries {
+		for _, bm := range e.Bookmarks {
+			if bm != "" && !strings.Contains(bm, "@") && !seen[bm] {
+				seen[bm] = true
+				out = append(out, bm)
+			}
+		}
+	}
+	return out
+}
+
 func filterPrefix(cands []string, prefix string) []string {
 	if prefix == "" {
 		return cands
@@ -3558,6 +3674,21 @@ func filterPrefix(cands []string, prefix string) []string {
 }
 
 func (m Model) displaySuggestions() []string {
+	if m.pushMode {
+		// Complete the bookmark name only; the optional remote is free-form.
+		if strings.Contains(m.pushInput, " ") {
+			return nil
+		}
+		prefix := m.pushInput
+		if m.acOriginal != nil {
+			prefix = *m.acOriginal
+		}
+		filtered := filterPrefix(m.bookmarkCandidates(), prefix)
+		if len(filtered) > 10 {
+			filtered = filtered[:10]
+		}
+		return filtered
+	}
 	if m.bookmarkAction == "" && m.tagAction == "" {
 		return nil
 	}
@@ -3581,7 +3712,7 @@ func (m Model) displaySuggestions() []string {
 }
 
 func (m Model) suggestionsVisible() bool {
-	return (m.bookmarkAction != "" || m.tagAction != "") && len(m.displaySuggestions()) > 0
+	return (m.bookmarkAction != "" || m.tagAction != "" || m.pushMode) && len(m.displaySuggestions()) > 0
 }
 
 func typed(msg tea.KeyMsg) (string, bool) {
@@ -3845,6 +3976,10 @@ func (m Model) renderStatusBar() []string {
 		return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: color})}
 
 	case m.gitMode:
+		if m.pushMode {
+			text := " [git > push] (bookmark [remote]): " + m.pushInput + "█"
+			return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: colDarkOrange})}
+		}
 		if m.remoteMode {
 			if m.remoteAction != "" {
 				prompts := map[string]string{
@@ -4070,7 +4205,7 @@ var (
 		{"cancel", "esc"},
 	}
 	gitMenuItems = [][2]string{
-		{"fetch", "f"}, {"push", "p"}, {"remote", "r"},
+		{"fetch", "f"}, {"push", "p"}, {"Push bookmark", "P"}, {"remote", "r"},
 		{"cancel", "esc"},
 	}
 	remoteMenuItems = [][2]string{

@@ -538,6 +538,68 @@ func TestGitModeRendering(t *testing.T) {
 	}
 }
 
+func TestGitPushCustomInput(t *testing.T) {
+	m := bootedModel(t)
+
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	if !m.gitMode {
+		t.Fatal("g did not enter git mode")
+	}
+	if !strings.Contains(stripView(m), "Push bookmark") {
+		t.Error("git menu missing Push bookmark item")
+	}
+
+	// P opens the custom-push input; type "main origin".
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+	if !m.pushMode {
+		t.Fatal("P did not enter push input mode")
+	}
+	if !strings.Contains(stripView(m), "[git > push]") {
+		t.Error("status bar missing push prompt")
+	}
+	for _, r := range "main origin" {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if m.pushInput != "main origin" {
+		t.Errorf("push input = %q, want \"main origin\"", m.pushInput)
+	}
+
+	// Enter closes both modes and queues the push (the batch's inner cmds are
+	// not executed by step, so no jj subprocess runs).
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.pushMode || m.gitMode {
+		t.Error("enter did not close push input / git mode")
+	}
+	if n := len(m.busy); n == 0 || m.busy[n-1] != "pushing main → origin…" {
+		t.Errorf("busy labels = %v, want last \"pushing main → origin…\"", m.busy)
+	}
+}
+
+func TestGitPushCustomInputEscape(t *testing.T) {
+	m := bootedModel(t)
+
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+	for _, r := range "ma" {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	// esc returns to the git menu; a second esc exits git mode.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.pushMode {
+		t.Error("esc did not leave push input mode")
+	}
+	if !m.gitMode {
+		t.Error("esc should return to the git menu, not exit git mode")
+	}
+	if m.pushInput != "" {
+		t.Errorf("push input = %q, want empty after esc", m.pushInput)
+	}
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.gitMode {
+		t.Error("esc did not exit git mode")
+	}
+}
+
 func TestTagModeRendering(t *testing.T) {
 	m := bootedModel(t)
 

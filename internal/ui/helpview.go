@@ -167,6 +167,7 @@ var helpSections = []helpSection{
 	{title: "Git Mode", color: colOrange, bindings: []helpBinding{
 		{"f", "git fetch"},
 		{"p", "git push"},
+		{"P", "push bookmark  (bookmark [remote]; tab completes)"},
 		{"r", "remote mode"},
 		{"esc / q", "cancel / exit"},
 	}},

@@ -704,7 +704,7 @@ func (m Model) tryShortcutClick(x, y int) (Model, tea.Cmd, bool) {
 		statusMenu = menuDef{" [tag mode] ", tagMenuItems}
 	case m.gitMode && m.remoteMode && m.remoteAction == "":
 		statusMenu = menuDef{" [git > remote] ", remoteMenuItems}
-	case m.gitMode && !m.remoteMode:
+	case m.gitMode && !m.remoteMode && !m.pushMode:
 		statusMenu = menuDef{" [git mode] ", gitMenuItems}
 	}
 	if statusMenu.items != nil {
@@ -785,7 +785,7 @@ func (m Model) shortcutSpanAt(x, y int) (menuSpan, bool) {
 		return hitMenuSpan(computeMenuSpans(m.width, " [tag mode] ", " ", tagMenuItems, m.statusBarStartY()), x, y)
 	case m.gitMode && m.remoteMode && m.remoteAction == "":
 		return hitMenuSpan(computeMenuSpans(m.width, " [git > remote] ", " ", remoteMenuItems, m.statusBarStartY()), x, y)
-	case m.gitMode && !m.remoteMode:
+	case m.gitMode && !m.remoteMode && !m.pushMode:
 		return hitMenuSpan(computeMenuSpans(m.width, " [git mode] ", " ", gitMenuItems, m.statusBarStartY()), x, y)
 	}
 	// Help bar.
