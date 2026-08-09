@@ -10,7 +10,9 @@ written in Go with [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 ## Project Structure
 
 ```
-main.go                 — entry point: tea.NewProgram(ui.NewModel(), WithAltScreen)
+main.go                 — entry point: tea.NewProgram(ui.NewModel(), WithAltScreen,
+                          WithReportFocus, WithMouse{Cell,All}Motion,
+                          WithANSICompressor)
 internal/
   jj/
     jj.go               — Runner: runs jj CLI commands, parses log/status output
@@ -100,7 +102,12 @@ commit during parsing (`parseLog`).
 - **Update** handles `tea.Msg`s. UI-blocking work (running jj, HTTP) happens in
   `tea.Cmd`s that return result messages (`refreshMsg`, `diffLoadedMsg`,
   `actionDoneMsg`, `aiDoneMsg`, `listLoadedMsg`, …). Keyboard input is a
-  `tea.KeyMsg` dispatched per mode.
+  `tea.KeyMsg` dispatched per mode. Mouse wheel events are coalesced: the
+  first step of a burst applies immediately, further steps accumulate and
+  flush as one batch per 16 ms `wheelTickMsg` — macOS trackpads emit wheel
+  events far faster than the terminal can repaint during momentum scrolling,
+  and per-event handling made the message queue back up (the app kept
+  repainting stale scroll states after the fingers lifted).
 - **View** composes the screen as a slice of pre-styled, width-clipped lines
   (top bar, content, optional autocomplete line, status bar, help bar) joined
   to exactly the terminal height.

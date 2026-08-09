@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -78,6 +79,96 @@ func TestMouseLogClickPadding(t *testing.T) {
 	m = m2.(Model)
 	if m.cursor != 0 {
 		t.Errorf("click below entries moved cursor to %d", m.cursor)
+	}
+}
+
+func wheelPress(dir tea.MouseButton, x, y int) tea.MouseMsg {
+	return tea.MouseMsg{Action: tea.MouseActionPress, Button: dir, X: x, Y: y}
+}
+
+// wheelTestModel builds a ready log-view model with a scrollable list of
+// commits in a short window.
+func wheelTestModel() Model {
+	m := mouseTestModel()
+	m.height = 10
+	m.entries = nil
+	for i := 0; i < 40; i++ {
+		m.entries = append(m.entries, jj.LogEntry{
+			ChangeID: "cccc" + fmt.Sprintf("%04d", i),
+			CommitID: "c0ffee00",
+		})
+	}
+	return m
+}
+
+// TestWheelCoalescing verifies that the first wheel event of a burst scrolls
+// immediately, subsequent events accumulate without repaints, and a single
+// flush tick applies the accumulated steps in one batch.
+func TestWheelCoalescing(t *testing.T) {
+	m := wheelTestModel()
+
+	// First step applies immediately (no added latency) and schedules a flush.
+	m2, cmd := m.Update(wheelPress(tea.MouseButtonWheelDown, 10, 5))
+	m = m2.(Model)
+	if m.cursor != 1 {
+		t.Fatalf("first wheel step: cursor = %d, want 1", m.cursor)
+	}
+	if cmd == nil {
+		t.Fatal("first wheel step should schedule a flush tick")
+	}
+	if !m.wheelPending {
+		t.Fatal("wheelPending should be set while a flush tick is in flight")
+	}
+	if m.wheelAccum != 0 {
+		t.Fatalf("wheelAccum = %d, want 0 after immediate step", m.wheelAccum)
+	}
+
+	// Events arriving while the tick is pending only accumulate: no scroll
+	// happens and no command is scheduled (the tick is still in flight).
+	for i := 0; i < 5; i++ {
+		m2, cmd = m.Update(wheelPress(tea.MouseButtonWheelDown, 10, 5))
+		m = m2.(Model)
+		if cmd != nil {
+			t.Fatal("coalesced wheel events must not schedule extra ticks")
+		}
+	}
+	if m.cursor != 1 {
+		t.Fatalf("cursor moved during burst: got %d, want 1 (steps must batch)", m.cursor)
+	}
+	if m.wheelAccum != 5 {
+		t.Fatalf("wheelAccum = %d, want 5", m.wheelAccum)
+	}
+
+	// The flush tick applies the whole batch at once.
+	m2, cmd = m.Update(wheelTickMsg{})
+	m = m2.(Model)
+	if cmd != nil {
+		t.Error("flush should not produce a command")
+	}
+	if m.cursor != 6 {
+		t.Fatalf("after flush: cursor = %d, want 6", m.cursor)
+	}
+	if m.wheelAccum != 0 || m.wheelPending {
+		t.Fatal("flush should clear wheelAccum and wheelPending")
+	}
+}
+
+// TestWheelCoalescingDirectionNet verifies that opposite-direction steps
+// within one burst net out instead of replaying intermediate states.
+func TestWheelCoalescingDirectionNet(t *testing.T) {
+	m := wheelTestModel()
+
+	m2, _ := m.Update(wheelPress(tea.MouseButtonWheelDown, 10, 5)) // cursor 1 (immediate)
+	m = m2.(Model)
+	m2, _ = m.Update(wheelPress(tea.MouseButtonWheelDown, 10, 5)) // accum +1
+	m = m2.(Model)
+	m2, _ = m.Update(wheelPress(tea.MouseButtonWheelUp, 10, 5)) // accum 0
+	m = m2.(Model)
+
+	m2, _ = m.Update(wheelTickMsg{})
+	m = m2.(Model)
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1 (up cancels down)", m.cursor)
 	}
 }
 

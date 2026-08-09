@@ -173,6 +173,21 @@ type Model struct {
 	// cleared on MouseActionRelease.
 	scrollDragging bool
 
+	// Wheel coalescing. macOS trackpads emit wheel events at very high rates
+	// during momentum scrolling (hundreds per second); applying each one
+	// synchronously floods the message loop faster than the terminal can
+	// repaint, so the app keeps visibly catching up after the fingers lift
+	// (a slow CRT-like repaint crawl). Instead, the first step of a burst
+	// applies immediately and further steps accumulate in wheelAccum while a
+	// flush tick is pending (wheelPending); the tick applies them all in one
+	// batch, bounding scroll work and repaints to the tick rate regardless of
+	// event rate. wheelX/wheelY remember the pointer position of the last
+	// wheel event so the hover highlight can re-anchor after the batch.
+	wheelAccum   int
+	wheelPending bool
+	wheelX       int
+	wheelY       int
+
 	// bookmarkDrag tracks an in-progress mouse drag of a bookmark from one
 	// revision to another. Set on press over a bookmark segment; cleared on
 	// release (which fires jj bookmark move when the drop target differs).
@@ -331,6 +346,9 @@ type listLoadedMsg struct {
 type spinnerTickMsg struct{}
 
 type pollMsg struct{}
+
+// wheelTickMsg fires the coalesced wheel flush; see the wheelAccum fields.
+type wheelTickMsg struct{}
 
 // File-view messages.
 type fileListMsg struct {
@@ -666,6 +684,18 @@ func pollTick() tea.Cmd {
 	})
 }
 
+// wheelFlushInterval is the cadence at which coalesced wheel steps are
+// applied. Matches the renderer's 60 FPS repaint cap: during a scroll burst
+// at most one scroll state is computed per frame no matter how many wheel
+// events arrived in between.
+const wheelFlushInterval = 16 * time.Millisecond
+
+func wheelTick() tea.Cmd {
+	return tea.Tick(wheelFlushInterval, func(time.Time) tea.Msg {
+		return wheelTickMsg{}
+	})
+}
+
 // refreshFocusedCmds builds the refresh work shared by focus and poll: reload
 // the log + status, plus the open diff when it's a revision view.
 func (m Model) refreshFocusedCmds() []tea.Cmd {
@@ -979,6 +1009,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.spinnerRunning = false
 		return m, nil
+
+	case wheelTickMsg:
+		return m.flushWheel()
 
 	case tea.FocusMsg:
 		// Terminal regained focus: the working copy may have changed underneath
@@ -1717,13 +1750,15 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// content area (the context menu has its own hover handling).
 	m = m.updateHover(msg.X, msg.Y)
 
-	// Wheel events work regardless of cursor position.
+	// Wheel events work regardless of cursor position. They are coalesced,
+	// not handled one-by-one: macOS trackpads emit them far faster than the
+	// terminal can repaint during momentum scrolling.
 	if msg.Action == tea.MouseActionPress {
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
-			return m.handleWheel(-1)
+			return m.accumulateWheel(msg, -1)
 		case tea.MouseButtonWheelDown:
-			return m.handleWheel(1)
+			return m.accumulateWheel(msg, 1)
 		case tea.MouseButtonRight:
 			return m.openContextMenuCmd(msg.X, msg.Y)
 		}
@@ -1998,9 +2033,48 @@ func (m Model) applyScrollBarDrag(mouseY int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleWheel scrolls the active view by one unit in the given direction
-// (−1 = up, +1 = down).
-func (m Model) handleWheel(dir int) (tea.Model, tea.Cmd) {
+// accumulateWheel records one wheel step and schedules the coalesced flush.
+// The first step of a burst applies immediately so wheel scrolling feels as
+// responsive as before; while a flush tick is pending, further events only
+// increment the accumulator — no scroll math, no hover recompute, no visible
+// state change — so the frame stays identical and the renderer repaints
+// nothing for them.
+func (m Model) accumulateWheel(msg tea.MouseMsg, dir int) (tea.Model, tea.Cmd) {
+	m.wheelX, m.wheelY = msg.X, msg.Y
+	if m.wheelPending {
+		m.wheelAccum += dir
+		return m, nil
+	}
+	m.wheelPending = true
+	m.wheelStep(dir)
+	return m, wheelTick()
+}
+
+// flushWheel applies all wheel steps accumulated since the last flush as one
+// batch, producing a single repaint for the whole burst. It then re-anchors
+// the hover highlight at the pointer position once — while scrolling, the
+// content moves under a stationary pointer, so per-event hover updates during
+// the burst are wasted work.
+func (m Model) flushWheel() (tea.Model, tea.Cmd) {
+	m.wheelPending = false
+	n := m.wheelAccum
+	m.wheelAccum = 0
+	if n == 0 {
+		return m, nil
+	}
+	dir := 1
+	if n < 0 {
+		dir, n = -1, -n
+	}
+	for ; n > 0; n-- {
+		m.wheelStep(dir)
+	}
+	return m.updateHover(m.wheelX, m.wheelY), nil
+}
+
+// wheelStep scrolls the active view by one unit in the given direction
+// (−1 = up, +1 = down). Mutates in place; flushWheel loops it for batches.
+func (m *Model) wheelStep(dir int) {
 	switch {
 	case m.diffOpen:
 		if dir > 0 {
@@ -2074,8 +2148,6 @@ func (m Model) handleWheel(dir int) (tea.Model, tea.Cmd) {
 			m.logMoveUp()
 		}
 	}
-
-	return m, nil
 }
 
 // handleElevKey handles input while an elevation prompt is on screen. 'y'

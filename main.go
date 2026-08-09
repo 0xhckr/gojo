@@ -35,6 +35,12 @@ func main() {
 		tea.WithReportFocus(),
 		tea.WithMouseCellMotion(),
 		tea.WithMouseAllMotion(),
+		// Deduplicate redundant SGR/cursor sequences in each repainted frame.
+		// Scrolling changes every row, so each frame is a full-screen rewrite;
+		// compressed frames are substantially smaller, which keeps slow
+		// terminals (macOS Terminal.app, iTerm2 under load) from falling
+		// behind into a visible top-to-bottom repaint crawl.
+		tea.WithANSICompressor(),
 	)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "fatal:", err)
