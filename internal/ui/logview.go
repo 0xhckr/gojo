@@ -200,12 +200,12 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 			hs = append(hs, seg{text: " ", bg: bg})
 			dragging := bd.active && i == bd.sourceIdx && bm == bd.name
 			hovered := hoverRefKind == "bookmark" && hoverRefName == bm
-			hs = append(hs, seg{text: bm, fg: colGreen, bold: true, underline: dragging || hovered, bg: bg})
+			hs = append(hs, seg{text: expandTabs(bm), fg: colGreen, bold: true, underline: dragging || hovered, bg: bg})
 		}
 		for _, tg := range e.Tags {
 			hs = append(hs, seg{text: " ", bg: bg})
 			hovered := hoverRefKind == "tag" && hoverRefName == tg
-			hs = append(hs, seg{text: tg, fg: colTeal, bold: true, underline: hovered, bg: bg})
+			hs = append(hs, seg{text: expandTabs(tg), fg: colTeal, bold: true, underline: hovered, bg: bg})
 		}
 		if bd.active && i == bd.sourceIdx {
 			hs = append(hs, seg{text: "  ● dragging " + bd.name, fg: colMagenta, bold: true, bg: bg})
@@ -245,6 +245,7 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 			if subject == "" {
 				subject = "(no description set)"
 			}
+			subject = expandTabs(subject)
 			switch {
 			case e.IsWorkingCopy:
 				bs = append(bs, seg{text: subject, fg: colYellow, bold: true, bg: bg})
@@ -307,9 +308,11 @@ func renderRowWithBar(scrollW, fullW int, bg lipgloss.TerminalColor, hasBar bool
 			b.WriteString(strings.Repeat(" ", scrollW-w))
 		}
 	} else if w > scrollW {
-		// Overflow: clip the content, then append the bar.
+		// Overflow: clip the content, then append the bar. The final clip is
+		// a safety net against reservation/visibility width mismatches —
+		// overflowing the terminal width wraps and scrambles the screen.
 		row := clip(b.String(), scrollW)
-		return row + scrollbarSegs(bg, lineIdx, thumbStart, thumbEnd)
+		return clip(row+scrollbarSegs(bg, lineIdx, thumbStart, thumbEnd), fullW)
 	}
 	// Scrollbar columns: a 1-column gap + the bar glyph.
 	b.WriteString(scrollbarSegs(bg, lineIdx, thumbStart, thumbEnd))
@@ -329,11 +332,23 @@ func scrollbarSegs(bg lipgloss.TerminalColor, lineIdx, thumbStart, thumbEnd int)
 // row. Callers must pass rows that are exactly scrollW cells wide (all the
 // row builders pad to their width via bgRow, which also clips any overflow) —
 // that makes the two ANSI width scans the old implementation did per row
-// unnecessary.
+// unnecessary. The composition must never exceed fullW cells: overflowing the
+// terminal soft-wraps the line and scrambles the screen, so a defensive clip
+// guards the (already consistent) cases.
 func renderRowWithBarFromString(scrollW, fullW int, bg lipgloss.TerminalColor, hasBar bool, lineIdx, thumbStart, thumbEnd int, row string) string {
 	if !hasBar {
-		// scrollW == fullW here, and the row is already exactly that wide.
+		if scrollW < fullW {
+			return clip(row, fullW)
+		}
 		return row
+	}
+	if scrollW+scrollbarWidth > fullW {
+		// Defensive: reservation/visibility mismatch.
+		w := fullW - scrollbarWidth
+		if w < 0 {
+			w = 0
+		}
+		return clip(row, w) + scrollbarSegs(bg, lineIdx, thumbStart, thumbEnd)
 	}
 	return row + scrollbarSegs(bg, lineIdx, thumbStart, thumbEnd)
 }

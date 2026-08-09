@@ -138,6 +138,19 @@ func diffFileHeaderForRow(rows []diffRow, rowIdx int) int {
 	return -1
 }
 
+// diffContentPrefixW is the number of columns a rendered diff content line
+// spends left of the highlighted body: the ┃ bar (1), the old+new line-number
+// gutter (2*digits+3), and the sign column (4). Split mode swaps the gutter's
+// leading space for a 3-char indicator slot (+2). The layout (diffRowWrapCount)
+// and the renderer (renderDiffRowSubLine) MUST share this value — if they
+// disagree, wrapped rows alias and every row below drifts out of place.
+func diffContentPrefixW(digits int, splitActive bool) int {
+	if splitActive {
+		return 2*digits + 10
+	}
+	return 2*digits + 8
+}
+
 // diffRowWrapCount is the number of terminal lines a diff row occupies at
 // scrollW columns. File/hunk headers wrap their label; content lines wrap the
 // syntax-highlighted body after the line-number gutter. fileCollapsed only
@@ -153,9 +166,9 @@ func diffRowWrapCount(scrollW, digits int, r diffRow, fileCollapsed bool, splitA
 		if fileCollapsed {
 			indicator = "▶ "
 		}
-		label := indicator + r.path + "  (" + r.changeType + ")"
+		label := indicator + expandTabs(r.path) + "  (" + r.changeType + ")"
 		if r.prevPath != "" {
-			label = indicator + r.prevPath + " → " + r.path + "  (" + r.changeType + ")"
+			label = indicator + expandTabs(r.prevPath) + " → " + expandTabs(r.path) + "  (" + r.changeType + ")"
 		}
 		prefix := 2
 		if splitActive {
@@ -168,11 +181,7 @@ func diffRowWrapCount(scrollW, digits int, r diffRow, fileCollapsed bool, splitA
 		if fileMode {
 			return spansWrapCount(r.spans, max(1, scrollW-(digits+3)))
 		}
-		gutter := 2*digits + 5
-		if splitActive {
-			gutter = 2*digits + 7
-		}
-		return spansWrapCount(r.spans, max(1, scrollW-gutter))
+		return spansWrapCount(r.spans, max(1, scrollW-diffContentPrefixW(digits, splitActive)))
 	}
 }
 
@@ -180,6 +189,10 @@ func diffRowWrapCount(scrollW, digits int, r diffRow, fileCollapsed bool, splitA
 // scrollbar reservation depends on whether the body overflows the viewport,
 // which in turn depends on the wrap width, so it is resolved in two passes:
 // first at the full width, then (if overflow) at width minus the scrollbar.
+//
+// The overflow probe includes headLen: renderDiffPanel draws the scrollbar
+// whenever head+body overflows, so the reservation must use the same total —
+// otherwise rows are built wider than the terminal and the bar wraps.
 func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw string, digits int, collapsed map[string]bool, splitActive bool, fileMode bool) diffLayout {
 	scrollW := width
 	if scrollW < 1 {
@@ -212,7 +225,7 @@ func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw str
 		for _, c := range counts {
 			total += c
 		}
-		if total <= contentH || pass == 1 {
+		if total+headLen <= contentH || pass == 1 {
 			break
 		}
 		scrollW = width - scrollbarWidth
@@ -295,7 +308,14 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 	}
 
 	var layout diffLayout
-	if preLayout != nil && len(preLayout.starts) > 0 {
+	// Trust the precomputed layout only when it maps the same body content —
+	// a stale layout (e.g. the previous revision's, rendered during a loading
+	// frame) must fall back to a fresh computation, or row indexing panics.
+	nContentRows := len(rows)
+	if nContentRows == 0 && rawContent != "" {
+		nContentRows = strings.Count(rawContent, "\n") + 1
+	}
+	if preLayout != nil && len(preLayout.starts) > 0 && len(preLayout.starts) == nContentRows {
 		layout = *preLayout
 	} else {
 		layout = computeDiffLayoutPure(width, contentH, headLen, rows, rawContent, digits, collapsed, sv.active, fileMode)
@@ -405,7 +425,7 @@ func fileRowBg(r diffRow) lipgloss.TerminalColor {
 // at scrollW-1 columns with a leading space.
 func renderRawSubLine(scrollW int, line string, sub int) string {
 	bodyW := max(1, scrollW-1)
-	wrapped := wrapSegs([]seg{{text: line, fg: colText}}, bodyW)
+	wrapped := wrapSegs([]seg{{text: expandTabs(line), fg: colText}}, bodyW)
 	var body []seg
 	if sub >= 0 && sub < len(wrapped) {
 		body = wrapped[sub]
@@ -427,9 +447,9 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 		if fileCollapsed {
 			indicator = "▶ "
 		}
-		label := indicator + r.path + "  (" + r.changeType + ")"
+		label := indicator + expandTabs(r.path) + "  (" + r.changeType + ")"
 		if r.prevPath != "" {
-			label = indicator + r.prevPath + " → " + r.path + "  (" + r.changeType + ")"
+			label = indicator + expandTabs(r.prevPath) + " → " + expandTabs(r.path) + "  (" + r.changeType + ")"
 		}
 		labelFg, labelBg := diffFileHeaderFg, diffFileHeaderBg
 		if isCursor {
@@ -520,7 +540,7 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 				if s.fg != "" {
 					fg = lipgloss.Color(s.fg)
 				}
-				bodySegs = append(bodySegs, seg{text: s.text, fg: fg, bg: bg})
+				bodySegs = append(bodySegs, seg{text: expandTabs(s.text), fg: fg, bg: bg})
 			}
 			wrapped := wrapSegs(bodySegs, bodyW)
 
@@ -558,10 +578,10 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 			lineFg = diffContextFg
 		}
 
-		prefixW := 2*digits + 8 // leftBar + gutter(incl leading space) + gap + sign + 2 trailing spaces
-		if splitActive {
-			prefixW = 2*digits + 10 // indicator slot is 3 chars instead of 1
-		}
+		// leftBar(1) + gutter(incl leading space) + gap + sign + 2 trailing
+		// spaces — via the shared helper so the layout agrees (split mode's
+		// 3-char indicator slot widens by 2).
+		prefixW := diffContentPrefixW(digits, splitActive)
 		bodyW := max(1, scrollW-prefixW)
 
 		// Build the wrapping body: the syntax-highlighted spans, all carrying
@@ -577,7 +597,7 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 			if s.bg != "" {
 				bg = lipgloss.Color(s.bg)
 			}
-			bodySegs = append(bodySegs, seg{text: s.text, fg: fg, bg: bg})
+			bodySegs = append(bodySegs, seg{text: expandTabs(s.text), fg: fg, bg: bg})
 		}
 		wrapped := wrapSegs(bodySegs, bodyW)
 
@@ -715,7 +735,7 @@ func diffHeadLine(width, i int, desc string, showDesc, aiLoading bool, spinnerFr
 				if text == "" {
 					text = "(no description set)"
 				}
-				return bgRow(width, colPanel, seg{text: "  " + nthLine(text, i-1), fg: colText, bg: colPanel})
+				return bgRow(width, colPanel, seg{text: expandTabs("  " + nthLine(text, i-1)), fg: colText, bg: colPanel})
 			default: // i == descLen-1
 				return divider()
 			}
@@ -739,7 +759,7 @@ func diffHeadLine(width, i int, desc string, showDesc, aiLoading bool, spinnerFr
 		return bgRow(width, colPanel,
 			seg{text: "┃ ", fg: color, bg: colPanel},
 			seg{text: statusSym(e.Status) + " ", fg: color, bg: colPanel},
-			seg{text: e.Path, fg: color, bg: colPanel},
+			seg{text: expandTabs(e.Path), fg: color, bg: colPanel},
 		)
 	case i == statusItemCount(status)+1:
 		return divider()

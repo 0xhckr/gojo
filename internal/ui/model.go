@@ -442,6 +442,7 @@ func (m Model) openRevisionDiff(changeID, commitID string, prefixLen int, subjec
 	m.diffRows = nil
 	m.diffStatus = nil
 	m.diffChunks = nil
+	m.diffLayout = diffLayout{} // stale layout from the previous view must not survive into the loading frame
 	return m, m.openDiffCmd(commitID, changeID)
 }
 
@@ -934,6 +935,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.diffRows = nil
 			m.diffStatus = nil
 			m.diffChunks = nil
+			m.diffLayout = diffLayout{}
 			return m, tea.Batch(m.refreshCmd(), m.openDiffCmd(msg.selectedRev, msg.selectedRev))
 		}
 		return m, m.refreshCmd()
@@ -963,6 +965,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.diffRows = nil
 			m.diffStatus = nil
 			m.diffChunks = nil
+			m.diffLayout = diffLayout{}
 			m.cursor = 0
 			m.recomputeOffset()
 			return m, tea.Batch(m.refreshCmd(), m.openDiffCmd(msg.entry.CommitID, msg.entry.ChangeID))

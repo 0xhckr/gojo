@@ -315,8 +315,30 @@ var (
 	blankCache = make(map[blankKey]string)
 )
 
+// tabStop is how many cells a tab renders as. Raw tabs must never reach the
+// terminal: the width libraries count '\t' as 0 cells while terminals expand
+// it to the next tab stop, so a tabbed line comes out physically wider than
+// computed, soft-wraps mid-frame, and corrupts the alt screen. Go source is
+// tab-indented, so every Go diff hits this.
+const tabStop = 4
+
+// expandTabs replaces tabs with tabStop spaces. Cheap no-allocation passthrough
+// when there are no tabs.
+func expandTabs(s string) string {
+	if strings.IndexByte(s, '\t') < 0 {
+		return s
+	}
+	return strings.ReplaceAll(s, "\t", "    ")
+}
+
 // runeWidth returns the display cell width of a rune (0 for combining marks).
-func runeWidth(r rune) int { return runewidth.RuneWidth(r) }
+// Tabs count as tabStop so wrap counters stay consistent with expandTabs.
+func runeWidth(r rune) int {
+	if r == '\t' {
+		return tabStop
+	}
+	return runewidth.RuneWidth(r)
+}
 
 // runeWidthStr returns the total display cell width of s.
 func runeWidthStr(s string) int {
