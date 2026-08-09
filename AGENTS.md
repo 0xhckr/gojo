@@ -20,7 +20,9 @@ internal/
     model.go            — Bubble Tea Model: state, Update (msgs + keys), View, commands
     render.go           — seg/renderSegs/clip/bgRow + the lipgloss style cache
                           (escape sequences probed once per style combo),
-                          blankRow cache, ASCII fast path for segTextWidth
+                          blankRow cache, ASCII fast path for segTextWidth,
+                          expandTabs (raw control chars never hit the terminal:
+                          tabs render as tabStop=4 spaces everywhere)
     styles.go           — color palette, spinner frames, diff colors
     logview.go          — commit list rendering + variable-height scroll windowing
     diff.go             — git unified-diff parser + chroma highlighting → diffRow

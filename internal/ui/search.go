@@ -260,6 +260,7 @@ func (m Model) renderSearch(width, height int) []string {
 		if subject == "" {
 			subject = "(no description set)"
 		}
+		subject = expandTabs(subject)
 		subjectFg := colText
 		if e.IsWorkingCopy {
 			subjectFg = colYellow

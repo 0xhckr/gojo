@@ -3721,7 +3721,7 @@ func (m Model) renderStatusBar() []string {
 		return []string{bgRow(m.width, colDarkerGray, seg{text: " / search · type to filter · ⏎ jump · ↑/↓ navigate · esc cancel", fg: colGray})}
 
 	case m.errMsg != "":
-		msg := m.errMsg
+		msg := expandTabs(m.errMsg)
 		limit := m.width - 4
 		if limit > 0 && len(msg) > limit {
 			msg = msg[:limit]
@@ -3729,7 +3729,7 @@ func (m Model) renderStatusBar() []string {
 		return []string{bgRow(m.width, colDarkerGray, seg{text: " ✖ " + msg, fg: colRed})}
 
 	case m.message != "":
-		return []string{bgRow(m.width, colDarkerGray, seg{text: m.revsetBadge() + m.message, fg: colGray})}
+		return []string{bgRow(m.width, colDarkerGray, seg{text: m.revsetBadge() + expandTabs(m.message), fg: colGray})}
 
 	case len(m.statusEntries) > 0:
 		return []string{bgRow(m.width, colDarkerGray, seg{text: m.revsetBadge() + fmt.Sprintf("%d changed file(s)", len(m.statusEntries)), fg: colGray})}

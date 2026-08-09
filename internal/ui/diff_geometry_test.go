@@ -112,6 +112,49 @@ func TestDiffPanelGeometryMatrix(t *testing.T) {
 	}
 }
 
+// TestDiffTabsExpanded ensures tab-indented diff content (all Go source) can
+// never reach the terminal raw: the UI expands tabs to tabStop spaces.
+// A raw tab is counted as 0 cells by the width libraries but expanded to the
+// next tab stop by the terminal, producing lines wider than the screen that
+// soft-wrap and corrupt the whole alt screen.
+func TestDiffTabsExpanded(t *testing.T) {
+	raw := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +1,3 @@\n-func a() int {\n+\treturn 1\n+func a() int {\n \treturn 2\n"
+	rows := renderDiff(raw)
+
+	// The parsed spans keep the original bytes (split reconstruction needs
+	// them); only rendering expands.
+	foundTab := false
+	for _, r := range rows {
+		for _, sp := range r.spans {
+			if strings.Contains(sp.text, "\t") {
+				foundTab = true
+			}
+		}
+	}
+	if !foundTab {
+		t.Fatal("test setup: no tab found in parsed spans")
+	}
+
+	// Render every row's sub-lines; none may contain a raw tab, and each must
+	// measure exactly scrollW cells.
+	for _, splitActive := range []bool{false, true} {
+		digits := maxLineDigits(rows)
+		scrollW := 100
+		for ri, r := range rows {
+			maxSub := diffRowWrapCount(scrollW, digits, r, false, splitActive, false)
+			for sub := 0; sub < maxSub; sub++ {
+				out := renderDiffRowSubLine(scrollW, digits, r, sub, nil, false, false, "", splitActive, false)
+				if strings.Contains(out, "\t") {
+					t.Errorf("row %d sub %d (split=%v) contains a raw tab", ri, sub, splitActive)
+				}
+				if w := lipgloss.Width(out); w != scrollW {
+					t.Errorf("row %d sub %d (split=%v): width %d, want %d", ri, sub, splitActive, w, scrollW)
+				}
+			}
+		}
+	}
+}
+
 // TestBoundaryScrollbar exercises the geometry boundary where the
 // diff body alone fits the viewport but head + body overflow it: the reserved
 // scrollbar width must match the scrollbar's visibility. Rows wider than the

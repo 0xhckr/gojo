@@ -694,7 +694,7 @@ func (m Model) renderFileBlame(width, height int) []string {
 	if len(cid) > 8 {
 		cid = cid[:8]
 	}
-	desc := strings.TrimSpace(cur.Description)
+	desc := expandTabs(strings.TrimSpace(cur.Description))
 	head := buildBlameHead(width, cid, cur.Author, desc)
 	headLen := len(head)
 
