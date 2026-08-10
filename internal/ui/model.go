@@ -1509,47 +1509,25 @@ func (m *Model) diffFollowCursor() {
 	m.diffClampMax()
 }
 
-// diffChunkContext is the number of context lines shown above (when entering
-// from above) or below (when entering from below) a chunk on snap, so the
-// change is seen in its surrounding context.
-const diffChunkContext = 3
-
-// diffEnterChunkDown scrolls for entering a chunk from above (cursor on its
-// first line). It reveals diffChunkContext lines before the chunk, then as much
-// of the chunk as fits in the viewport.
-func (m *Model) diffEnterChunkDown() {
-	cur := m.diffChunks[m.diffCurChunk]
-	headLen := m.diffHeadLen()
-	first := headLen + m.rowStartTerm(cur[0]-headLen)
-	top := first - diffChunkContext
-	if top < 0 {
-		top = 0
+// diffCenterCursor scrolls so the cursor row sits at the vertical middle of
+// the diff body. Used by the explicit cursor moves (j/k, g/G). With the "page
+// ends kept in mind": at the very top the scroll clamps to 0 (the cursor
+// rides near the edge, no dead space above the head), at the bottom it clamps
+// to maxScroll (cursor rides near the bottom edge).
+func (m *Model) diffCenterCursor() {
+	row := m.diffCursorBodyRow()
+	if row < 0 {
+		return
 	}
-	m.diffScrollY = top
+	m.diffScrollY = row - (m.diffBodyHeight()-1)/2
 	m.diffClampMax()
 }
 
-// diffEnterChunkUp scrolls for entering a chunk from below (cursor on its last
-// line). It reveals diffChunkContext lines after the chunk, then as much of the
-// chunk as fits in the viewport.
-func (m *Model) diffEnterChunkUp() {
-	cur := m.diffChunks[m.diffCurChunk]
-	headLen := m.diffHeadLen()
-	lastIdx := cur[len(cur)-1] - headLen
-	last := headLen + m.rowStartTerm(lastIdx) + m.rowCountTerm(lastIdx) - 1
-	h := m.diffBodyHeight()
-	top := last + diffChunkContext - h + 1
-	if top < 0 {
-		top = 0
-	}
-	m.diffScrollY = top
-	m.diffClampMax()
-}
-
-// diffMoveDown advances the cursor: steps within the current chunk, revealing
-// one line at a time for long chunks, then jumps to the next chunk. Falls back
-// to free line-scrolling when there are no chunks (e.g. raw list output). At
-// the very bottom it free-scrolls to reveal trailing context.
+// diffMoveDown advances the cursor one line (stepping within a chunk, then to
+// the next chunk), keeping the cursor centered in the viewport via
+// diffCenterCursor. Falls back to free line-scrolling when there are no
+// chunks (e.g. raw list output). At the very bottom it free-scrolls to reveal
+// trailing context.
 func (m *Model) diffMoveDown() {
 	if len(m.diffChunks) == 0 {
 		if m.diffScrollY < m.diffMaxScroll() {
@@ -1560,13 +1538,13 @@ func (m *Model) diffMoveDown() {
 	cur := m.diffChunks[m.diffCurChunk]
 	if m.diffCurLine < len(cur)-1 {
 		m.diffCurLine++
-		m.diffFollowCursor()
+		m.diffCenterCursor()
 		return
 	}
 	if m.diffCurChunk < len(m.diffChunks)-1 {
 		m.diffCurChunk++
 		m.diffCurLine = 0
-		m.diffEnterChunkDown()
+		m.diffCenterCursor()
 		return
 	}
 	// Last line of the last chunk: free-scroll down to reveal trailing context.
@@ -1575,9 +1553,10 @@ func (m *Model) diffMoveDown() {
 	}
 }
 
-// diffMoveUp is the upward mirror of diffMoveDown. At the very top it
-// free-scrolls upward to reveal the status section / preceding context, with
-// the cursor resting on the first chunk line.
+// diffMoveUp is the upward mirror of diffMoveDown, keeping the cursor centered
+// (diffCenterCursor). At the very top it free-scrolls upward to reveal the
+// status section / preceding context, with the cursor resting on the first
+// chunk line.
 func (m *Model) diffMoveUp() {
 	if len(m.diffChunks) == 0 {
 		if m.diffScrollY > 0 {
@@ -1587,13 +1566,13 @@ func (m *Model) diffMoveUp() {
 	}
 	if m.diffCurLine > 0 {
 		m.diffCurLine--
-		m.diffFollowCursor()
+		m.diffCenterCursor()
 		return
 	}
 	if m.diffCurChunk > 0 {
 		m.diffCurChunk--
 		m.diffCurLine = len(m.diffChunks[m.diffCurChunk]) - 1
-		m.diffEnterChunkUp()
+		m.diffCenterCursor()
 		return
 	}
 	// First line of the first chunk: free-scroll up to reveal the status header
@@ -1603,7 +1582,8 @@ func (m *Model) diffMoveUp() {
 	}
 }
 
-// diffMoveTop jumps to the first line of the first chunk.
+// diffMoveTop jumps to the first line of the first chunk, landing at the very
+// top of the document (head/status section fully visible).
 func (m *Model) diffMoveTop() {
 	if len(m.diffChunks) == 0 {
 		m.diffScrollY = 0
@@ -1611,7 +1591,7 @@ func (m *Model) diffMoveTop() {
 	}
 	m.diffCurChunk = 0
 	m.diffCurLine = 0
-	m.diffFollowCursor()
+	m.diffScrollY = 0
 }
 
 // diffMoveBottom jumps to the last line of the last chunk.
@@ -1622,7 +1602,7 @@ func (m *Model) diffMoveBottom() {
 	}
 	m.diffCurChunk = len(m.diffChunks) - 1
 	m.diffCurLine = len(m.diffChunks[m.diffCurChunk]) - 1
-	m.diffFollowCursor()
+	m.diffCenterCursor()
 }
 
 // cursorOnFileHeader returns the row index of the file header the cursor is

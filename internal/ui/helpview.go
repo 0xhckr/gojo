@@ -83,7 +83,7 @@ var helpSections = []helpSection{
 		{"esc / q", "cancel"},
 	}},
 	{title: "Diff Panel", color: colGreen, bindings: []helpBinding{
-		{"↑/k, ↓/j", "move chunk cursor  (view follows)"},
+		{"↑/k, ↓/j", "move chunk cursor  (view centers)"},
 		{"wheel / pgup·b / pgdn·f", "scroll view  (cursor stays)"},
 		{"g / G", "jump top / bottom"},
 		{"←/h or →/l", "collapse / expand file"},

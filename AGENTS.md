@@ -151,7 +151,7 @@ with `x/ansi` (preserving escape codes).
 | View | Key | Description |
 |------|-----|-------------|
 | Log  | default | Commit list, 2 lines + graph edges per commit. Variable-height scroll windowing in `logWindow`. Conflicted commits carry a red `⚡ conflict` badge. |
-| Diff | `enter` | Status summary + parsed/highlighted diff, scrolled via `diffScrollY`. |
+| Diff | `enter` | Status summary + parsed/highlighted diff. Cursor moves (j/k, g/G) center the cursor in the viewport (clamped at the page ends); wheel/pgup·pgdn scroll only via `diffScrollY` without touching the chunk cursor. |
 | Conflicts | `c` (log/diff) | Side-by-side 3-way conflict resolution; per-hunk l/r/b/u or pane click, per-file ⏎ apply via `jj resolve` with a probe/apply merge tool. |
 | Help | `?` | Keybinding reference, scrolled via `helpScrollY`. |
 

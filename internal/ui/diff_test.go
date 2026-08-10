@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -233,11 +234,10 @@ func TestWordDiffCompute(t *testing.T) {
 	}
 }
 
-// TestDiffCursorScroll verifies the "reveal one line at a time" behavior for a
-// long chunk: stepping down through a chunk taller than the viewport scrolls a
-// line at a time, and stepping past the end jumps to the next chunk. It also
-// checks that snapping to a chunk shows diffChunkContext lines of context
-// before it.
+// TestDiffCursorScroll verifies the centering behavior for cursor moves:
+// every j/k step recenters the viewport on the cursor row, scrolling one line
+// per step inside a chunk and jumping to center on chunk hops, clamping at
+// the page ends (top: scrollY 0, bottom: maxScroll).
 func TestDiffCursorScroll(t *testing.T) {
 	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,1 +1,10 @@\n"
 	for i := 0; i < 10; i++ {
@@ -252,74 +252,125 @@ func TestDiffCursorScroll(t *testing.T) {
 	// Chunks: [0] a header, [1] 10 additions, [2] b header, [3] 2 additions.
 	const addChunk = 1 // index of a's 10-line addition chunk
 	m.diffCurChunk, m.diffCurLine = addChunk, 0
-	bodyH := m.diffBodyHeight() // visible rows below title
-
-	// Entering chunk from above reveals diffChunkContext lines of context
-	// before the chunk (clamped at 0), then as much of the chunk as fits.
-	m.diffEnterChunkDown()
-	wantTop := m.diffChunks[addChunk][0] - diffChunkContext
-	if wantTop < 0 {
-		wantTop = 0
+	bodyH := m.diffBodyHeight()
+	centerScroll := func(row int) int {
+		s := row - (bodyH-1)/2
+		if s < 0 {
+			s = 0
+		}
+		if mx := m.diffMaxScroll(); s > mx {
+			s = mx
+		}
+		return s
 	}
-	if m.diffScrollY != wantTop {
-		t.Fatalf("enterChunkDown scrollY = %d, want %d (chunk start %d - ctx %d)",
-			m.diffScrollY, wantTop, m.diffChunks[addChunk][0], diffChunkContext)
+	assertCentered := func(tag string) {
+		t.Helper()
+		row := m.diffCursorBodyRow()
+		if w := centerScroll(row); m.diffScrollY != w {
+			t.Errorf("%s: scrollY = %d, want %d (cursor %d centered in %d rows)", tag, m.diffScrollY, w, row, bodyH)
+		}
 	}
 
-	// Walk down the addition chunk: cursor stays in view, and once it passes
-	// the bottom edge the viewport scrolls exactly one line per step.
+	m.diffCenterCursor()
+	startScroll := m.diffScrollY
+	assertCentered("initial")
+
+	// Walk down the addition chunk: the cursor stays centered, so the
+	// viewport scrolls exactly one line per step until the bottom clamp.
+	prev := startScroll
 	for i := 1; i < len(m.diffChunks[addChunk]); i++ {
 		m.diffMoveDown()
 		if m.diffCursorBodyRow() != m.diffChunks[addChunk][i] {
 			t.Fatalf("step %d: cursor = %d, want %d", i, m.diffCursorBodyRow(), m.diffChunks[addChunk][i])
 		}
-		row := m.diffCursorBodyRow()
-		if row < m.diffScrollY || row >= m.diffScrollY+bodyH {
-			t.Fatalf("step %d: cursor %d out of view [%d,%d)", i, row, m.diffScrollY, m.diffScrollY+bodyH)
+		assertCentered(fmt.Sprintf("step %d", i))
+		if m.diffScrollY < m.diffMaxScroll() && m.diffScrollY != prev+1 {
+			t.Fatalf("step %d: scrollY = %d, want %d (one-line follow)", i, m.diffScrollY, prev+1)
 		}
+		prev = m.diffScrollY
 	}
 
-	// One more down: jump to the b file header (next navigable item).
+	// One more down: jump to the b file header (next navigable item), still
+	// centered.
 	m.diffMoveDown()
 	if m.diffCurChunk != addChunk+1 || m.diffCurLine != 0 {
 		t.Fatalf("after addition chunk: chunk=%d line=%d, want %d,0", m.diffCurChunk, m.diffCurLine, addChunk+1)
 	}
-	c1 := m.diffCursorBodyRow()
-	if c1 < m.diffScrollY || c1 >= m.diffScrollY+bodyH {
-		t.Errorf("file header cursor %d out of view [%d,%d)", c1, m.diffScrollY, m.diffScrollY+bodyH)
-	}
+	assertCentered("b file header")
 
-	// Walk back up: re-enter the addition chunk from below (last line).
+	// Walk back up: re-enter the addition chunk on its last line, centered.
 	m.diffMoveUp()
 	if m.diffCurChunk != addChunk || m.diffCurLine != len(m.diffChunks[addChunk])-1 {
 		t.Fatalf("moveUp: chunk=%d line=%d, want %d,%d", m.diffCurChunk, m.diffCurLine, addChunk, len(m.diffChunks[addChunk])-1)
 	}
-	last := m.diffChunks[addChunk][len(m.diffChunks[addChunk])-1]
-	wantUp := last + diffChunkContext - bodyH + 1
-	if wantUp < 0 {
-		wantUp = 0
+	assertCentered("re-entry from below")
+}
+
+// TestDiffCenterPageEnds pins the centering clamps: G centers onto the last
+// chunk line but clamps at maxScroll (bottom page end), g jumps to the first
+// chunk at scroll 0 (top page end), and a mid-document j step centers
+// exactly.
+func TestDiffCenterPageEnds(t *testing.T) {
+	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,1 +1,40 @@\n"
+	for i := 0; i < 40; i++ {
+		raw += "+line\n"
 	}
-	if wantUp > m.diffMaxScroll() {
-		wantUp = m.diffMaxScroll()
+	m := Model{width: 80, height: 11, view: viewLog, diffOpen: true}
+	m.diffRows = renderDiff(raw)
+	m.diffStatus = nil
+	m.diffChunks = computeDiffChunks(m.diffRows, m.diffHeadLen(), nil)
+	bodyH := m.diffBodyHeight()
+
+	// G: bottom page end — clamps to maxScroll.
+	m.diffMoveBottom()
+	if m.diffCurChunk != len(m.diffChunks)-1 || m.diffCurLine != len(m.diffChunks[len(m.diffChunks)-1])-1 {
+		t.Fatalf("G: chunk=%d line=%d, want last chunk's last line", m.diffCurChunk, m.diffCurLine)
 	}
-	if m.diffScrollY != wantUp {
-		t.Errorf("addition chunk re-entry scrollY = %d, want %d", m.diffScrollY, wantUp)
+	if m.diffScrollY != m.diffMaxScroll() {
+		t.Errorf("G: scrollY = %d, want clamp %d", m.diffScrollY, m.diffMaxScroll())
+	}
+
+	// g: top page end — cursor on the first chunk, scroll pinned to 0 so the
+	// head/status section is fully visible.
+	m.diffMoveTop()
+	if m.diffCurChunk != 0 || m.diffCurLine != 0 {
+		t.Fatalf("g: chunk=%d line=%d, want 0,0", m.diffCurChunk, m.diffCurLine)
+	}
+	if m.diffScrollY != 0 {
+		t.Errorf("g: scrollY = %d, want 0 (top of document)", m.diffScrollY)
+	}
+
+	// j into the middle: exact center, no clamp.
+	m.diffMoveDown() // chunk 0 (file header) → chunk 1 first line
+	if m.diffCurChunk != 1 || m.diffCurLine != 0 {
+		t.Fatalf("j: chunk=%d line=%d, want 1,0", m.diffCurChunk, m.diffCurLine)
+	}
+	row := m.diffCursorBodyRow()
+	if want := row - (bodyH-1)/2; m.diffScrollY != want {
+		t.Errorf("mid step: scrollY = %d, want %d (cursor %d centered in %d)", m.diffScrollY, want, row, bodyH)
+	}
+	if row < m.diffScrollY || row >= m.diffScrollY+bodyH {
+		t.Errorf("cursor %d out of view [%d,%d)", row, m.diffScrollY, m.diffScrollY+bodyH)
 	}
 }
 
 // TestDiffCursorFreeScrollTop verifies that pressing up at the first line of
 // the first chunk free-scrolls the viewport upward to reveal the status
-// section, with the cursor resting on the first chunk line.
+// section, with the cursor resting on the first chunk line. (Centering can't
+// reveal the head while the cursor sits on it, so the edge free-scrolls.)
 func TestDiffCursorFreeScrollTop(t *testing.T) {
-	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,1 +1,2 @@\n+x\n+y\n"
-	m := Model{width: 80, height: 24, view: viewLog, diffOpen: true}
+	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,1 +1,10 @@\n"
+	for i := 0; i < 10; i++ {
+		raw += "+line\n"
+	}
+	m := Model{width: 80, height: 11, view: viewLog, diffOpen: true}
 	rows := renderDiff(raw)
 	m.diffRows = rows
 	m.diffStatus = nil
 	m.diffDigits = maxLineDigits(rows)
 	m.diffChunks = computeDiffChunks(rows, m.diffHeadLen(), nil)
 	m.diffCurChunk, m.diffCurLine = 0, 0
-	m.diffEnterChunkDown()
+	m.diffCenterCursor()
 	cursorRow := m.diffCursorBodyRow()
 	startScroll := m.diffScrollY
 
@@ -360,7 +411,7 @@ func TestDiffWheelScrollsWithoutCursor(t *testing.T) {
 	m.diffChunks = computeDiffChunks(m.diffRows, m.diffHeadLen(), nil)
 	// Chunks: [0] a header, [1] 10 additions. Cursor into the addition chunk.
 	m.diffCurChunk, m.diffCurLine = 1, 0
-	m.diffEnterChunkDown()
+	m.diffCenterCursor()
 	startScroll := m.diffScrollY
 
 	// Message level: one wheel event scrolls the viewport one step without
@@ -417,7 +468,7 @@ func TestDiffPageKeysScrollWithoutCursor(t *testing.T) {
 	m.diffStatus = nil
 	m.diffChunks = computeDiffChunks(m.diffRows, m.diffHeadLen(), nil)
 	m.diffCurChunk, m.diffCurLine = 1, 0
-	m.diffEnterChunkDown()
+	m.diffCenterCursor()
 	half := max(1, m.diffBodyHeight()) / 2
 	cur := m.diffCursorBodyRow()
 
@@ -577,20 +628,24 @@ func TestDiffCursorShowsContext(t *testing.T) {
 	// Chunks: [0] a header, [1] -old/+new (2 elements).
 	const changeChunk = 1
 	m.diffCurChunk, m.diffCurLine = changeChunk, 0
-	head := m.diffHeadLen()
-	chunkFirst := m.diffChunks[changeChunk][0] // body row of -old
+	chunkFirst := m.diffChunks[changeChunk][0]                               // body row of -old
+	chunkLast := m.diffChunks[changeChunk][len(m.diffChunks[changeChunk])-1] // +new
 
-	// Scroll so the chunk is near the bottom of the viewport, then step: the
-	// whole chunk must stay visible (scroll moves only to keep it so), proving
-	// context above isn't lost to a pin-to-top jump.
-	m.diffScrollY = chunkFirst // pin top as if we'd just entered
-	m.diffCurLine = 1          // move to +new
-	m.diffFollowCursor()
-	// The chunk's first line should still be visible (not scrolled away).
+	// Stepping through the chunk keeps the viewport centered on the cursor;
+	// a chunk that fits stays fully visible so surrounding context isn't lost.
+	m.diffCurChunk, m.diffCurLine = changeChunk, 0
+	m.diffCenterCursor()
+	m.diffMoveDown() // onto +new
+	if m.diffCurLine != 1 {
+		t.Fatalf("curLine = %d, want 1 (+new)", m.diffCurLine)
+	}
+	bodyH := m.diffBodyHeight()
 	if chunkFirst < m.diffScrollY {
 		t.Errorf("chunk first line %d scrolled above viewport %d", chunkFirst, m.diffScrollY)
 	}
-	_ = head
+	if chunkLast >= m.diffScrollY+bodyH {
+		t.Errorf("chunk last line %d below viewport %d", chunkLast, m.diffScrollY+bodyH)
+	}
 }
 
 // TestDiffWrap verifies that long diff lines wrap onto extra terminal lines
@@ -646,8 +701,8 @@ func TestDiffWrap(t *testing.T) {
 		t.Errorf("wrapped panel lines = %d, want %d", len(out), m.height)
 	}
 
-	// Following the cursor must keep the cursor's first sub-line in view.
-	m.diffEnterChunkDown()
+	// Centering the cursor must keep the cursor's first sub-line in view.
+	m.diffCenterCursor()
 	row := m.diffCursorBodyRow()
 	if row < m.diffScrollY || row >= m.diffScrollY+m.diffBodyHeight() {
 		t.Errorf("wrapped cursor %d out of view [%d,%d)", row, m.diffScrollY, m.diffScrollY+m.diffBodyHeight())
