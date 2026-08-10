@@ -367,49 +367,49 @@ func (m Model) handleConflictKey(k string) (tea.Model, tea.Cmd) {
 	}
 	bodyH := m.conflictBodyHeight()
 
-	switch k {
-	case "q", "esc":
+	switch m.keys.resolve(ctxConflict, k) {
+	case actClose:
 		m.conflictOpen = false
 		return m, nil
-	case "up", "k":
+	case actUp:
 		if n > 0 {
 			m.conflict.cursor = (m.conflict.cursor - 1 + n) % n
 			m.conflictFollowCursor()
 		}
-	case "down", "j":
+	case actDown:
 		if n > 0 {
 			m.conflict.cursor = (m.conflict.cursor + 1) % n
 			m.conflictFollowCursor()
 		}
-	case "home", "g":
+	case actTop:
 		if n > 0 {
 			m.conflict.cursor = 0
 			m.conflictFollowCursor()
 		}
-	case "end", "G":
+	case actBottom:
 		if n > 0 {
 			m.conflict.cursor = n - 1
 			m.conflictFollowCursor()
 		}
-	case "pgup", "ctrl+u":
+	case actPageUp:
 		m.conflict.scrollY -= max(1, bodyH/2)
 		m.conflictClampScroll()
-	case "pgdn", "ctrl+d":
+	case actPageDown:
 		m.conflict.scrollY += max(1, bodyH/2)
 		m.conflictClampScroll()
-	case "[":
+	case actPrevFile:
 		m.conflictSwitchFile(-1)
-	case "]":
+	case actNextFile:
 		m.conflictSwitchFile(1)
-	case "l", "left", "h":
+	case actPickLeft:
 		m.conflictSetChoice(resolutionLeft)
-	case "r", "right":
+	case actPickRight:
 		m.conflictSetChoice(resolutionRight)
-	case "b":
+	case actPickBoth:
 		m.conflictSetChoice(resolutionBoth)
-	case "u":
+	case actPickUnset:
 		m.conflictSetChoice(resolutionUnset)
-	case "enter":
+	case actApply:
 		return m.execConflictApply()
 	}
 	return m, nil

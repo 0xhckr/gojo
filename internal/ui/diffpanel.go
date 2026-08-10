@@ -254,7 +254,9 @@ func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw str
 // are always contiguous; chunkFirst < 0 means no chunk). A thin left-edge bar
 // is drawn for those rows: bright for the cursor line, dim for the rest of
 // the chunk.
-func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, aiLoading bool, spinnerFrame int, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkFirst, chunkLast int, collapsed map[string]bool, sv splitView, fileMode bool, fileHead []string, preLayout *diffLayout, hoverRow int) []string {
+// titleHint is the key-hint suffix on the title bar (e.g.
+// "  (enter/q to close) "), resolved from the configured keymap by callers.
+func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, aiLoading bool, spinnerFrame int, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkFirst, chunkLast int, collapsed map[string]bool, sv splitView, fileMode bool, fileHead []string, preLayout *diffLayout, hoverRow int, titleHint string) []string {
 	// Title bar — the only sticky chrome; description + status + separator +
 	// diff all scroll together below it as one body. The revision ID uses the
 	// same two-tone highlighting as the log view: the shortest-unique prefix
@@ -267,7 +269,7 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 		if loading {
 			titleSegs = append(titleSegs, seg{text: "  loading…", fg: colText, bg: colPanel})
 		}
-		titleSegs = append(titleSegs, seg{text: "  (esc/q to back) ", fg: colTextMuted, bg: colPanel})
+		titleSegs = append(titleSegs, seg{text: titleHint, fg: colTextMuted, bg: colPanel})
 	} else {
 		if revPrefixLen > 0 && revPrefixLen < len(rev) {
 			titleSegs = append(titleSegs, seg{text: rev[:revPrefixLen], fg: colMagenta, bold: true, bg: colPanel})
@@ -278,7 +280,7 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 		if loading {
 			titleSegs = append(titleSegs, seg{text: "  loading…", fg: colText, bg: colPanel})
 		}
-		titleSegs = append(titleSegs, seg{text: "  (enter/q to close) ", fg: colText, bg: colPanel})
+		titleSegs = append(titleSegs, seg{text: titleHint, fg: colText, bg: colPanel})
 	}
 	out := []string{bgRow(width, colPanel, titleSegs...)}
 

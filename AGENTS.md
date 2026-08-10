@@ -23,10 +23,14 @@ internal/
                           gojo-composed content into $output)
     config.go           — Config struct, repo-root discovery (ErrNoRepo sentinel
                           when no .jj dir; Config still carries JJPath so the
-                          boot prompt can init), minimal TOML loader
+                          boot prompt can init), minimal TOML loader (incl. the
+                          [keymap] / [tools.gojo.keymap] section → Config.Keymap)
     ai.go               — AIDescribe: OpenAI-compatible chat-completions client (net/http)
   ui/
     model.go            — Bubble Tea Model: state, Update (msgs + keys), View, commands
+    keys.go             — configurable keybindings: key contexts/actions, default
+                          table, KeyMap (defaults + [keymap] overrides), resolve/
+                          hk/hkN hint helpers, keyMsg synthesis for menu clicks
     render.go           — seg/renderSegs/clip/bgRow + the lipgloss style cache
                           (escape sequences probed once per style combo),
                           blankRow cache, ASCII fast path for segTextWidth,
@@ -167,6 +171,37 @@ with `x/ansi` (preserving escape codes).
 3. Autocomplete suggestions — only in bookmark input mode (1 line, optional)
 4. Status bar — mode menus, errors, messages, or file count (1 line)
 5. Help bar — global keybinding hints (1 line)
+
+## Configurable keybindings
+
+All keys route through `KeyMap` (keys.go): every handler resolves
+`tea.KeyMsg.String()` through a *context* (`global`, `log`, `diff`, `split`,
+`conflict`, `input`, `menu`, `bookmark`, `tag`, `git`, `remote`, …) to a named
+*action*, then switches on the action. The default table in `keys.go` declares
+each context's actions with their default keys.
+
+Users override in `~/.config/gojo/gojo.toml` (or `[tools.gojo.keymap]` in jj's
+config.toml):
+
+```toml
+[keymap]
+log.down = "j,down"     # comma-separated alternates; replaces the whole binding
+global.quit = "Q"
+diff.absorb = ""        # empty = unbind
+```
+
+Key names follow `tea.KeyMsg.String()` ("enter", "esc", "tab", "up", "pgup",
+"ctrl+u", single runes…); `normalizeKeyName` accepts friendly spellings
+("space", "escape", "pgdn"…). When two actions in a context are bound to the
+same key, the one declared first in the default table wins. Overrides apply at
+boot (bootMsg → `newKeyMap(cfg.Keymap)`); the boot init/error screens read the
+user keymap too since config loads before repo discovery.
+
+Every UI hint (help bar, status-bar menus, view title bars, help view,
+context menus) renders from the keymap via `m.hk` / `m.hkN` / `m.hkRaw` /
+`m.hkLast` helpers, so rebinding is reflected everywhere. Synthetic dispatch
+(context-menu clicks, shortcut-bar clicks → `keyMsgFromName`) also resolves
+against the active bindings.
 
 ## JJ Runner (internal/jj)
 

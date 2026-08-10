@@ -274,7 +274,7 @@ func TestSearchStatusHelpBars(t *testing.T) {
 // TestSearchInHelpView verifies the help view includes a search section.
 func TestSearchInHelpView(t *testing.T) {
 	found := false
-	for _, s := range helpSections {
+	for _, s := range NewModel().helpSections() {
 		if s.title == "Search Mode" {
 			found = true
 			for _, b := range s.bindings {

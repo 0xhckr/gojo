@@ -699,13 +699,13 @@ func (m Model) tryShortcutClick(x, y int) (Model, tea.Cmd, bool) {
 	var statusMenu menuDef
 	switch {
 	case m.bookmarkMode && m.bookmarkAction == "":
-		statusMenu = menuDef{" [bookmark mode] ", bookmarkMenuItems}
+		statusMenu = menuDef{" [bookmark mode] ", m.bookmarkMenuItems()}
 	case m.tagMode && m.tagAction == "":
-		statusMenu = menuDef{" [tag mode] ", tagMenuItems}
+		statusMenu = menuDef{" [tag mode] ", m.tagMenuItems()}
 	case m.gitMode && m.remoteMode && m.remoteAction == "":
-		statusMenu = menuDef{" [git > remote] ", remoteMenuItems}
+		statusMenu = menuDef{" [git > remote] ", m.remoteMenuItems()}
 	case m.gitMode && !m.remoteMode && !m.pushMode:
-		statusMenu = menuDef{" [git mode] ", gitMenuItems}
+		statusMenu = menuDef{" [git mode] ", m.gitMenuItems()}
 	}
 	if statusMenu.items != nil {
 		spans := computeMenuSpans(m.width, statusMenu.prefix, " ", statusMenu.items, m.statusBarStartY())
@@ -765,8 +765,18 @@ func keyMsgFromHint(hint string) (tea.KeyMsg, string) {
 		return tea.KeyMsg{Type: tea.KeySpace}, " "
 	case "tab":
 		return tea.KeyMsg{Type: tea.KeyTab}, "tab"
-	case "backspace":
+	case "backspace", "⌫":
 		return tea.KeyMsg{Type: tea.KeyBackspace}, "backspace"
+	case "del", "delete":
+		return tea.KeyMsg{Type: tea.KeyDelete}, "delete"
+	case "Home", "home":
+		return tea.KeyMsg{Type: tea.KeyHome}, "home"
+	case "End", "end":
+		return tea.KeyMsg{Type: tea.KeyEnd}, "end"
+	case "pgup":
+		return tea.KeyMsg{Type: tea.KeyPgUp}, "pgup"
+	case "pgdn", "pgdown":
+		return tea.KeyMsg{Type: tea.KeyPgDown}, "pgdown"
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(hint)}, hint
 	}
@@ -780,13 +790,13 @@ func (m Model) shortcutSpanAt(x, y int) (menuSpan, bool) {
 	// Status bar menus (sub-menu modes).
 	switch {
 	case m.bookmarkMode && m.bookmarkAction == "":
-		return hitMenuSpan(computeMenuSpans(m.width, " [bookmark mode] ", " ", bookmarkMenuItems, m.statusBarStartY()), x, y)
+		return hitMenuSpan(computeMenuSpans(m.width, " [bookmark mode] ", " ", m.bookmarkMenuItems(), m.statusBarStartY()), x, y)
 	case m.tagMode && m.tagAction == "":
-		return hitMenuSpan(computeMenuSpans(m.width, " [tag mode] ", " ", tagMenuItems, m.statusBarStartY()), x, y)
+		return hitMenuSpan(computeMenuSpans(m.width, " [tag mode] ", " ", m.tagMenuItems(), m.statusBarStartY()), x, y)
 	case m.gitMode && m.remoteMode && m.remoteAction == "":
-		return hitMenuSpan(computeMenuSpans(m.width, " [git > remote] ", " ", remoteMenuItems, m.statusBarStartY()), x, y)
+		return hitMenuSpan(computeMenuSpans(m.width, " [git > remote] ", " ", m.remoteMenuItems(), m.statusBarStartY()), x, y)
 	case m.gitMode && !m.remoteMode && !m.pushMode:
-		return hitMenuSpan(computeMenuSpans(m.width, " [git mode] ", " ", gitMenuItems, m.statusBarStartY()), x, y)
+		return hitMenuSpan(computeMenuSpans(m.width, " [git mode] ", " ", m.gitMenuItems(), m.statusBarStartY()), x, y)
 	}
 	// Help bar.
 	if helpItems := m.helpBarItems(); helpItems != nil {

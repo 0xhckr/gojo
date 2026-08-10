@@ -21,6 +21,13 @@ type Config struct {
 	AIBaseURL    string
 	AIModel      string
 	CommitPrompt string
+
+	// Keymap carries keybinding overrides keyed by "<context>.<action>"
+	// (e.g. "log.down") with comma-separated key names as values. It is
+	// populated from the [keymap] section of gojo.toml (or
+	// [tools.gojo.keymap] in jj's config.toml) and consumed by the ui
+	// package. An empty value unbinds the action.
+	Keymap map[string]string
 }
 
 // DefaultAIBaseURL is used when ai_base_url / openrouter_base_url is unset.
@@ -31,8 +38,15 @@ const DefaultAIModel = "anthropic/claude-sonnet-4"
 
 // applyTOMLConfig parses a minimal subset of TOML, optionally restricted to a
 // single section (e.g. "tools.gojo"). Only the keys gojo cares about are read.
+// Keybindings are collected from a "<section>.keymap" sub-section (or the
+// top-level [keymap] section when section is "") into cfg.Keymap.
 func applyTOMLConfig(cfg *Config, raw string, section string) {
 	inSection := section == "" // no section filter → parse all top-level lines
+	keymapSection := section + ".keymap"
+	if section == "" {
+		keymapSection = "keymap"
+	}
+	inKeymap := false
 
 	for _, line := range strings.Split(raw, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -44,10 +58,11 @@ func applyTOMLConfig(cfg *Config, raw string, section string) {
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 			name := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
 			inSection = name == section
+			inKeymap = name == keymapSection
 			continue
 		}
 
-		if !inSection {
+		if !inSection && !inKeymap {
 			continue
 		}
 
@@ -76,6 +91,17 @@ func applyTOMLConfig(cfg *Config, raw string, section string) {
 			}
 		}
 
+		if inKeymap {
+			// Keybinding override: "log.down" = "j,down" etc. Quoted key
+			// names (TOML dotted keys) are unwrapped by the quote stripping
+			// above; the map key is used verbatim by the ui keymap.
+			if cfg.Keymap == nil {
+				cfg.Keymap = map[string]string{}
+			}
+			cfg.Keymap[key] = val
+			continue
+		}
+
 		switch key {
 		case "ai_api_key", "openrouter_api_key":
 			cfg.AIAPIKey = val
@@ -98,13 +124,8 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	repoRoot, err := findRepoRoot()
-	if err != nil {
-		return Config{JJPath: jjPath}, err
-	}
 
-	cfg := Config{JJPath: jjPath, RepoRoot: repoRoot}
-	cfg.GitPath, _ = findBinary("git")
+	cfg := Config{JJPath: jjPath}
 
 	home, _ := os.UserHomeDir()
 
@@ -121,6 +142,16 @@ func LoadConfig() (Config, error) {
 			applyTOMLConfig(&cfg, string(raw), "")
 		}
 	}
+
+	// Repo discovery happens last so user-level config (key bindings, AI
+	// keys) still loads when gojo starts outside a repo and shows the boot
+	// init prompt.
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return cfg, err
+	}
+	cfg.RepoRoot = repoRoot
+	cfg.GitPath, _ = findBinary("git")
 
 	return cfg, nil
 }

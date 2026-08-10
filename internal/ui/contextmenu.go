@@ -364,26 +364,26 @@ func (m Model) rightClickSelectHistory(mouseY int) Model {
 // handleContextMenuKey drives keyboard navigation and activation while the
 // context menu is open.
 func (m Model) handleContextMenuKey(k string) (tea.Model, tea.Cmd) {
-	switch k {
-	case "esc", "q":
+	switch m.keys.resolve(ctxMenu, k) {
+	case actClose:
 		m.closeContextMenu()
 		return m, nil
-	case "enter":
+	case actAccept:
 		return m.activateContextMenuItem()
-	case "up", "k":
+	case actUp:
 		if m.contextMenuCursor > 0 {
 			m.contextMenuCursor--
 		}
 		return m, nil
-	case "down", "j":
+	case actDown:
 		if m.contextMenuCursor < len(m.contextMenuItems)-1 {
 			m.contextMenuCursor++
 		}
 		return m, nil
-	case "home", "g":
+	case actTop:
 		m.contextMenuCursor = 0
 		return m, nil
-	case "end", "G":
+	case actBottom:
 		m.contextMenuCursor = len(m.contextMenuItems) - 1
 		return m, nil
 	}
@@ -549,151 +549,130 @@ func (m Model) renderContextMenuItem(mw int, item contextMenuItem, selected bool
 
 // ── Per-view context menu builders ──────────────────────────────────────────
 
+// logKeyItem builds a menu item that synthesizes the log-view key currently
+// bound to action, showing the primary binding as the hint.
+func (m Model) logKeyItem(label, action string) contextMenuItem {
+	msg, k := m.keyMsg(ctxLog, action)
+	return menuItem(label, displayKey(k), func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleLogKey(msg, k)
+	})
+}
+
+// diffKeyItem builds a menu item that synthesizes the diff-view key currently
+// bound to action.
+func (m Model) diffKeyItem(label, action string) contextMenuItem {
+	k := m.keys.primary(ctxDiff, action)
+	return menuItem(label, displayKey(k), func(m Model) (tea.Model, tea.Cmd) {
+		return m.handleDiffKey(k)
+	})
+}
+
 func (m Model) logContextMenuItems() []contextMenuItem {
 	var items []contextMenuItem
 	hasSel := m.selectedEntry() != nil
 
 	if hasSel {
-		items = append(items, menuItem("open diff", "enter", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleLogKey(tea.KeyMsg{Type: tea.KeyEnter}, "enter")
-		}))
+		items = append(items, m.logKeyItem("open diff", actOpen))
 	}
 	if hasSel {
-		items = append(items, menuItem("describe", "d", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}, "d")
-		}))
+		items = append(items, m.logKeyItem("describe", actDescribe))
 	}
 	if hasSel {
-		items = append(items, menuItem("AI describe", "D", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}, "D")
-		}))
+		items = append(items, m.logKeyItem("AI describe", actAIDescribe))
 	}
 	if hasSel {
-		items = append(items, menuItem("edit", "e", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}}, "e")
-		}))
+		items = append(items, m.logKeyItem("edit", actEdit))
 	}
-	items = append(items, menuItem("new change", "n", func(m Model) (tea.Model, tea.Cmd) {
-		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}, "n")
-	}))
+	items = append(items, m.logKeyItem("new change", actNew))
 	if hasSel {
-		items = append(items, menuItem("abandon", "a", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}, "a")
-		}))
+		items = append(items, m.logKeyItem("abandon", actAbandon))
 	}
 	if hasSel {
-		items = append(items, menuItem("absorb", "x", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}, "x")
-		}))
+		items = append(items, m.logKeyItem("absorb", actAbsorb))
 	}
-	items = append(items, menuItem("rebase", "r", func(m Model) (tea.Model, tea.Cmd) {
-		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}, "r")
-	}))
-	items = append(items, menuItem("squash", "s", func(m Model) (tea.Model, tea.Cmd) {
-		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}, "s")
-	}))
-	items = append(items, menuItem("bookmark", "b", func(m Model) (tea.Model, tea.Cmd) {
-		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}}, "b")
-	}))
-	items = append(items, menuItem("tag", "t", func(m Model) (tea.Model, tea.Cmd) {
-		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}}, "t")
-	}))
-	items = append(items, menuItem("git", "g", func(m Model) (tea.Model, tea.Cmd) {
-		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}}, "g")
-	}))
-	items = append(items, menuItem("file view", "f", func(m Model) (tea.Model, tea.Cmd) {
-		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}}, "f")
-	}))
-	items = append(items, menuItem("toggle all revisions", "A", func(m Model) (tea.Model, tea.Cmd) {
-		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}}, "A")
-	}))
-	items = append(items, menuItem("undo", "u", func(m Model) (tea.Model, tea.Cmd) {
-		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}}, "u")
-	}))
-	items = append(items, menuItem("redo", "U", func(m Model) (tea.Model, tea.Cmd) {
-		return m.handleLogKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'U'}}, "U")
-	}))
+	items = append(items, m.logKeyItem("rebase", actRebase))
+	items = append(items, m.logKeyItem("squash", actSquash))
+	items = append(items, m.logKeyItem("bookmark", actBookmark))
+	items = append(items, m.logKeyItem("tag", actTag))
+	items = append(items, m.logKeyItem("git", actGit))
+	items = append(items, m.logKeyItem("file view", actFiles))
+	items = append(items, m.logKeyItem("toggle all revisions", actAllRev))
+	items = append(items, m.logKeyItem("undo", actUndo))
+	items = append(items, m.logKeyItem("redo", actRedo))
 	return items
 }
 
+// modeKeyItem builds a menu item that runs handler with the key currently
+// bound to action in ctx, showing the primary binding as the hint.
+func (m Model) modeKeyItem(label, ctx, action string, handler func(Model, string) (tea.Model, tea.Cmd)) contextMenuItem {
+	k := m.keys.primary(ctx, action)
+	return menuItem(label, displayKey(k), func(m Model) (tea.Model, tea.Cmd) {
+		return handler(m, k)
+	})
+}
+
 func (m Model) rebaseContextMenuItems() []contextMenuItem {
+	rb := func(label, action string) contextMenuItem {
+		return m.modeKeyItem(label, ctxRebase, action, func(mm Model, k string) (tea.Model, tea.Cmd) { return mm.handleRebaseKey(k) })
+	}
 	return []contextMenuItem{
-		menuItem("confirm rebase", "enter", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleRebaseKey("enter")
-		}),
-		menuItem("toggle scope", "s", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleRebaseKey("s")
-		}),
-		menuItem("cycle placement", "tab", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleRebaseKey("tab")
-		}),
-		menuItem("cancel", "esc", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleRebaseKey("esc")
-		}),
+		rb("confirm rebase", actConfirm),
+		rb("toggle scope", actScope),
+		rb("cycle placement", actPlace),
+		rb("cancel", actCancel),
 	}
 }
 
 func (m Model) squashContextMenuItems() []contextMenuItem {
+	sq := func(label, action string) contextMenuItem {
+		return m.modeKeyItem(label, ctxSquash, action, func(mm Model, k string) (tea.Model, tea.Cmd) { return mm.handleSquashKey(k) })
+	}
 	return []contextMenuItem{
-		menuItem("confirm squash", "enter", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleSquashKey("enter")
-		}),
-		menuItem("cancel", "esc", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleSquashKey("esc")
-		}),
+		sq("confirm squash", actConfirm),
+		sq("cancel", actCancel),
 	}
 }
 
 func (m Model) diffContextMenuItems() []contextMenuItem {
 	var items []contextMenuItem
-	items = append(items, menuItem("close diff", "q", func(m Model) (tea.Model, tea.Cmd) {
-		return m.handleDiffKey("q")
-	}))
+	items = append(items, m.diffKeyItem("close diff", actClose))
 	if m.diffIsRevision && m.diffRev != "" {
-		items = append(items, menuItem("describe", "d", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleDiffKey("d")
-		}))
-		items = append(items, menuItem("AI describe", "D", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleDiffKey("D")
-		}))
-		items = append(items, menuItem("new change", "n", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleDiffKey("n")
-		}))
-		items = append(items, menuItem("split", "s", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleDiffKey("s")
-		}))
-		items = append(items, menuItem("absorb", "x", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleDiffKey("x")
-		}))
+		items = append(items, m.diffKeyItem("describe", actDescribe))
+		items = append(items, m.diffKeyItem("AI describe", actAIDescribe))
+		items = append(items, m.diffKeyItem("new change", actNew))
+		items = append(items, m.diffKeyItem("split", actSplit))
+		items = append(items, m.diffKeyItem("absorb", actAbsorb))
 	}
 	if fileIdx, ok := m.cursorFileHeader(); ok {
 		path := m.diffRows[fileIdx].path
 		collapsed := m.diffCollapsed != nil && m.diffCollapsed[path]
 		if collapsed {
-			items = append(items, menuItem("expand file", "l", func(m Model) (tea.Model, tea.Cmd) {
-				return m.handleDiffKey("l")
-			}))
+			items = append(items, m.diffKeyItem("expand file", actExpand))
 		} else {
-			items = append(items, menuItem("collapse file", "h", func(m Model) (tea.Model, tea.Cmd) {
-				return m.handleDiffKey("h")
-			}))
+			items = append(items, m.diffKeyItem("collapse file", actCollapse))
 		}
 	}
 	return items
 }
 
 func (m Model) splitContextMenuItems() []contextMenuItem {
-	return []contextMenuItem{
-		menuItem("toggle mark", "space", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleSplitKey(" ")
-		}),
-		menuItem("confirm split", "c", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleSplitKey("c")
-		}),
-		menuItem("cancel", "q", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleSplitKey("q")
-		}),
+	sp := func(label, action string) contextMenuItem {
+		return m.modeKeyItem(label, ctxSplit, action, func(mm Model, k string) (tea.Model, tea.Cmd) { return mm.handleSplitKey(k) })
 	}
+	return []contextMenuItem{
+		sp("toggle mark", actToggle),
+		sp("confirm split", actConfirm),
+		sp("cancel", actCancel),
+	}
+}
+
+// msgKeyItem builds a menu item that runs handler with a synthesized KeyMsg
+// for the key currently bound to action in ctx.
+func (m Model) msgKeyItem(label, ctx, action string, handler func(Model, tea.KeyMsg, string) (tea.Model, tea.Cmd)) contextMenuItem {
+	msg, k := m.keyMsg(ctx, action)
+	return menuItem(label, displayKey(k), func(m Model) (tea.Model, tea.Cmd) {
+		return handler(m, msg, k)
+	})
 }
 
 func (m Model) pickerContextMenuItems() []contextMenuItem {
@@ -701,62 +680,57 @@ func (m Model) pickerContextMenuItems() []contextMenuItem {
 	if fv.fzfActive {
 		var items []contextMenuItem
 		if fv.fzfCursor >= 0 && fv.fzfCursor < len(fv.fzfResults) {
-			items = append(items, menuItem("open file", "enter", func(m Model) (tea.Model, tea.Cmd) {
-				return m.handleFzfKey(tea.KeyMsg{Type: tea.KeyEnter}, "enter")
-			}))
+			items = append(items, m.msgKeyItem("open file", ctxFzf, actAccept,
+				func(mm Model, msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) { return mm.handleFzfKey(msg, k) }))
 		}
-		items = append(items, menuItem("close finder", "esc", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleFzfKey(tea.KeyMsg{Type: tea.KeyEscape}, "esc")
-		}))
+		items = append(items, m.msgKeyItem("close finder", ctxFzf, actCancel,
+			func(mm Model, msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) { return mm.handleFzfKey(msg, k) }))
 		return items
 	}
 	var items []contextMenuItem
 	if row := fv.curRow(); row != nil {
 		if row.node.isDir {
-			items = append(items, menuItem("expand/collapse", "enter", func(m Model) (tea.Model, tea.Cmd) {
-				return m.handleFilePickerKey(tea.KeyMsg{Type: tea.KeyEnter}, "enter")
-			}))
+			items = append(items, m.msgKeyItem("expand/collapse", ctxPicker, actOpen,
+				func(mm Model, msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) { return mm.handleFilePickerKey(msg, k) }))
 		} else {
-			items = append(items, menuItem("open file", "enter", func(m Model) (tea.Model, tea.Cmd) {
-				return m.handleFilePickerKey(tea.KeyMsg{Type: tea.KeyEnter}, "enter")
-			}))
+			items = append(items, m.msgKeyItem("open file", ctxPicker, actOpen,
+				func(mm Model, msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) { return mm.handleFilePickerKey(msg, k) }))
 		}
 	}
-	items = append(items, menuItem("leave file view", "q", func(m Model) (tea.Model, tea.Cmd) {
-		return m.handleFilePickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}, "q")
-	}))
+	items = append(items, m.msgKeyItem("leave file view", ctxPicker, actQuit,
+		func(mm Model, msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) { return mm.handleFilePickerKey(msg, k) }))
 	return items
 }
 
 func (m Model) blameContextMenuItems() []contextMenuItem {
+	bl := func(label, action string) contextMenuItem {
+		return m.modeKeyItem(label, ctxBlame, action, func(mm Model, k string) (tea.Model, tea.Cmd) { return mm.handleFileBlameKey(k) })
+	}
 	return []contextMenuItem{
-		menuItem("open commit", "enter", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleFileBlameKey("enter")
-		}),
-		menuItem("file history", "h", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleFileBlameKey("h")
-		}),
-		menuItem("back", "q", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleFileBlameKey("q")
-		}),
+		bl("open commit", actOpen),
+		bl("file history", actHistory),
+		bl("back", actBack),
 	}
 }
 
 func (m Model) historyContextMenuItems() []contextMenuItem {
+	hi := func(label, action string) contextMenuItem {
+		return m.modeKeyItem(label, ctxHist, action, func(mm Model, k string) (tea.Model, tea.Cmd) { return mm.handleFileHistoryKey(k) })
+	}
 	return []contextMenuItem{
-		menuItem("open commit", "enter", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleFileHistoryKey("enter")
-		}),
-		menuItem("back", "q", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleFileHistoryKey("q")
-		}),
+		hi("open commit", actOpen),
+		hi("back", actBack),
 	}
 }
 
 func (m Model) helpContextMenuItems() []contextMenuItem {
+	// Help closes via the global quit/help keys (handled in handleKey), not
+	// handleHelpKey.
+	k := m.hk(ctxGlobal, actQuit)
 	return []contextMenuItem{
-		menuItem("close help", "q", func(m Model) (tea.Model, tea.Cmd) {
-			return m.handleHelpKey("q"), nil
+		menuItem("close help", k, func(m Model) (tea.Model, tea.Cmd) {
+			m.view = viewLog
+			return m, nil
 		}),
 	}
 }

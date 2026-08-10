@@ -53,7 +53,7 @@ func TestShortcutClickBookmarkMenu(t *testing.T) {
 	m.bookmarkMode = true
 	m.bookmarkAction = ""
 
-	spans := computeMenuSpans(m.width, " [bookmark mode] ", " ", bookmarkMenuItems, m.statusBarStartY())
+	spans := computeMenuSpans(m.width, " [bookmark mode] ", " ", m.bookmarkMenuItems(), m.statusBarStartY())
 
 	var createSpan *menuSpan
 	for i := range spans {
@@ -68,8 +68,8 @@ func TestShortcutClickBookmarkMenu(t *testing.T) {
 
 	m2, _ := m.Update(leftClick(createSpan.x1, createSpan.y))
 	m = m2.(Model)
-	if m.bookmarkAction != "c" {
-		t.Fatalf("bookmarkAction = %q, want 'c'", m.bookmarkAction)
+	if m.bookmarkAction != actCreate {
+		t.Fatalf("bookmarkAction = %q, want %q (create)", m.bookmarkAction, actCreate)
 	}
 }
 
@@ -78,7 +78,7 @@ func TestShortcutClickGitMenu(t *testing.T) {
 	m := mouseTestModel()
 	m.gitMode = true
 
-	spans := computeMenuSpans(m.width, " [git mode] ", " ", gitMenuItems, m.statusBarStartY())
+	spans := computeMenuSpans(m.width, " [git mode] ", " ", m.gitMenuItems(), m.statusBarStartY())
 	var fetchSpan *menuSpan
 	for i := range spans {
 		if spans[i].keyHint == "f" {
@@ -123,7 +123,7 @@ func TestShortcutClickEsc(t *testing.T) {
 	m.bookmarkMode = true
 	m.bookmarkAction = ""
 
-	spans := computeMenuSpans(m.width, " [bookmark mode] ", " ", bookmarkMenuItems, m.statusBarStartY())
+	spans := computeMenuSpans(m.width, " [bookmark mode] ", " ", m.bookmarkMenuItems(), m.statusBarStartY())
 	var escSpan *menuSpan
 	for i := range spans {
 		if spans[i].keyHint == "esc" {
@@ -229,7 +229,7 @@ func TestShortcutHover(t *testing.T) {
 func TestShortcutHoverBookmarkMenu(t *testing.T) {
 	m := mouseTestModel()
 	m.bookmarkMode = true
-	spans := computeMenuSpans(m.width, " [bookmark mode] ", " ", bookmarkMenuItems, m.statusBarStartY())
+	spans := computeMenuSpans(m.width, " [bookmark mode] ", " ", m.bookmarkMenuItems(), m.statusBarStartY())
 
 	var cSpan menuSpan
 	for _, s := range spans {

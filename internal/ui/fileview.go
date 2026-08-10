@@ -399,7 +399,9 @@ func (m Model) renderFilePicker(width, height int) []string {
 		return m.renderFzf(width, height)
 	}
 	titleLeft := " file browser"
-	titleRight := " f: fzf · ⏎ open · l/→ expand · h/← collapse · esc/q leave "
+	titleRight := " f: fzf · " + m.hk(ctxPicker, actOpen) + " open · " +
+		m.hkN(ctxPicker, actExpand, 2, "/") + " expand · " + m.hkN(ctxPicker, actCollapse, 2, "/") + " collapse · " +
+		m.hkN(ctxPicker, actQuit, 2, "/") + " leave "
 	pad := max(1, width-len(titleLeft)-len(titleRight))
 	out := []string{bgRow(width, colDarkPurple,
 		seg{text: titleLeft, fg: colPurple, bg: colDarkPurple},
@@ -442,7 +444,7 @@ func (m Model) renderFzf(width, height int) []string {
 
 	// Title bar.
 	titleLeft := " file browser"
-	titleRight := " esc back · ⏎ open · type to filter "
+	titleRight := " " + m.hk(ctxFzf, actCancel) + " back · " + m.hk(ctxFzf, actAccept) + " open · type to filter "
 	pad := max(1, width-len(titleLeft)-len(titleRight))
 	out := []string{bgRow(width, colDarkPurple,
 		seg{text: titleLeft, fg: colPurple, bg: colDarkPurple},
@@ -674,7 +676,7 @@ func (m Model) renderFileBlame(width, height int) []string {
 	titleSegs := []seg{
 		{text: " ", fg: colText, bg: colPanel},
 		{text: fv.path, fg: colText, bold: true, bg: colPanel},
-		{text: "  (esc/q to back) ", fg: colTextMuted, bg: colPanel},
+		{text: "  (" + m.hkN(ctxBlame, actBack, 2, "/") + " to back) ", fg: colTextMuted, bg: colPanel},
 	}
 	title := bgRow(width, colPanel, titleSegs...)
 
@@ -748,7 +750,7 @@ func (m Model) renderFileBlame(width, height int) []string {
 		termScrollY = maxScroll
 	}
 
-	return renderDiffPanel(width, height, fv.path, 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, sectionFirst, sectionLast, nil, splitView{}, true, head, &layout, m.hover.blameLine)
+	return renderDiffPanel(width, height, fv.path, 0, false, false, 0, "", false, rows, digits, nil, "", termScrollY, cursorBodyRow, sectionFirst, sectionLast, nil, splitView{}, true, head, &layout, m.hover.blameLine, "  ("+m.hkN(ctxBlame, actBack, 2, "/")+" to back) ")
 }
 
 func lineDigits(n int) int {
@@ -794,7 +796,7 @@ func computeSectionRows(lines []jj.AnnotateLine, cursorY int) (int, int) {
 func (m Model) renderFileHistory(width, height int) []string {
 	fv := &m.fileView
 	titleLeft := " history: " + fv.path + "  (all())"
-	titleRight := " ⏎ open commit · esc back "
+	titleRight := " " + m.hk(ctxHist, actOpen) + " open commit · " + m.hk(ctxHist, actBack) + " back "
 	pad := max(1, width-len(titleLeft)-len(titleRight))
 	title := bgRow(width, colDarkPurple,
 		seg{text: titleLeft, fg: colWhite, bg: colDarkPurple},

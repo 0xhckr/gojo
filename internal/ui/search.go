@@ -168,7 +168,7 @@ func searchVisibleRange(cursor, offset, total, height int) (int, int) {
 func (m Model) renderSearch(width, height int) []string {
 	// Title bar.
 	titleLeft := " search revisions"
-	titleRight := " esc cancel · ⏎ jump · type to filter "
+	titleRight := " " + m.hk(ctxSearch, actCancel) + " cancel · " + m.hk(ctxSearch, actAccept) + " jump · type to filter "
 	pad := max(1, width-len(titleLeft)-len(titleRight))
 	out := []string{bgRow(width, colDarkPurple,
 		seg{text: titleLeft, fg: colPurple, bg: colDarkPurple},

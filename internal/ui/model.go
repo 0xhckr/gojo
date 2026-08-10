@@ -42,6 +42,10 @@ type Model struct {
 	cwd      string
 	home     string
 
+	// keys is the resolved keybinding table (defaults + [keymap] overrides
+	// from the config files). Set at boot; tests may replace it directly.
+	keys KeyMap
+
 	// Boot init prompt — shown when gojo starts outside a jj repo (boot
 	// error ErrNoRepo). Stage 1 asks whether to initialize a repo in
 	// bootInitDir, stage 2 asks whether to --colocate with git, stage 3
@@ -263,6 +267,7 @@ func NewModel() Model {
 		polling:         true,
 		aiLoading:       map[string]bool{},
 		aiDescribeQueue: []aiPendingDescribe{},
+		keys:            DefaultKeyMap(),
 	}
 }
 
@@ -775,6 +780,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case bootMsg:
+		m.keys = newKeyMap(msg.cfg.Keymap)
 		if msg.err != nil {
 			// Outside any jj repo: offer to initialize one (and optionally
 			// colocate with git) instead of showing a bare error.
@@ -1333,16 +1339,16 @@ func (m Model) contentHeight() int {
 func (m Model) statusBarHeight() int {
 	switch {
 	case m.bookmarkMode && m.bookmarkAction == "":
-		return menuRowCount(m.width, " [bookmark mode] ", " ", bookmarkMenuItems)
+		return menuRowCount(m.width, " [bookmark mode] ", " ", m.bookmarkMenuItems())
 	case m.tagMode && m.tagAction == "":
-		return menuRowCount(m.width, " [tag mode] ", " ", tagMenuItems)
+		return menuRowCount(m.width, " [tag mode] ", " ", m.tagMenuItems())
 	case m.gitMode && m.remoteMode && m.remoteAction == "":
-		return menuRowCount(m.width, " [git > remote] ", " ", remoteMenuItems)
+		return menuRowCount(m.width, " [git > remote] ", " ", m.remoteMenuItems())
 	case m.gitMode && (m.pushMode || m.remoteMode):
 		// Text-input prompts are always a single row.
 		return 1
 	case m.gitMode:
-		return menuRowCount(m.width, " [git mode] ", " ", gitMenuItems)
+		return menuRowCount(m.width, " [git mode] ", " ", m.gitMenuItems())
 	default:
 		return 1
 	}
@@ -1757,30 +1763,30 @@ func (m Model) selectedEntry() *jj.LogEntry {
 func (m Model) handleBootInitKey(k string) (tea.Model, tea.Cmd) {
 	switch m.bootInitStage {
 	case 1:
-		switch k {
-		case "y", "Y":
+		switch m.keys.resolve(ctxBoot, k) {
+		case actYes:
 			m.bootInitStage = 2
 			return m, nil
-		case "n", "N":
+		case actNo:
 			m.bootInitStage = 0
 			m.bootErr = jj.ErrNoRepo.Error()
 			return m, nil
-		case "q", "esc":
+		case actQuit, actBack:
 			return m, tea.Quit
 		}
 	case 2:
-		switch k {
-		case "y", "Y":
+		switch m.keys.resolve(ctxBoot, k) {
+		case actYes:
 			m.bootInitStage = 3
 			return m, m.initRepoCmd(true)
-		case "n", "N":
+		case actNo:
 			m.bootInitStage = 3
 			return m, m.initRepoCmd(false)
-		case "esc":
+		case actBack:
 			// Step back to the init question.
 			m.bootInitStage = 1
 			return m, nil
-		case "q":
+		case actQuit:
 			return m, tea.Quit
 		}
 	}
@@ -1790,8 +1796,8 @@ func (m Model) handleBootInitKey(k string) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 
-	// ctrl+c always quits, even from an unrecoverable boot error screen.
-	if k == "ctrl+c" {
+	// Force quit fires even from an unrecoverable boot error screen.
+	if m.keys.resolve(ctxGlobal, k) == actForceQuit {
 		return m, tea.Quit
 	}
 
@@ -1799,10 +1805,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.bootInitStage > 0 {
 			return m.handleBootInitKey(k)
 		}
-		// Boot failed (e.g. jj not in PATH). q / esc also quits so the
+		// Boot failed (e.g. jj not in PATH). quit/back also quits so the
 		// user is never trapped in the alt screen with no escape.
-		if m.bootErr != "" && (k == "q" || k == "esc") {
-			return m, tea.Quit
+		if m.bootErr != "" {
+			switch m.keys.resolve(ctxBoot, k) {
+			case actQuit, actBack:
+				return m, tea.Quit
+			}
 		}
 		return m, nil
 	}
@@ -1862,7 +1871,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Global keys.
-	if k == "q" {
+	switch m.keys.resolve(ctxGlobal, k) {
+	case actQuit:
 		if m.view == viewHelp {
 			m.view = viewLog
 			return m, nil
@@ -1872,8 +1882,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, tea.Quit
-	}
-	if k == "?" {
+	case actHelp:
 		if m.diffOpen {
 			m.diffOpen = false
 			return m, nil
@@ -2124,7 +2133,7 @@ func (m Model) applyScrollBarDrag(mouseY int) (tea.Model, tea.Cmd) {
 		m.diffClampMax()
 
 	case m.view == viewHelp:
-		maxScroll := helpMaxScroll(trackH)
+		maxScroll := m.helpMaxScroll(trackH)
 		if maxScroll > 0 {
 			m.helpScrollY = trackY * maxScroll / max(1, trackH-1)
 		} else {
@@ -2267,7 +2276,7 @@ func (m *Model) wheelStep(dir int) {
 
 	case m.view == viewHelp:
 		contentH := m.contentHeight() - 1
-		maxS := helpMaxScroll(contentH)
+		maxS := m.helpMaxScroll(contentH)
 		if dir > 0 {
 			m.helpScrollY = min(maxS, m.helpScrollY+1)
 		} else {
@@ -2337,8 +2346,8 @@ func (m *Model) wheelStep(dir int) {
 // anything else cancels and returns to the log view with the original error
 // shown.
 func (m Model) handleElevKey(k string) (tea.Model, tea.Cmd) {
-	switch k {
-	case "y", "Y", "enter":
+	switch m.keys.resolve(ctxElev, k) {
+	case actConfirm:
 		req := m.pendingElev
 		m.pendingElev = nil
 		return m, req.retry()
@@ -2351,20 +2360,20 @@ func (m Model) handleElevKey(k string) (tea.Model, tea.Cmd) {
 
 func (m Model) handleHelpKey(k string) Model {
 	contentH := m.contentHeight() - 1
-	maxS := helpMaxScroll(contentH)
+	maxS := m.helpMaxScroll(contentH)
 	half := max(1, contentH/2)
-	switch k {
-	case "up", "k":
+	switch m.keys.resolve(ctxHelp, k) {
+	case actUp:
 		m.helpScrollY = max(0, m.helpScrollY-1)
-	case "down", "j":
+	case actDown:
 		m.helpScrollY = min(maxS, m.helpScrollY+1)
-	case "home", "g":
+	case actTop:
 		m.helpScrollY = 0
-	case "end", "G":
+	case actBottom:
 		m.helpScrollY = maxS
-	case "pgup", "b":
+	case actPageUp:
 		m.helpScrollY = max(0, m.helpScrollY-half)
-	case "pgdown", "f":
+	case actPageDown:
 		m.helpScrollY = min(maxS, m.helpScrollY+half)
 	}
 	return m
@@ -2378,41 +2387,41 @@ func (m Model) handleFilePickerKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd
 	if fv.fzfActive {
 		return m.handleFzfKey(msg, k)
 	}
-	switch k {
-	case "esc", "q":
+	switch m.keys.resolve(ctxPicker, k) {
+	case actQuit:
 		// Leave the file view entirely.
 		m.view = viewLog
 		m.fileView = fileViewState{}
 		return m, nil
-	case "up", "k":
+	case actUp:
 		if fv.cursor > 0 {
 			fv.cursor--
 		}
 		return m, nil
-	case "down", "j":
+	case actDown:
 		if fv.cursor < len(fv.rows)-1 {
 			fv.cursor++
 		}
 		return m, nil
-	case "home", "g":
+	case actTop:
 		fv.cursor = 0
 		return m, nil
-	case "end", "G":
+	case actBottom:
 		fv.cursor = len(fv.rows) - 1
 		return m, nil
-	case "pgup":
+	case actPageUp:
 		fv.cursor = max(0, fv.cursor-10)
 		return m, nil
-	case "pgdown":
+	case actPageDown:
 		fv.cursor = min(len(fv.rows)-1, fv.cursor+10)
 		return m, nil
-	case "l", "right":
+	case actExpand:
 		if row := fv.curRow(); row != nil && row.node.isDir {
 			row.node.expanded = true
 			fv.reflow()
 		}
 		return m, nil
-	case "h", "left":
+	case actCollapse:
 		if row := fv.curRow(); row != nil {
 			if row.node.isDir && row.node.expanded {
 				row.node.expanded = false
@@ -2428,7 +2437,7 @@ func (m Model) handleFilePickerKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd
 			}
 		}
 		return m, nil
-	case "enter", " ":
+	case actOpen:
 		if row := fv.curRow(); row != nil {
 			if row.node.isDir {
 				row.node.expanded = !row.node.expanded
@@ -2463,11 +2472,11 @@ func (m Model) handleFilePickerKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd
 // the selected file; esc returns to the tree.
 func (m Model) handleFzfKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 	fv := &m.fileView
-	switch k {
-	case "esc":
+	switch m.keys.resolve(ctxFzf, k) {
+	case actCancel:
 		fv.fzfActive = false
 		return m, nil
-	case "enter":
+	case actAccept:
 		if fv.fzfCursor < len(fv.fzfResults) {
 			path := fv.fzfResults[fv.fzfCursor].path
 			fv.fzfActive = false
@@ -2475,33 +2484,33 @@ func (m Model) handleFzfKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(tick, m.loadAnnotateCmd(path))
 		}
 		return m, nil
-	case "up", "k":
+	case actUp:
 		if fv.fzfCursor > 0 {
 			fv.fzfCursor--
 		}
 		return m, nil
-	case "down", "j":
+	case actDown:
 		if fv.fzfCursor < len(fv.fzfResults)-1 {
 			fv.fzfCursor++
 		}
 		return m, nil
-	case "home", "g":
+	case actTop:
 		fv.fzfCursor = 0
 		return m, nil
-	case "end", "G":
+	case actBottom:
 		fv.fzfCursor = max(0, len(fv.fzfResults)-1)
 		return m, nil
-	case "pgup":
+	case actPageUp:
 		fv.fzfCursor = max(0, fv.fzfCursor-10)
 		return m, nil
-	case "pgdown":
+	case actPageDown:
 		fv.fzfCursor = min(max(0, len(fv.fzfResults)-1), fv.fzfCursor+10)
 		return m, nil
-	case "backspace":
+	case actErase:
 		fv.fzfQuery = trimLastRune(fv.fzfQuery)
 		fv.fzfFilter()
 		return m, nil
-	case "ctrl+u":
+	case actClear:
 		fv.fzfQuery = ""
 		fv.fzfFilter()
 		return m, nil
@@ -2518,40 +2527,40 @@ func (m Model) handleFzfKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 func (m Model) handleFileBlameKey(k string) (tea.Model, tea.Cmd) {
 	fv := &m.fileView
 	total := len(fv.lines)
-	switch k {
-	case "esc", "q":
+	switch m.keys.resolve(ctxBlame, k) {
+	case actBack:
 		// Back to the picker.
 		fv.phase = filePicker
 		fv.err = ""
 		return m, nil
-	case "up", "k":
+	case actUp:
 		if fv.cursorY > 0 {
 			fv.cursorY--
 		}
 		return m, nil
-	case "down", "j":
+	case actDown:
 		if fv.cursorY < total-1 {
 			fv.cursorY++
 		}
 		return m, nil
-	case "home", "g":
+	case actTop:
 		fv.cursorY = 0
 		return m, nil
-	case "end", "G":
+	case actBottom:
 		fv.cursorY = total - 1
 		return m, nil
-	case "pgup":
+	case actPageUp:
 		fv.cursorY = max(0, fv.cursorY-10)
 		return m, nil
-	case "pgdown":
+	case actPageDown:
 		fv.cursorY = min(total-1, fv.cursorY+10)
 		return m, nil
-	case "h":
+	case actHistory:
 		// View file history (commits that touched this file).
 		path := fv.path
 		m, tick := m.startBusy("loading history for " + path + "…")
 		return m, tea.Batch(tick, m.loadFileHistoryCmd(path))
-	case "enter":
+	case actOpen:
 		// Open the commit that last touched the focused line.
 		if fv.cursorY >= 0 && fv.cursorY < total {
 			line := fv.lines[fv.cursorY]
@@ -2563,33 +2572,33 @@ func (m Model) handleFileBlameKey(k string) (tea.Model, tea.Cmd) {
 
 func (m Model) handleFileHistoryKey(k string) (tea.Model, tea.Cmd) {
 	fv := &m.fileView
-	switch k {
-	case "esc", "q", "backspace":
+	switch m.keys.resolve(ctxHist, k) {
+	case actBack:
 		// Back to the blame view of the same file.
 		fv.phase = fileBlame
 		fv.err = ""
 		return m, nil
-	case "up", "k":
+	case actUp:
 		if fv.histCur > 0 {
 			fv.histCur--
 		}
 		m.recomputeFileHistOffset()
 		return m, nil
-	case "down", "j":
+	case actDown:
 		if fv.histCur < len(fv.hist)-1 {
 			fv.histCur++
 		}
 		m.recomputeFileHistOffset()
 		return m, nil
-	case "home", "g":
+	case actTop:
 		fv.histCur = 0
 		m.recomputeFileHistOffset()
 		return m, nil
-	case "end", "G":
+	case actBottom:
 		fv.histCur = len(fv.hist) - 1
 		m.recomputeFileHistOffset()
 		return m, nil
-	case "enter":
+	case actOpen:
 		if fv.histCur >= 0 && fv.histCur < len(fv.hist) {
 			e := fv.hist[fv.histCur]
 			return m.openRevisionDiff(e.ChangeID, e.CommitID, e.ChangeIDPrefixLen, e.Subject)
@@ -2620,42 +2629,42 @@ func (m *Model) recomputeFileHistOffset() {
 // handleDiffKey drives the diff panel navigation regardless of which view
 // (log or file) opened it. Closing the diff returns to that view.
 func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
-	switch k {
-	case "enter", "q", "esc":
+	switch m.keys.resolve(ctxDiff, k) {
+	case actClose:
 		m.diffOpen = false
-	case "up", "k":
+	case actUp:
 		m.diffMoveUp()
-	case "down", "j":
+	case actDown:
 		m.diffMoveDown()
-	case "home", "g":
+	case actTop:
 		m.diffMoveTop()
-	case "end", "G":
+	case actBottom:
 		m.diffMoveBottom()
-	case "pgup", "b", "ctrl+u":
+	case actPageUp:
 		m.diffPageScroll(-max(1, m.diffBodyHeight()/2))
-	case "pgdown", "f", "ctrl+d":
+	case actPageDown:
 		m.diffPageScroll(max(1, m.diffBodyHeight()/2))
-	case "left", "h":
+	case actCollapse:
 		if fileIdx, ok := m.cursorFileHeader(); ok {
 			path := m.diffRows[fileIdx].path
 			if m.diffCollapsed == nil || !m.diffCollapsed[path] {
 				m.toggleDiffCollapse(fileIdx)
 			}
 		}
-	case "right", "l":
+	case actExpand:
 		if fileIdx, ok := m.cursorFileHeader(); ok {
 			path := m.diffRows[fileIdx].path
 			if m.diffCollapsed != nil && m.diffCollapsed[path] {
 				m.toggleDiffCollapse(fileIdx)
 			}
 		}
-	case "c":
+	case actConflict:
 		if m.diffIsRevision && m.diffRev != "" {
 			m, tick := m.startBusy("loading conflicts…")
 			return m, tea.Batch(tick, m.openConflictCmd(m.diffRev, m.diffRevPrefix))
 		}
 		return m, nil
-	case "d":
+	case actDescribe:
 		if m.diffIsRevision && m.diffRev != "" {
 			changeID := m.diffRev
 			if e := m.findEntryByChangeID(changeID); e != nil && e.IsImmutable {
@@ -2668,7 +2677,7 @@ func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
 			}
 			return m, m.describeCmd(changeID)
 		}
-	case "D":
+	case actAIDescribe:
 		if m.diffIsRevision && m.diffRev != "" {
 			changeID := m.diffRev
 			if m.aiLoading[changeID] {
@@ -2684,13 +2693,13 @@ func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(cmds...)
 		}
-	case "n":
+	case actNew:
 		if m.diffIsRevision && m.diffRev != "" {
 			rev := m.diffRev
 			m, tick := m.startBusy("creating change…")
 			return m, tea.Batch(tick, m.newOnRevCmd(rev))
 		}
-	case "s":
+	case actSplit:
 		if m.diffIsRevision && m.diffRev != "" && len(m.diffRows) > 0 {
 			m.splitMode = true
 			m.splitMarked = map[int]bool{}
@@ -2700,7 +2709,7 @@ func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
 			m.computeDiffLayout()
 			return m, nil
 		}
-	case "x":
+	case actAbsorb:
 		if m.diffIsRevision && m.diffRev != "" {
 			rev := m.diffRev
 			r := m.runner
@@ -2718,38 +2727,38 @@ func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
 // selection, c confirms, q/esc cancels, and navigation keys (up/down/left/
 // right/home/end) work the same as in the diff panel.
 func (m Model) handleSplitKey(k string) (tea.Model, tea.Cmd) {
-	switch k {
-	case "q", "esc":
+	switch m.keys.resolve(ctxSplit, k) {
+	case actCancel:
 		m.splitMode = false
 		m.splitMarked = nil
 		m.message = "split cancelled"
 		// Back to the non-split line prefixes: restore the layout.
 		m.computeDiffLayout()
 		return m, nil
-	case "c":
+	case actConfirm:
 		return m.execSplit()
-	case " ":
+	case actToggle:
 		m.splitToggle()
 		return m, nil
-	case "up", "k":
+	case actUp:
 		m.diffMoveUp()
 		return m, nil
-	case "down", "j":
+	case actDown:
 		m.diffMoveDown()
 		return m, nil
-	case "home", "g":
+	case actTop:
 		m.diffMoveTop()
 		return m, nil
-	case "end", "G":
+	case actBottom:
 		m.diffMoveBottom()
 		return m, nil
-	case "pgup", "b", "ctrl+u":
+	case actPageUp:
 		m.diffPageScroll(-max(1, m.diffBodyHeight()/2))
 		return m, nil
-	case "pgdown", "f", "ctrl+d":
+	case actPageDown:
 		m.diffPageScroll(max(1, m.diffBodyHeight()/2))
 		return m, nil
-	case "left", "h":
+	case actCollapse:
 		if fileIdx, ok := m.cursorFileHeader(); ok {
 			path := m.diffRows[fileIdx].path
 			if m.diffCollapsed == nil || !m.diffCollapsed[path] {
@@ -2757,7 +2766,7 @@ func (m Model) handleSplitKey(k string) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case "right", "l":
+	case actExpand:
 		if fileIdx, ok := m.cursorFileHeader(); ok {
 			path := m.diffRows[fileIdx].path
 			if m.diffCollapsed != nil && m.diffCollapsed[path] {
@@ -2797,29 +2806,31 @@ func (m Model) handleFileKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+	action := m.keys.resolve(ctxLog, k)
+
 	// Any key other than navigation and enter leaves the edge-line cursor.
-	switch k {
-	case "j", "down", "k", "up", "enter":
+	switch action {
+	case actUp, actDown, actOpen:
 	default:
 		m.logEdgeCursor = -1
 	}
 
-	switch k {
-	case "up", "k":
+	switch action {
+	case actUp:
 		m.logMoveUp()
 		return m, nil
-	case "down", "j":
+	case actDown:
 		m.logMoveDown()
 		return m, nil
-	case "home":
+	case actTop:
 		m.cursor = 0
 		m.recomputeOffset()
 		return m, nil
-	case "end", "G":
+	case actBottom:
 		m.cursor = len(m.entries) - 1
 		m.recomputeOffset()
 		return m, nil
-	case "enter":
+	case actOpen:
 		if m.logEdgeCursor >= 0 {
 			return m.toggleShowAllRev()
 		}
@@ -2827,7 +2838,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			return m.openRevisionDiff(e.ChangeID, e.CommitID, e.ChangeIDPrefixLen, e.Subject)
 		}
 		return m, nil
-	case "/":
+	case actSearch:
 		if len(m.entries) == 0 {
 			return m, nil
 		}
@@ -2840,7 +2851,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		m.message = ""
 		m.searchFilter()
 		return m, nil
-	case "d":
+	case actDescribe:
 		if e := m.selectedEntry(); e != nil {
 			// The editor flow runs via ExecProcess, which attaches the terminal —
 			// so jj's "is immutable" error text isn't captured and can't be
@@ -2858,7 +2869,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			return m, m.describeCmd(e.ChangeID)
 		}
 		return m, nil
-	case "D":
+	case actAIDescribe:
 		if e := m.selectedEntry(); e != nil {
 			if m.aiLoading[e.ChangeID] {
 				return m, nil
@@ -2874,7 +2885,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 		return m, nil
-	case "e":
+	case actEdit:
 		if e := m.selectedEntry(); e != nil {
 			rev := e.ChangeID
 			r := m.runner
@@ -2885,7 +2896,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			})
 		}
 		return m, nil
-	case "n":
+	case actNew:
 		rev := ""
 		if e := m.selectedEntry(); e != nil {
 			rev = e.ChangeID
@@ -2896,7 +2907,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			okMsg:   "created new change",
 			elevate: func(flag string) func() error { return func() error { return r.New(rev, flag) } },
 		})
-	case "a":
+	case actAbandon:
 		if e := m.selectedEntry(); e != nil {
 			if e.IsWorkingCopy {
 				m.errMsg = "cannot abandon the working copy"
@@ -2911,15 +2922,15 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			})
 		}
 		return m, nil
-	case "A":
+	case actAllRev:
 		return m.toggleShowAllRev()
-	case "c":
+	case actConflict:
 		if e := m.selectedEntry(); e != nil {
 			m, tick := m.startBusy("loading conflicts…")
 			return m, tea.Batch(tick, m.openConflictCmd(e.ChangeID, e.ChangeIDPrefixLen))
 		}
 		return m, nil
-	case "b":
+	case actBookmark:
 		m.bookmarkMode = true
 		m.bookmarkAction = ""
 		m.bookmarkInput = ""
@@ -2928,7 +2939,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		m.errMsg = ""
 		m.message = ""
 		return m, nil
-	case "t":
+	case actTag:
 		m.tagMode = true
 		m.tagAction = ""
 		m.tagInput = ""
@@ -2937,7 +2948,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		m.errMsg = ""
 		m.message = ""
 		return m, nil
-	case "f":
+	case actFiles:
 		// File view: browse tracked files, open one with blame, inspect history.
 		m.view = viewFile
 		m.fileView = fileViewState{phase: filePicker}
@@ -2946,18 +2957,18 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		m.message = ""
 		m, tick := m.startBusy("listing files…")
 		return m, tea.Batch(tick, m.loadFileListCmd())
-	case "g":
+	case actGit:
 		m.gitMode = true
 		m.errMsg = ""
 		m.message = ""
 		return m, nil
-	case "u":
+	case actUndo:
 		r := m.runner
 		return m.busySimpleCmd("undoing…", func() error { return r.Undo() }, "undone")
-	case "U":
+	case actRedo:
 		r := m.runner
 		return m.busySimpleCmd("redoing…", func() error { return r.Redo() }, "redone")
-	case "r":
+	case actRebase:
 		if len(m.entries) < 2 {
 			m.errMsg = "need at least two revisions to rebase"
 			return m, nil
@@ -2978,7 +2989,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			m.recomputeOffset()
 		}
 		return m, nil
-	case "s":
+	case actSquash:
 		if len(m.entries) < 2 {
 			m.errMsg = "need at least two revisions to squash"
 			return m, nil
@@ -2997,7 +3008,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			m.recomputeOffset()
 		}
 		return m, nil
-	case "x":
+	case actAbsorb:
 		if e := m.selectedEntry(); e != nil {
 			rev := e.ChangeID
 			r := m.runner
@@ -3017,11 +3028,11 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 // ctrl+u clears the query; enter jumps the cursor to the selected result;
 // navigation keys move through results; esc/q cancels and returns to the log.
 func (m Model) handleSearchKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
-	switch k {
-	case "esc", "q":
+	switch m.keys.resolve(ctxSearch, k) {
+	case actCancel:
 		m.searchMode = false
 		return m, nil
-	case "enter":
+	case actAccept:
 		if len(m.searchResults) > 0 && m.searchCursor >= 0 && m.searchCursor < len(m.searchResults) {
 			idx := m.searchResults[m.searchCursor].entryIdx
 			m.cursor = idx
@@ -3030,33 +3041,33 @@ func (m Model) handleSearchKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, nil
-	case "up":
+	case actUp:
 		if m.searchCursor > 0 {
 			m.searchCursor--
 		}
 		return m, nil
-	case "down":
+	case actDown:
 		if m.searchCursor < len(m.searchResults)-1 {
 			m.searchCursor++
 		}
 		return m, nil
-	case "home":
+	case actTop:
 		m.searchCursor = 0
 		return m, nil
-	case "end":
+	case actBottom:
 		m.searchCursor = max(0, len(m.searchResults)-1)
 		return m, nil
-	case "pgup":
+	case actPageUp:
 		m.searchCursor = max(0, m.searchCursor-10)
 		return m, nil
-	case "pgdown":
+	case actPageDown:
 		m.searchCursor = min(max(0, len(m.searchResults)-1), m.searchCursor+10)
 		return m, nil
-	case "backspace", "delete":
+	case actErase:
 		m.searchQuery = trimLastRune(m.searchQuery)
 		m.searchFilter()
 		return m, nil
-	case "ctrl+u":
+	case actClear:
 		m.searchQuery = ""
 		m.searchFilter()
 		return m, nil
@@ -3070,33 +3081,33 @@ func (m Model) handleSearchKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleSquashKey(k string) (tea.Model, tea.Cmd) {
-	switch k {
-	case "esc", "q":
+	switch m.keys.resolve(ctxSquash, k) {
+	case actCancel:
 		m.squashMode = false
 		m.message = "squash cancelled"
 		m.recomputeOffset()
 		return m, nil
-	case "up", "k":
+	case actUp:
 		if m.squashDest > 0 {
 			m.squashDest--
 		}
 		m.recomputeOffset()
 		return m, nil
-	case "down", "j":
+	case actDown:
 		if m.squashDest < len(m.entries)-1 {
 			m.squashDest++
 		}
 		m.recomputeOffset()
 		return m, nil
-	case "home":
+	case actTop:
 		m.squashDest = 0
 		m.recomputeOffset()
 		return m, nil
-	case "end", "G":
+	case actBottom:
 		m.squashDest = len(m.entries) - 1
 		m.recomputeOffset()
 		return m, nil
-	case "enter":
+	case actConfirm:
 		return m.execSquash()
 	}
 	return m, nil
@@ -3119,39 +3130,39 @@ func (m Model) execSquash() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleRebaseKey(k string) (tea.Model, tea.Cmd) {
-	switch k {
-	case "esc", "q":
+	switch m.keys.resolve(ctxRebase, k) {
+	case actCancel:
 		m.rebaseMode = false
 		m.message = "rebase cancelled"
 		m.recomputeOffset()
 		return m, nil
-	case "up", "k":
+	case actUp:
 		if m.rebaseDest > 0 {
 			m.rebaseDest--
 		}
 		m.recomputeOffset()
 		return m, nil
-	case "down", "j":
+	case actDown:
 		if m.rebaseDest < len(m.entries)-1 {
 			m.rebaseDest++
 		}
 		m.recomputeOffset()
 		return m, nil
-	case "home":
+	case actTop:
 		m.rebaseDest = 0
 		m.recomputeOffset()
 		return m, nil
-	case "end", "G":
+	case actBottom:
 		m.rebaseDest = len(m.entries) - 1
 		m.recomputeOffset()
 		return m, nil
-	case "s":
+	case actScope:
 		m.rebaseSubtree = !m.rebaseSubtree
 		return m, nil
-	case "tab":
+	case actPlace:
 		m.rebasePlace = (m.rebasePlace + 1) % len(rebasePlaceFlags)
 		return m, nil
-	case "enter":
+	case actConfirm:
 		return m.execRebase()
 	}
 	return m, nil
@@ -3188,8 +3199,8 @@ func (m Model) execRebase() (tea.Model, tea.Cmd) {
 
 func (m Model) handleBookmarkKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 	if m.bookmarkAction != "" {
-		switch k {
-		case "esc":
+		switch m.keys.resolve(ctxInput, k) {
+		case actCancel:
 			if m.acOriginal != nil {
 				m.bookmarkInput = *m.acOriginal
 				m.acOriginal = nil
@@ -3201,7 +3212,7 @@ func (m Model) handleBookmarkKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) 
 			m.acOriginal = nil
 			m.acIdx = 0
 			return m, nil
-		case "enter":
+		case actAccept:
 			action := m.bookmarkAction
 			input := m.bookmarkInput
 			m.acOriginal = nil
@@ -3211,7 +3222,7 @@ func (m Model) handleBookmarkKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) 
 			m.bookmarkInput = ""
 			m, tick := m.startBusy("bookmark " + action + "…")
 			return m, tea.Batch(tick, m.execBookmark(action, input))
-		case "tab":
+		case actComplete:
 			prefix := m.bookmarkInput
 			if m.acOriginal != nil {
 				prefix = *m.acOriginal
@@ -3229,7 +3240,7 @@ func (m Model) handleBookmarkKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) 
 				}
 			}
 			return m, nil
-		case "backspace", "delete":
+		case actErase:
 			m.bookmarkInput = trimLastRune(m.bookmarkInput)
 			m.acOriginal = nil
 			m.acIdx = 0
@@ -3244,30 +3255,30 @@ func (m Model) handleBookmarkKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) 
 	}
 
 	// Bookmark menu.
-	switch k {
-	case "esc", "q":
+	switch action := m.keys.resolve(ctxBookmark, k); action {
+	case actCancel:
 		m.bookmarkMode = false
 		m.acOriginal = nil
 		m.acIdx = 0
 		return m, nil
-	case "c", "d", "f", "m", "r", "s", "t", "T":
-		m.bookmarkAction = k
+	case actCreate, actDelete, actForget, actMove, actRename, actSet, actTrack, actUntrack:
+		m.bookmarkAction = action
 		m.bookmarkInput = ""
 		m.acOriginal = nil
 		m.acIdx = 0
 		return m, nil
-	case "l":
+	case actList:
 		m.bookmarkMode = false
 		m, tick := m.startBusy("loading bookmarks…")
-		return m, tea.Batch(tick, m.execBookmark("l", ""))
+		return m, tea.Batch(tick, m.execBookmark(actList, ""))
 	}
 	return m, nil
 }
 
 func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 	if m.pushMode {
-		switch k {
-		case "esc":
+		switch m.keys.resolve(ctxInput, k) {
+		case actCancel:
 			if m.acOriginal != nil {
 				m.pushInput = *m.acOriginal
 				m.acOriginal = nil
@@ -3277,9 +3288,9 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			m.pushMode = false
 			m.pushInput = ""
 			return m, nil
-		case "enter":
+		case actAccept:
 			return m.startPush(m.pushInput)
-		case "tab":
+		case actComplete:
 			// Complete the bookmark name (first word; remote is free-form).
 			if strings.Contains(m.pushInput, " ") {
 				return m, nil
@@ -3301,7 +3312,7 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case "backspace", "delete":
+		case actErase:
 			m.pushInput = trimLastRune(m.pushInput)
 			m.acOriginal = nil
 			m.acIdx = 0
@@ -3317,12 +3328,12 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 
 	if m.remoteMode {
 		if m.remoteAction != "" {
-			switch k {
-			case "esc":
+			switch m.keys.resolve(ctxInput, k) {
+			case actCancel:
 				m.remoteAction = ""
 				m.remoteInput = ""
 				return m, nil
-			case "enter":
+			case actAccept:
 				action := m.remoteAction
 				input := m.remoteInput
 				m.remoteMode = false
@@ -3331,7 +3342,7 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 				m.gitMode = false
 				m, tick := m.startBusy("remote " + action + "…")
 				return m, tea.Batch(tick, m.execRemote(action, input))
-			case "backspace", "delete":
+			case actErase:
 				m.remoteInput = trimLastRune(m.remoteInput)
 				return m, nil
 			}
@@ -3341,28 +3352,28 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Remote menu.
-		switch k {
-		case "esc", "q":
+		switch action := m.keys.resolve(ctxRemote, k); action {
+		case actCancel:
 			m.remoteMode = false
 			return m, nil
-		case "l":
+		case actList:
 			m.remoteMode = false
 			m.gitMode = false
 			m, tick := m.startBusy("loading remotes…")
-			return m, tea.Batch(tick, m.execRemote("l", ""))
-		case "a", "r", "m", "s":
-			m.remoteAction = k
+			return m, tea.Batch(tick, m.execRemote(actList, ""))
+		case actAdd, actRemove, actRename, actSetURL:
+			m.remoteAction = action
 			m.remoteInput = ""
 			return m, nil
 		}
 		return m, nil
 	}
 
-	switch k {
-	case "esc", "q":
+	switch m.keys.resolve(ctxGit, k) {
+	case actCancel:
 		m.gitMode = false
 		return m, nil
-	case "f":
+	case actFetch:
 		m.gitMode = false
 		r := m.runner
 		return m.busyActionCmd("fetching…", actionSpec{
@@ -3370,7 +3381,7 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			okMsg:   "fetched",
 			elevate: func(flag string) func() error { return func() error { return r.GitFetch(flag) } },
 		})
-	case "p":
+	case actPush:
 		m.gitMode = false
 		r := m.runner
 		return m.busyActionCmd("pushing…", actionSpec{
@@ -3378,13 +3389,13 @@ func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			okMsg:   "pushed",
 			elevate: func(flag string) func() error { return func() error { return r.GitPush(flag) } },
 		})
-	case "P":
+	case actPushMark:
 		m.pushMode = true
 		m.pushInput = ""
 		m.acOriginal = nil
 		m.acIdx = 0
 		return m, nil
-	case "r":
+	case actRemote:
 		m.remoteMode = true
 		m.remoteAction = ""
 		m.remoteInput = ""
@@ -3418,8 +3429,8 @@ func (m Model) startPush(input string) (tea.Model, tea.Cmd) {
 	label += "…"
 	r := m.runner
 	return m.busyActionCmd(label, actionSpec{
-		run:    func() error { return r.GitPush(args...) },
-		okMsg:  okMsg,
+		run:   func() error { return r.GitPush(args...) },
+		okMsg: okMsg,
 		elevate: func(flag string) func() error {
 			return func() error {
 				return r.GitPush(append(append([]string{}, args...), flag)...)
@@ -3434,32 +3445,32 @@ func (m Model) execBookmark(action, input string) tea.Cmd {
 	if e := m.selectedEntry(); e != nil {
 		rev = e.ChangeID
 	}
-	if action == "l" {
+	if action == actList {
 		return listCmd(r.BookmarkList, "bookmark list")
 	}
 	// run performs the bookmark action; runElevated re-runs it with an extra
 	// trailing flag for elevation retries.
 	run := func(extra string) error {
 		switch action {
-		case "c":
+		case actCreate:
 			return r.BookmarkCreate(input, rev, extra)
-		case "d":
+		case actDelete:
 			return r.BookmarkDelete(input, extra)
-		case "f":
+		case actForget:
 			return r.BookmarkForget(input, extra)
-		case "m":
+		case actMove:
 			return r.BookmarkMove(input, rev, extra)
-		case "r":
+		case actRename:
 			parts := strings.Fields(input)
 			if len(parts) < 2 {
 				return errors.New("rename requires: <old> <new>")
 			}
 			return r.BookmarkRename(parts[0], parts[1])
-		case "s":
+		case actSet:
 			return r.BookmarkSet(input, rev, extra)
-		case "t":
+		case actTrack:
 			return r.BookmarkTrack(input)
-		case "T":
+		case actUntrack:
 			return r.BookmarkUntrack(input)
 		}
 		return nil
@@ -3485,8 +3496,8 @@ func (m Model) execBookmark(action, input string) tea.Cmd {
 
 func (m Model) handleTagKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 	if m.tagAction != "" {
-		switch k {
-		case "esc":
+		switch m.keys.resolve(ctxInput, k) {
+		case actCancel:
 			if m.acOriginal != nil {
 				m.tagInput = *m.acOriginal
 				m.acOriginal = nil
@@ -3498,7 +3509,7 @@ func (m Model) handleTagKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			m.acOriginal = nil
 			m.acIdx = 0
 			return m, nil
-		case "enter":
+		case actAccept:
 			action := m.tagAction
 			input := m.tagInput
 			m.acOriginal = nil
@@ -3506,13 +3517,13 @@ func (m Model) handleTagKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			m.tagMode = false
 			m.tagAction = ""
 			m.tagInput = ""
-			if action == "p" {
+			if action == actPush {
 				r := m.runner
 				return m.busySimpleCmd("pushing tags…", func() error { return r.GitPushTags() }, "pushed tags")
 			}
 			m, tick := m.startBusy("tag " + action + "…")
 			return m, tea.Batch(tick, m.execTag(action, input))
-		case "tab":
+		case actComplete:
 			prefix := m.tagInput
 			if m.acOriginal != nil {
 				prefix = *m.acOriginal
@@ -3530,7 +3541,7 @@ func (m Model) handleTagKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case "backspace", "delete":
+		case actErase:
 			m.tagInput = trimLastRune(m.tagInput)
 			m.acOriginal = nil
 			m.acIdx = 0
@@ -3545,23 +3556,23 @@ func (m Model) handleTagKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 	}
 
 	// Tag menu.
-	switch k {
-	case "esc", "q":
+	switch action := m.keys.resolve(ctxTag, k); action {
+	case actCancel:
 		m.tagMode = false
 		m.acOriginal = nil
 		m.acIdx = 0
 		return m, nil
-	case "s", "m", "d":
-		m.tagAction = k
+	case actSet, actMove, actDelete:
+		m.tagAction = action
 		m.tagInput = ""
 		m.acOriginal = nil
 		m.acIdx = 0
 		return m, nil
-	case "l":
+	case actList:
 		m.tagMode = false
 		m, tick := m.startBusy("loading tags…")
-		return m, tea.Batch(tick, m.execTag("l", ""))
-	case "p":
+		return m, tea.Batch(tick, m.execTag(actList, ""))
+	case actPush:
 		m.tagMode = false
 		r := m.runner
 		return m.busySimpleCmd("pushing tags…", func() error { return r.GitPushTags() }, "pushed tags")
@@ -3575,18 +3586,18 @@ func (m Model) execTag(action, input string) tea.Cmd {
 	if e := m.selectedEntry(); e != nil {
 		rev = e.ChangeID
 	}
-	if action == "l" {
+	if action == actList {
 		return listCmd(r.TagList, "tag list")
 	}
 	// run performs the tag action; runElevated re-runs it with an extra
 	// trailing flag for elevation retries.
 	run := func(extra string) error {
 		switch action {
-		case "s":
+		case actSet:
 			return r.TagSet(input, rev, extra)
-		case "m":
+		case actMove:
 			return r.TagSet(input, rev, "--allow-move", extra)
-		case "d":
+		case actDelete:
 			return r.TagDelete(input, extra)
 		}
 		return nil
@@ -3611,13 +3622,13 @@ func (m Model) execTag(action, input string) tea.Cmd {
 }
 
 func (m Model) handleRenameKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
-	switch k {
-	case "esc", "q":
+	switch m.keys.resolve(ctxRename, k) {
+	case actCancel:
 		m.renameMode = false
 		m.renameInput = ""
 		m.renameTarget = renameRef{}
 		return m, nil
-	case "enter":
+	case actAccept:
 		if m.renameInput == "" {
 			return m, nil
 		}
@@ -3629,7 +3640,7 @@ func (m Model) handleRenameKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 		label := "renaming " + target.kind + "…"
 		m, tick := m.startBusy(label)
 		return m, tea.Batch(tick, m.execRename(target, newName))
-	case "backspace", "delete":
+	case actErase:
 		m.renameInput = trimLastRune(m.renameInput)
 		return m, nil
 	}
@@ -3664,29 +3675,29 @@ func (m Model) execRename(target renameRef, newName string) tea.Cmd {
 
 func (m Model) execRemote(action, input string) tea.Cmd {
 	r := m.runner
-	if action == "l" {
+	if action == actList {
 		return listCmd(r.RemoteList, "remote list")
 	}
 	return func() tea.Msg {
 		var err error
 		switch action {
-		case "a":
+		case actAdd:
 			parts := strings.Fields(input)
 			if len(parts) < 2 {
 				err = errors.New("add requires: <name> <url>")
 			} else {
 				err = r.RemoteAdd(parts[0], strings.Join(parts[1:], " "))
 			}
-		case "r":
+		case actRemove:
 			err = r.RemoteRemove(input)
-		case "m":
+		case actRename:
 			parts := strings.Fields(input)
 			if len(parts) < 2 {
 				err = errors.New("rename requires: <old> <new>")
 			} else {
 				err = r.RemoteRename(parts[0], parts[1])
 			}
-		case "s":
+		case actSetURL:
 			parts := strings.Fields(input)
 			if len(parts) < 2 {
 				err = errors.New("set-url requires: <name> <url>")
@@ -3912,11 +3923,11 @@ func (m Model) View() string {
 	case m.conflictOpen:
 		lines = append(lines, m.renderConflictView(m.width, ch)...)
 	case m.view == viewHelp:
-		lines = append(lines, renderHelp(m.width, ch, m.helpScrollY)...)
+		lines = append(lines, m.renderHelp(m.width, ch, m.helpScrollY)...)
 	case m.diffOpen:
 		sv := splitView{active: m.splitMode, marked: m.splitMarked}
 		chunkFirst, chunkLast := m.diffChunkRange()
-		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), chunkFirst, chunkLast, m.diffCollapsed, sv, false, nil, &m.diffLayout, m.hover.diffRow)...)
+		lines = append(lines, renderDiffPanel(m.width, ch, m.diffRev, m.diffRevPrefix, m.diffLoading, m.aiLoading[m.diffRev], m.spinnerFrame, m.diffDesc, m.diffIsRevision, m.diffRows, m.diffDigits, m.diffStatus, m.diffRaw, m.diffScrollY, m.diffCursorBodyRow(), chunkFirst, chunkLast, m.diffCollapsed, sv, false, nil, &m.diffLayout, m.hover.diffRow, "  ("+m.hkN(ctxDiff, actClose, 2, " / ")+" to close) ")...)
 	case m.view == viewFile:
 		lines = append(lines, m.renderFileView(m.width, ch)...)
 	case m.searchMode:
@@ -4011,7 +4022,7 @@ func (m Model) renderFileStatusBar() []string {
 
 func (m Model) renderSuggestions() string {
 	sugg := m.displaySuggestions()
-	segs := []seg{{text: " tab:", fg: colBorderSubtle}}
+	segs := []seg{{text: " " + m.hk(ctxInput, actComplete) + ":", fg: colBorderSubtle}}
 	activeIdx := -1
 	if m.acOriginal != nil {
 		activeIdx = m.acIdx
@@ -4039,9 +4050,9 @@ func (m Model) renderStatusBar() []string {
 			{text: " ⚠ retry with ", fg: colYellow},
 			{text: m.pendingElev.flag, fg: colYellow, bold: true},
 			{text: "? (" + m.pendingElev.reason + ")  ", fg: colYellow},
-			{text: "y confirm", fg: colPurple, underline: true},
+			{text: m.hk(ctxElev, actConfirm) + " confirm", fg: colPurple, underline: true},
 			{text: " · ", fg: colGray},
-			{text: "n/esc cancel", fg: colGray},
+			{text: "any other key cancels", fg: colGray},
 		}
 		return []string{bgRow(m.width, colDarkerGray, segs...)}
 
@@ -4063,28 +4074,28 @@ func (m Model) renderStatusBar() []string {
 	case m.bookmarkMode:
 		if m.bookmarkAction != "" {
 			prompts := map[string]string{
-				"c": "create: ", "d": "delete: ", "f": "forget: ",
-				"m": "move to " + m.selChangeID() + ": ",
-				"r": "rename (old new): ",
-				"s": "set to " + m.selChangeID() + ": ",
-				"t": "track: ", "T": "untrack: ",
+				actCreate: "create: ", actDelete: "delete: ", actForget: "forget: ",
+				actMove:   "move to " + m.selChangeID() + ": ",
+				actRename: "rename (old new): ",
+				actSet:    "set to " + m.selChangeID() + ": ",
+				actTrack:  "track: ", actUntrack: "untrack: ",
 			}
 			text := " [bookmark] " + prompts[m.bookmarkAction] + m.bookmarkInput + "█"
 			return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: colCyan})}
 		}
-		return m.renderMenuRows(" [bookmark mode] ", colCyan, colPurple, bookmarkMenuItems)
+		return m.renderMenuRows(" [bookmark mode] ", colCyan, colPurple, m.bookmarkMenuItems())
 
 	case m.tagMode:
 		if m.tagAction != "" {
 			prompts := map[string]string{
-				"s": "set to " + m.selChangeID() + ": ",
-				"m": "move to " + m.selChangeID() + ": ",
-				"d": "delete: ",
+				actSet:    "set to " + m.selChangeID() + ": ",
+				actMove:   "move to " + m.selChangeID() + ": ",
+				actDelete: "delete: ",
 			}
 			text := " [tag] " + prompts[m.tagAction] + m.tagInput + "█"
 			return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: colTeal})}
 		}
-		return m.renderMenuRows(" [tag mode] ", colTeal, colPurple, tagMenuItems)
+		return m.renderMenuRows(" [tag mode] ", colTeal, colPurple, m.tagMenuItems())
 
 	case m.renameMode:
 		kindLabel := "bookmark"
@@ -4104,17 +4115,17 @@ func (m Model) renderStatusBar() []string {
 		if m.remoteMode {
 			if m.remoteAction != "" {
 				prompts := map[string]string{
-					"a": "add (name url): ",
-					"r": "remove (name): ",
-					"m": "rename (old new): ",
-					"s": "set-url (name url): ",
+					actAdd:    "add (name url): ",
+					actRemove: "remove (name): ",
+					actRename: "rename (old new): ",
+					actSetURL: "set-url (name url): ",
 				}
 				text := " [git > remote] " + prompts[m.remoteAction] + m.remoteInput + "█"
 				return []string{bgRow(m.width, colDarkerGray, seg{text: text, fg: colPink})}
 			}
-			return m.renderMenuRows(" [git > remote] ", colPink, colPurple, remoteMenuItems)
+			return m.renderMenuRows(" [git > remote] ", colPink, colPurple, m.remoteMenuItems())
 		}
-		return m.renderMenuRows(" [git mode] ", colDarkOrange, colPurple, gitMenuItems)
+		return m.renderMenuRows(" [git mode] ", colDarkOrange, colPurple, m.gitMenuItems())
 
 	case m.conflictOpen:
 		f := m.curConflictFile()
@@ -4167,7 +4178,7 @@ func (m Model) renderStatusBar() []string {
 		segs = append(segs, seg{text: src, fg: colMagenta, bold: true})
 		segs = append(segs, seg{text: " " + rebasePlaceLabels[m.rebasePlace] + " ", fg: colYellow})
 		segs = append(segs, seg{text: dest, fg: colMagenta, bold: true})
-		segs = append(segs, seg{text: "   j/k move · s scope · tab place · ⏎ confirm · esc cancel", fg: colGray})
+		segs = append(segs, seg{text: "   " + m.modeHints(ctxRebase, actScope, actPlace), fg: colGray})
 		return []string{bgRow(m.width, colDarkerGray, segs...)}
 
 	case m.squashMode:
@@ -4182,17 +4193,22 @@ func (m Model) renderStatusBar() []string {
 		segs = append(segs, seg{text: src, fg: colMagenta, bold: true})
 		segs = append(segs, seg{text: " into ", fg: colYellow})
 		segs = append(segs, seg{text: dest, fg: colMagenta, bold: true})
-		segs = append(segs, seg{text: "   j/k move · ⏎ confirm · esc cancel", fg: colGray})
+		segs = append(segs, seg{text: "   " + m.modeHints(ctxSquash), fg: colGray})
 		return []string{bgRow(m.width, colDarkerGray, segs...)}
 
 	case m.splitMode:
 		segs := []seg{{text: " [split] ", fg: colYellow, bold: true}}
 		segs = append(segs, seg{text: m.diffRev, fg: colMagenta, bold: true})
-		segs = append(segs, seg{text: " · space toggle · c confirm · esc cancel · ↑/↓ navigate", fg: colGray})
+		segs = append(segs, seg{text: " · " + m.hk(ctxSplit, actToggle) + " toggle · " +
+			m.hk(ctxSplit, actConfirm) + " confirm · " + m.hk(ctxSplit, actCancel) + " cancel · " +
+			m.hk(ctxSplit, actUp) + "/" + m.hk(ctxSplit, actDown) + " navigate", fg: colGray})
 		return []string{bgRow(m.width, colDarkerGray, segs...)}
 
 	case m.searchMode:
-		return []string{bgRow(m.width, colDarkerGray, seg{text: " / search · type to filter · ⏎ jump · ↑/↓ navigate · esc cancel", fg: colGray})}
+		return []string{bgRow(m.width, colDarkerGray, seg{text: " " + m.hk(ctxLog, actSearch) +
+			" search · type to filter · " + m.hk(ctxSearch, actAccept) + " jump · " +
+			m.hk(ctxSearch, actUp) + "/" + m.hk(ctxSearch, actDown) + " navigate · " +
+			m.hk(ctxSearch, actCancel) + " cancel", fg: colGray})}
 
 	case m.errMsg != "":
 		msg := expandTabs(m.errMsg)
@@ -4242,11 +4258,29 @@ func (m Model) selChangeID() string {
 
 // defaultHelpBarItems is the ordered list of global shortcut hints shown in
 // the bottom help bar while browsing the log (the default context).
-var defaultHelpBarItems = [][2]string{
-	{"⏎diff", "⏎"}, {"describe", "d"},
-	{"AI Desc", "D"}, {"bookmark", "b"}, {"tag", "t"}, {"git", "g"},
-	{"undo", "u"}, {"redo", "U"}, {"rebase", "r"}, {"squash", "s"}, {"absorb", "x"}, {"edit", "e"}, {"new", "n"},
-	{"conflicts", "c"}, {"abandon", "a"}, {"file", "f"}, {"/search", "/"}, {"?help", "?"}, {"quit", "q"},
+func (m Model) defaultHelpBarItems() [][2]string {
+	hk := func(action string) string { return m.hk(ctxLog, action) }
+	return [][2]string{
+		{m.hk(ctxLog, actOpen) + "diff", m.hk(ctxLog, actOpen)},
+		{"describe", hk(actDescribe)},
+		{"AI Desc", hk(actAIDescribe)},
+		{"bookmark", hk(actBookmark)},
+		{"tag", hk(actTag)},
+		{"git", hk(actGit)},
+		{"undo", hk(actUndo)},
+		{"redo", hk(actRedo)},
+		{"rebase", hk(actRebase)},
+		{"squash", hk(actSquash)},
+		{"absorb", hk(actAbsorb)},
+		{"edit", hk(actEdit)},
+		{"new", hk(actNew)},
+		{"conflicts", hk(actConflict)},
+		{"abandon", hk(actAbandon)},
+		{"file", hk(actFiles)},
+		{m.hk(ctxLog, actSearch) + "search", m.hk(ctxLog, actSearch)},
+		{m.hk(ctxGlobal, actHelp) + "help", m.hk(ctxGlobal, actHelp)},
+		{"quit", m.hk(ctxGlobal, actQuit)},
+	}
 }
 
 // helpBarItems returns the shortcut hints shown in the bottom help bar for the
@@ -4254,92 +4288,150 @@ var defaultHelpBarItems = [][2]string{
 // (e.g. subcommand modes whose key hints are already surfaced in the status
 // bar), so the content area can reclaim that row.
 func (m Model) helpBarItems() [][2]string {
+	navPair := func(ctx string) [][2]string {
+		return [][2]string{{m.hkN(ctx, actUp, 0, "/"), m.hk(ctx, actUp)}, {m.hkN(ctx, actDown, 0, "/"), m.hk(ctx, actDown)}}
+	}
 	switch {
 	case m.conflictOpen:
 		return [][2]string{
-			{"l left", "l"}, {"r right", "r"}, {"b both", "b"},
-			{"u undo", "u"}, {"↑/k hunk↑", "↑"}, {"↓/j hunk↓", "↓"},
-			{"[/] file", "["}, {"⏎ apply", "⏎"}, {"esc abort", "esc"},
+			{m.hk(ctxConflict, actPickLeft) + " left", m.hk(ctxConflict, actPickLeft)},
+			{m.hk(ctxConflict, actPickRight) + " right", m.hk(ctxConflict, actPickRight)},
+			{m.hk(ctxConflict, actPickBoth) + " both", m.hk(ctxConflict, actPickBoth)},
+			{m.hk(ctxConflict, actPickUnset) + " undo", m.hk(ctxConflict, actPickUnset)},
+			{m.hkN(ctxConflict, actUp, 0, "/") + " hunk↑", m.hk(ctxConflict, actUp)},
+			{m.hkN(ctxConflict, actDown, 0, "/") + " hunk↓", m.hk(ctxConflict, actDown)},
+			{m.hk(ctxConflict, actPrevFile) + "/" + m.hk(ctxConflict, actNextFile) + " file", m.hk(ctxConflict, actPrevFile)},
+			{m.hk(ctxConflict, actApply) + " apply", m.hk(ctxConflict, actApply)},
+			{m.hk(ctxConflict, actClose) + " abort", m.hk(ctxConflict, actClose)},
 		}
 	case m.splitMode:
 		return [][2]string{
-			{"space toggle", "space"}, {"c confirm", "c"}, {"esc cancel", "esc"},
-			{"↑/k chunk↑", "↑"}, {"↓/j chunk↓", "↓"},
-			{"g top", "g"}, {"G bot", "G"}, {"←/→ fold", "←"},
+			{m.hk(ctxSplit, actToggle) + " toggle", m.hk(ctxSplit, actToggle)},
+			{m.hk(ctxSplit, actConfirm) + " confirm", m.hk(ctxSplit, actConfirm)},
+			{m.hk(ctxSplit, actCancel) + " cancel", m.hk(ctxSplit, actCancel)},
+			{m.hkN(ctxSplit, actUp, 0, "/") + " chunk↑", m.hk(ctxSplit, actUp)},
+			{m.hkN(ctxSplit, actDown, 0, "/") + " chunk↓", m.hk(ctxSplit, actDown)},
+			{m.hk(ctxSplit, actTop) + " top", m.hk(ctxSplit, actTop)},
+			{m.hk(ctxSplit, actBottom) + " bot", m.hk(ctxSplit, actBottom)},
+			{m.hk(ctxSplit, actCollapse) + "/" + m.hk(ctxSplit, actExpand) + " fold", m.hk(ctxSplit, actCollapse)},
 		}
 	case m.diffOpen:
-		return [][2]string{
-			{"⏎ close", "⏎"}, {"↑/k chunk↑", "↑"}, {"↓/j chunk↓", "↓"},
-			{"g top", "g"}, {"G bot", "G"}, {"←/→ fold", "←"},
-			{"describe", "d"}, {"AI Desc", "D"}, {"new", "n"}, {"split", "s"}, {"absorb", "x"},
-			{"q close", "q"},
+		var items [][2]string
+		if closeKeys := m.keys.keys(ctxDiff, actClose); len(closeKeys) > 0 {
+			items = append(items, [2]string{prettyKey(closeKeys[0]) + " close", prettyKey(closeKeys[0])})
 		}
+		items = append(items,
+			[2]string{m.hkN(ctxDiff, actUp, 0, "/") + " chunk↑", m.hk(ctxDiff, actUp)},
+			[2]string{m.hkN(ctxDiff, actDown, 0, "/") + " chunk↓", m.hk(ctxDiff, actDown)},
+			[2]string{m.hk(ctxDiff, actTop) + " top", m.hk(ctxDiff, actTop)},
+			[2]string{m.hk(ctxDiff, actBottom) + " bot", m.hk(ctxDiff, actBottom)},
+			[2]string{m.hk(ctxDiff, actCollapse) + "/" + m.hk(ctxDiff, actExpand) + " fold", m.hk(ctxDiff, actCollapse)},
+			[2]string{"describe", m.hk(ctxDiff, actDescribe)},
+			[2]string{"AI Desc", m.hk(ctxDiff, actAIDescribe)},
+			[2]string{"new", m.hk(ctxDiff, actNew)},
+			[2]string{"split", m.hk(ctxDiff, actSplit)},
+			[2]string{"absorb", m.hk(ctxDiff, actAbsorb)},
+		)
+		if closeKeys := m.keys.keys(ctxDiff, actClose); len(closeKeys) > 1 {
+			items = append(items, [2]string{prettyKey(closeKeys[1]) + " close", prettyKey(closeKeys[1])})
+		}
+		return items
 	case m.view == viewFile:
 		switch m.fileView.phase {
 		case fileBlame:
-			return [][2]string{
-				{"↑/k", "↑"}, {"↓/j", "↓"}, {"g/G top/bot", "g"},
-				{"history", "h"}, {"open commit", "⏎"}, {"back", "esc/q"},
-			}
+			items := navPair(ctxBlame)
+			items = append(items,
+				[2]string{m.hk(ctxBlame, actTop) + "/" + m.hk(ctxBlame, actBottom) + " top/bot", m.hk(ctxBlame, actTop)},
+				[2]string{"history", m.hk(ctxBlame, actHistory)},
+				[2]string{"open commit", m.hk(ctxBlame, actOpen)},
+				[2]string{"back", m.hkN(ctxBlame, actBack, 2, "/")},
+			)
+			return items
 		case fileHistory:
-			return [][2]string{
-				{"↑/k", "↑"}, {"↓/j", "↓"}, {"open commit", "⏎"},
-				{"back", "esc/q"},
-			}
+			items := navPair(ctxHist)
+			items = append(items,
+				[2]string{"open commit", m.hk(ctxHist, actOpen)},
+				[2]string{"back", m.hkN(ctxHist, actBack, 2, "/")},
+			)
+			return items
 		default:
 			if m.fileView.fzfActive {
 				return [][2]string{
-					{"type", "filter"}, {"⌫ del", "backspace"}, {"⏎ open", "⏎"},
-					{"↑/k ↓/j", "nav"}, {"esc back", "esc"},
+					{"type", "filter"}, {m.hk(ctxFzf, actErase) + " del", m.hkRaw(ctxFzf, actErase)},
+					{m.hk(ctxFzf, actAccept) + " open", m.hk(ctxFzf, actAccept)},
+					{m.hkN(ctxFzf, actUp, 0, "/") + " " + m.hkN(ctxFzf, actDown, 0, "/"), "nav"},
+					{m.hk(ctxFzf, actCancel) + " back", m.hk(ctxFzf, actCancel)},
 				}
 			}
-			return [][2]string{
-				{"↑/k", "↑"}, {"↓/j", "↓"}, {"⏎/l open", "⏎"}, {"h collapse", "h"},
-				{"type→fzf", "f"}, {"quit", "q"},
-			}
+			items := navPair(ctxPicker)
+			items = append(items,
+				[2]string{m.hk(ctxPicker, actOpen) + "/" + m.hk(ctxPicker, actExpand) + " open", m.hk(ctxPicker, actOpen)},
+				[2]string{m.hk(ctxPicker, actCollapse) + " collapse", m.hk(ctxPicker, actCollapse)},
+				[2]string{"type→fzf", "f"},
+				[2]string{"quit", m.hkLast(ctxPicker, actQuit)},
+			)
+			return items
 		}
 	case m.view == viewHelp:
-		return [][2]string{
-			{"↑/k", "↑"}, {"↓/j", "↓"}, {"?/q close", "?"},
-		}
+		items := navPair(ctxHelp)
+		items = append(items, [2]string{m.hk(ctxGlobal, actHelp) + "/" + m.hk(ctxGlobal, actQuit) + " close", m.hk(ctxGlobal, actHelp)})
+		return items
 	case m.searchMode:
 		return [][2]string{
-			{"type", "filter"}, {"⌫ del", "backspace"}, {"⏎ jump", "⏎"},
-			{"↑/↓ nav", "↑"}, {"ctrl+u clear", "ctrl+u"}, {"esc cancel", "esc"},
+			{"type", "filter"}, {m.hk(ctxSearch, actErase) + " del", m.hkRaw(ctxSearch, actErase)},
+			{m.hk(ctxSearch, actAccept) + " jump", m.hk(ctxSearch, actAccept)},
+			{m.hk(ctxSearch, actUp) + "/" + m.hk(ctxSearch, actDown) + " nav", m.hk(ctxSearch, actUp)},
+			{m.hk(ctxSearch, actClear) + " clear", m.hkRaw(ctxSearch, actClear)},
+			{m.hk(ctxSearch, actCancel) + " cancel", m.hk(ctxSearch, actCancel)},
 		}
 	case m.rebaseMode, m.squashMode,
 		m.bookmarkMode, m.tagMode, m.renameMode, m.gitMode:
 		// Keys for these modes are shown inline in the status bar.
 		return nil
 	default:
-		return defaultHelpBarItems
+		return m.defaultHelpBarItems()
 	}
 }
 
 // Menu item lists for the status-bar subcommand menus. Each entry is
-// {label, key}; "cancel" is folded in so it wraps with the rest.
-var (
-	bookmarkMenuItems = [][2]string{
-		{"create", "c"}, {"delete", "d"}, {"forget", "f"},
-		{"list", "l"}, {"move", "m"}, {"rename", "r"},
-		{"set", "s"}, {"track", "t"}, {"untrack", "T"},
-		{"cancel", "esc"},
+// {label, key}; "cancel" is folded in so it wraps with the rest. Keys are
+// resolved from the configured keymap so hints and clicks follow the user's
+// bindings.
+func (m Model) bookmarkMenuItems() [][2]string {
+	hk := func(action string) string { return m.hk(ctxBookmark, action) }
+	return [][2]string{
+		{"create", hk(actCreate)}, {"delete", hk(actDelete)}, {"forget", hk(actForget)},
+		{"list", hk(actList)}, {"move", hk(actMove)}, {"rename", hk(actRename)},
+		{"set", hk(actSet)}, {"track", hk(actTrack)}, {"untrack", hk(actUntrack)},
+		{"cancel", hk(actCancel)},
 	}
-	gitMenuItems = [][2]string{
-		{"fetch", "f"}, {"push", "p"}, {"Push bookmark", "P"}, {"remote", "r"},
-		{"cancel", "esc"},
+}
+
+func (m Model) gitMenuItems() [][2]string {
+	hk := func(action string) string { return m.hk(ctxGit, action) }
+	return [][2]string{
+		{"fetch", hk(actFetch)}, {"push", hk(actPush)}, {"Push bookmark", hk(actPushMark)}, {"remote", hk(actRemote)},
+		{"cancel", hk(actCancel)},
 	}
-	remoteMenuItems = [][2]string{
-		{"add", "a"}, {"list", "l"}, {"remove", "r"},
-		{"rename", "m"}, {"set-url", "s"},
-		{"cancel", "esc"},
+}
+
+func (m Model) remoteMenuItems() [][2]string {
+	hk := func(action string) string { return m.hk(ctxRemote, action) }
+	return [][2]string{
+		{"add", hk(actAdd)}, {"list", hk(actList)}, {"remove", hk(actRemove)},
+		{"rename", hk(actRename)}, {"set-url", hk(actSetURL)},
+		{"cancel", hk(actCancel)},
 	}
-	tagMenuItems = [][2]string{
-		{"set", "s"}, {"move", "m"}, {"delete", "d"},
-		{"list", "l"}, {"push", "p"},
-		{"cancel", "esc"},
+}
+
+func (m Model) tagMenuItems() [][2]string {
+	hk := func(action string) string { return m.hk(ctxTag, action) }
+	return [][2]string{
+		{"set", hk(actSet)}, {"move", hk(actMove)}, {"delete", hk(actDelete)},
+		{"list", hk(actList)}, {"push", hk(actPush)},
+		{"cancel", hk(actCancel)},
 	}
-)
+}
 
 // wrapMenu greedily packs highlightable menu items into rows no wider than
 // width, returning the segment slices per row. The first row is prefixed with
