@@ -1,0 +1,17 @@
+# Base16 Classic Dark — https://github.com/chriskempson/base16
+name = "Base16 Classic Dark"
+
+[dark]
+background = "#151515"
+panel      = "#202020"
+element    = "#303030"
+hover      = "#2a2a2a"
+text       = "#d0d0d0"
+text_muted = "#505050"
+purple     = "#aa759f"
+blue       = "#6a9fb5"
+green      = "#90a959"
+red        = "#ac4142"
+yellow     = "#f4bf75"
+cyan       = "#75b5aa"
+orange     = "#d28445"

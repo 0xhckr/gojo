@@ -253,6 +253,18 @@ type Model struct {
 	renameMode   bool
 	renameInput  string
 	renameTarget renameRef
+
+	// Theme picker. themes is the merged list (compiled-in defaults, theme
+	// files from the install/share dirs, user themes from
+	// ~/.config/gojo/themes); themeName is the active theme id. themeOpen
+	// shows the picker; themeReturn remembers the theme active when the
+	// picker opened so esc can restore it after live previews.
+	themes      []Theme
+	themeName   string
+	themeOpen   bool
+	themeCursor int
+	themeOffset int
+	themeReturn string
 }
 
 // NewModel builds the initial model.
@@ -274,8 +286,9 @@ func NewModel() Model {
 // ── Messages ────────────────────────────────────────────────────────────────
 
 type bootMsg struct {
-	cfg jj.Config
-	err error
+	cfg    jj.Config
+	err    error
+	themes []Theme
 }
 
 // initDoneMsg reports the outcome of jj git init from the boot prompt. On
@@ -411,7 +424,7 @@ func (m Model) Init() tea.Cmd {
 
 func boot() tea.Msg {
 	cfg, err := jj.LoadConfig()
-	return bootMsg{cfg: cfg, err: err}
+	return bootMsg{cfg: cfg, err: err, themes: LoadThemes()}
 }
 
 // initRepoCmd runs jj git init (--colocate optional) in the directory gojo
@@ -781,6 +794,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case bootMsg:
 		m.keys = newKeyMap(msg.cfg.Keymap)
+		// Apply the configured theme before any UI draws — the boot init and
+		// error screens use the palette too.
+		m.themes = msg.themes
+		if len(m.themes) == 0 {
+			m.themes = compiledThemes()
+		}
+		m.applyThemeByName(msg.cfg.Theme)
 		if msg.err != nil {
 			// Outside any jj repo: offer to initialize one (and optionally
 			// colocate with git) instead of showing a bare error.
@@ -1854,6 +1874,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSquashKey(k)
 	}
 
+	// The theme picker handles its own keys (including q/esc to cancel).
+	if m.themeOpen {
+		nm, cmd := m.handleThemeKey(k)
+		return nm, cmd
+	}
+
 	// The conflict view handles its own keys (including q/esc to close).
 	if m.conflictOpen {
 		return m.handleConflictKey(k)
@@ -2114,6 +2140,11 @@ func (m Model) applyScrollBarDrag(mouseY int) (tea.Model, tea.Cmd) {
 	}
 
 	switch {
+	case m.themeOpen:
+		if total := len(m.themes); total > 0 {
+			m.themeMove(trackY * (total - 1) / max(1, trackH-1))
+		}
+
 	case m.conflictOpen:
 		maxScroll := m.conflictMaxScroll()
 		if maxScroll > 0 {
@@ -2262,6 +2293,9 @@ func (m Model) flushWheel() (tea.Model, tea.Cmd) {
 // (−1 = up, +1 = down). Mutates in place; flushWheel loops it for batches.
 func (m *Model) wheelStep(dir int) {
 	switch {
+	case m.themeOpen:
+		m.themeMove(m.themeCursor + dir)
+
 	case m.conflictOpen:
 		m.conflict.scrollY += dir
 		m.conflictClampScroll()
@@ -2968,6 +3002,8 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 	case actRedo:
 		r := m.runner
 		return m.busySimpleCmd("redoing…", func() error { return r.Redo() }, "redone")
+	case actTheme:
+		return m.openThemePicker(), nil
 	case actRebase:
 		if len(m.entries) < 2 {
 			m.errMsg = "need at least two revisions to rebase"
@@ -3920,6 +3956,8 @@ func (m Model) View() string {
 	// Content area.
 	ch := m.contentHeight()
 	switch {
+	case m.themeOpen:
+		lines = append(lines, m.renderThemePicker(m.width, ch)...)
 	case m.conflictOpen:
 		lines = append(lines, m.renderConflictView(m.width, ch)...)
 	case m.view == viewHelp:
@@ -4045,6 +4083,18 @@ func (m Model) renderStatusBar() []string {
 	switch {
 	case m.view == viewFile:
 		return m.renderFileStatusBar()
+	case m.themeOpen:
+		var name string
+		if m.themeCursor >= 0 && m.themeCursor < len(m.themes) {
+			name = m.themes[m.themeCursor].Title
+		}
+		segs := []seg{
+			{text: " [themes] ", fg: colMagenta, bold: true},
+			{text: name, fg: colWhite},
+			{text: "  ·  " + m.hkN(ctxTheme, actUp, 0, "/") + "/" + m.hkN(ctxTheme, actDown, 0, "/") + " preview · " +
+				m.hk(ctxTheme, actApply) + " apply & save · " + m.hk(ctxTheme, actCancel) + " cancel", fg: colGray},
+		}
+		return []string{bgRow(m.width, colDarkerGray, segs...)}
 	case m.pendingElev != nil:
 		segs := []seg{
 			{text: " ⚠ retry with ", fg: colYellow},
@@ -4274,6 +4324,7 @@ func (m Model) defaultHelpBarItems() [][2]string {
 		{"absorb", hk(actAbsorb)},
 		{"edit", hk(actEdit)},
 		{"new", hk(actNew)},
+		{"themes", hk(actTheme)},
 		{"conflicts", hk(actConflict)},
 		{"abandon", hk(actAbandon)},
 		{"file", hk(actFiles)},
@@ -4292,6 +4343,9 @@ func (m Model) helpBarItems() [][2]string {
 		return [][2]string{{m.hkN(ctx, actUp, 0, "/"), m.hk(ctx, actUp)}, {m.hkN(ctx, actDown, 0, "/"), m.hk(ctx, actDown)}}
 	}
 	switch {
+	case m.themeOpen:
+		// Keys for the picker are shown inline in the status bar.
+		return nil
 	case m.conflictOpen:
 		return [][2]string{
 			{m.hk(ctxConflict, actPickLeft) + " left", m.hk(ctxConflict, actPickLeft)},

@@ -33,10 +33,11 @@ archives:
       {{ .ProjectName }}_{{ .Version }}_
       {{- if eq .Os "darwin" }}macOS
       {{- else }}{{ .Os }}{{ end }}_{{ .Arch }}
-    # Ship the binary + license + readme in each archive.
+    # Ship the binary + license + readme + theme files in each archive.
     files:
       - LICENSE
       - README.md
+      - themes/
 
 # Distro packages (nfpm). One entry per package format, enabled one distro
 # family at a time. jujutsu is a hard dependency on Arch (it is packaged in
@@ -64,6 +65,10 @@ nfpms:
         dst: /usr/share/doc/gojo/README.md
       - src: LICENSE
         dst: /usr/share/licenses/gojo/LICENSE
+      # Built-in themes; gojo discovers share/gojo/themes next to bin/.
+      - src: themes/
+        dst: /usr/share/gojo/themes
+        type: tree
 
   # Debian/Ubuntu: .deb. jujutsu is only a recommendation — it is packaged
   # as `jujutsu` on Debian 13+/Ubuntu 24.10+, but older releases lack it and
@@ -81,6 +86,9 @@ nfpms:
     contents:
       - src: LICENSE
         dst: /usr/share/doc/gojo/copyright
+      - src: themes/
+        dst: /usr/share/gojo/themes
+        type: tree
 
   # Arch Linux (and derivatives): pacman .pkg.tar.zst.
   - id: gojo-arch
@@ -98,6 +106,9 @@ nfpms:
         dst: /usr/share/doc/gojo/README.md
       - src: LICENSE
         dst: /usr/share/licenses/gojo/LICENSE
+      - src: themes/
+        dst: /usr/share/gojo/themes
+        type: tree
 
 checksum:
   name_template: "checksums.txt"

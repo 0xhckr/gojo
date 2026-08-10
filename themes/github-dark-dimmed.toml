@@ -1,0 +1,19 @@
+# GitHub Dark Dimmed
+name = "GitHub Dark Dimmed"
+syntax = "github-dark"
+
+[dark]
+background = "#22272e"
+panel      = "#1c2128"
+element    = "#2d333b"
+hover      = "#282e36"
+text       = "#adbac7"
+text_muted = "#768390"
+purple     = "#b083f0"
+blue       = "#539bf5"
+green      = "#57ab5a"
+red        = "#e5534b"
+yellow     = "#daaa3f"
+cyan       = "#76e3ea"
+orange     = "#c69026"
+pink       = "#e275ad"

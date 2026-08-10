@@ -27,6 +27,8 @@ func (m Model) modalInputActive() bool {
 // outside the scrollbar area.
 func (m Model) handleClick(x, mouseY int) (tea.Model, tea.Cmd) {
 	switch {
+	case m.themeOpen:
+		return m.handleThemeClick(mouseY)
 	case m.conflictOpen:
 		return m.handleConflictClick(x, mouseY)
 	case m.diffOpen:
@@ -45,6 +47,35 @@ func (m Model) handleClick(x, mouseY int) (tea.Model, tea.Cmd) {
 	default:
 		return m.handleLogClick(mouseY)
 	}
+}
+
+// themeRowAtMouseY maps a terminal Y coordinate to a theme index in the
+// picker list. Row 0 of the content area is the picker title bar; list row
+// i of the visible window shows theme themeOffset+i.
+func (m Model) themeRowAtMouseY(mouseY int) (int, bool) {
+	line := mouseY - contentTopBarHeight - 1 // skip title bar
+	if line < 0 {
+		return 0, false
+	}
+	idx := m.themeOffset + line
+	if idx < 0 || idx >= len(m.themes) || idx >= m.themeOffset+m.themeContentHeight() {
+		return 0, false
+	}
+	return idx, true
+}
+
+// handleThemeClick: click a row to preview it; click the already-focused row
+// to apply and save (same as ⏎).
+func (m Model) handleThemeClick(mouseY int) (tea.Model, tea.Cmd) {
+	idx, ok := m.themeRowAtMouseY(mouseY)
+	if !ok {
+		return m, nil
+	}
+	if idx == m.themeCursor {
+		return m.handleThemeKey("enter")
+	}
+	m.themeMove(idx)
+	return m, nil
 }
 
 // logEntryAtContentY maps a Y coordinate within a rendered log list to the
@@ -371,7 +402,7 @@ func (m Model) handleHistoryClick(mouseY int) (tea.Model, tea.Cmd) {
 // scrollbar. Clicks are also fed through here so pressing sets the highlight
 // even if no motion event preceded the press.
 func (m Model) updateHover(x, y int) Model {
-	m.hover = hoverState{valid: true, logIdx: -1, logEdge: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1, searchRow: -1, conflictBlock: -1, refName: "", refKind: ""}
+	m.hover = hoverState{valid: true, logIdx: -1, logEdge: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1, searchRow: -1, conflictBlock: -1, refName: "", refKind: "", themeRow: -1}
 
 	// Check shortcut hover (help bar / status bar menus) first — this works
 	// regardless of content area bounds.
@@ -391,6 +422,10 @@ func (m Model) updateHover(x, y int) Model {
 	}
 
 	switch {
+	case m.themeOpen:
+		if idx, ok := m.themeRowAtMouseY(y); ok {
+			m.hover.themeRow = idx
+		}
 	case m.conflictOpen:
 		m.conflictHover(x, y)
 	case m.diffOpen:

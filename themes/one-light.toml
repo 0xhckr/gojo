@@ -1,0 +1,17 @@
+# One Light — Atom One Light / One Half Light
+name = "One Light"
+
+[light]
+background = "#fafafa"
+panel      = "#f0f0f0"
+element    = "#e5e5e6"
+hover      = "#ececec"
+text       = "#383a42"
+text_muted = "#a0a1a7"
+purple     = "#a626a4"
+blue       = "#0184bc"
+green      = "#50a14f"
+red        = "#e45649"
+yellow     = "#c18401"
+cyan       = "#0997b3"
+orange     = "#d75f00"

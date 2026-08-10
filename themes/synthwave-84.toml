@@ -1,0 +1,18 @@
+# SynthWave '84 — https://github.com/robb0wen/synthwave-vscode
+name = "SynthWave '84"
+
+[dark]
+background = "#262335"
+panel      = "#201b2d"
+element    = "#372f4c"
+hover      = "#2f2a44"
+text       = "#ffffff"
+text_muted = "#848bbd"
+purple     = "#b465ff"
+blue       = "#03edf9"
+green      = "#72f1b8"
+red        = "#fe4450"
+yellow     = "#fede5d"
+cyan       = "#36f9f6"
+orange     = "#f97e72"
+pink       = "#ff7edb"

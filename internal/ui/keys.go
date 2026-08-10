@@ -46,6 +46,7 @@ const (
 	ctxFzf      = "fzf"      // inline fuzzy file finder
 	ctxBlame    = "blame"    // file blame view
 	ctxHist     = "history"  // file history view
+	ctxTheme    = "theme"    // theme picker
 )
 
 // Action names — the config-key suffix after the dot.
@@ -117,6 +118,7 @@ const (
 	actSetURL     = "set_url"
 	actAdd        = "add"
 	actRemove     = "remove"
+	actTheme      = "theme" // open the theme picker
 )
 
 // keyBind declares the default keys for one action.
@@ -186,6 +188,7 @@ var defaultKeymap = []struct {
 		{actRebase, []string{"r"}},
 		{actSquash, []string{"s"}},
 		{actAbsorb, []string{"x"}},
+		{actTheme, []string{"T"}},
 	}},
 	{ctxDiff, []keyBind{
 		{actClose, []string{"enter", "q", "esc"}},
@@ -353,6 +356,16 @@ var defaultKeymap = []struct {
 		{actTop, []string{"home", "g"}},
 		{actBottom, []string{"end", "G"}},
 		{actOpen, []string{"enter"}},
+	}},
+	{ctxTheme, []keyBind{
+		{actCancel, []string{"esc", "q"}},
+		{actApply, []string{"enter"}},
+		{actUp, []string{"up", "k"}},
+		{actDown, []string{"down", "j"}},
+		{actTop, []string{"home", "g"}},
+		{actBottom, []string{"end", "G"}},
+		{actPageUp, []string{"pgup", "ctrl+u"}},
+		{actPageDown, []string{"pgdown", "ctrl+d"}},
 	}},
 }
 

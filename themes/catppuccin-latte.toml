@@ -1,0 +1,20 @@
+# Catppuccin Latte — https://catppuccin.com
+name = "Catppuccin Latte"
+syntax = "catppuccin-latte"
+
+[light]
+background = "#eff1f5"
+panel      = "#e6e9ef"
+element    = "#ccd0da"
+hover      = "#dce0e8"
+text       = "#4c4f69"
+text_muted = "#9ca0b0"
+purple     = "#8839ef"
+blue       = "#1e66f5"
+green      = "#40a02b"
+red        = "#d20f39"
+yellow     = "#df8e1d"
+cyan       = "#04a5e5"
+orange     = "#fe640b"
+pink       = "#ea76cb"
+teal       = "#179299"

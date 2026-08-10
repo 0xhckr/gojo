@@ -1,0 +1,17 @@
+# Everforest (dark medium) — https://github.com/sainnhe/everforest
+name = "Everforest"
+
+[dark]
+background = "#2d353b"
+panel      = "#232a2e"
+element    = "#3d484d"
+hover      = "#343f44"
+text       = "#d3c6aa"
+text_muted = "#859289"
+purple     = "#d699b6"
+blue       = "#7fbbb3"
+green      = "#a7c080"
+red        = "#e67e80"
+yellow     = "#dbbc7f"
+cyan       = "#83c092"
+orange     = "#e69875"

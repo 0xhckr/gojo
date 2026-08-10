@@ -1,0 +1,17 @@
+# Base16 Eighties — https://github.com/chriskempson/base16
+name = "Base16 Eighties"
+
+[dark]
+background = "#2d2d2d"
+panel      = "#212121"
+element    = "#515151"
+hover      = "#393939"
+text       = "#d3d0c8"
+text_muted = "#747369"
+purple     = "#cc99cc"
+blue       = "#6699cc"
+green      = "#99cc99"
+red        = "#f2777a"
+yellow     = "#ffcc66"
+cyan       = "#66cccc"
+orange     = "#f99157"

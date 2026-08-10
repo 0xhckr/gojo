@@ -1,0 +1,20 @@
+# Doom One — https://github.com/doomemacs/themes
+name = "Doom One"
+syntax = "doom-one"
+
+[dark]
+background = "#282c34"
+panel      = "#21242b"
+element    = "#3e4451"
+hover      = "#343a45"
+text       = "#bbc2cf"
+text_muted = "#5b6268"
+purple     = "#c678dd"
+magenta    = "#c678dd"
+blue       = "#51afef"
+green      = "#98be65"
+red        = "#ff6c6b"
+yellow     = "#ecbe7b"
+cyan       = "#46d9ff"
+orange     = "#da8548"
+teal       = "#4db5bd"

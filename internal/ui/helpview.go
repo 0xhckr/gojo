@@ -60,6 +60,15 @@ func (m Model) helpSections() []helpSection {
 			{kv(ctxLog, actRebase), "rebase mode"},
 			{kv(ctxLog, actSquash), "squash mode"},
 			{kv(ctxLog, actAbsorb), "jj absorb  (move changes into ancestors)"},
+			{kv(ctxLog, actTheme), "theme picker  (live preview, saves to gojo.toml)"},
+		}},
+		{title: "Theme Picker", color: colMagenta, bindings: []helpBinding{
+			{kv(ctxLog, actTheme) + " (from log)", "open the theme picker"},
+			{kvs(ctxTheme, actUp) + ", " + kvs(ctxTheme, actDown), "browse themes  (live-previewed)"},
+			{kv(ctxTheme, actApply), "apply & save theme to ~/.config/gojo/gojo.toml"},
+			{m.hkN(ctxTheme, actCancel, 2, " / "), "cancel  (restore previous theme)"},
+			{"terminal", "built-in theme that follows your terminal colors"},
+			{"~/.config/gojo/themes/*.toml", "drop in your own themes  (one file each)"},
 		}},
 		{title: "Search Mode", color: colCyan, bindings: []helpBinding{
 			{kv(ctxLog, actSearch) + " (from log)", "open the revision search"},

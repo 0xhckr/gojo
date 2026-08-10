@@ -1,0 +1,17 @@
+# Embark — https://embark-theme.github.io
+name = "Embark"
+
+[dark]
+background = "#1e1c31"
+panel      = "#100e23"
+element    = "#36324c"
+hover      = "#2b2946"
+text       = "#cbe3e7"
+text_muted = "#585273"
+purple     = "#d4bfff"
+blue       = "#91ddff"
+green      = "#a1efd3"
+red        = "#f48fb1"
+yellow     = "#ffe6b3"
+cyan       = "#87dfeb"
+orange     = "#f2b482"

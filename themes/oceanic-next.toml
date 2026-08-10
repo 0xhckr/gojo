@@ -1,0 +1,17 @@
+# Oceanic Next — https://github.com/voronianski/oceanic-next-color-scheme
+name = "Oceanic Next"
+
+[dark]
+background = "#1b2b34"
+panel      = "#15232b"
+element    = "#343d46"
+hover      = "#2b3841"
+text       = "#d8dee9"
+text_muted = "#65737e"
+purple     = "#c594c5"
+blue       = "#6699cc"
+green      = "#99c794"
+red        = "#ec5f67"
+yellow     = "#fac863"
+cyan       = "#62b3b2"
+orange     = "#f99157"

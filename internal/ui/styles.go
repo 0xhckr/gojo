@@ -7,6 +7,10 @@ import "github.com/charmbracelet/lipgloss"
 // design. A three-tier surface system (background → panel → element) provides
 // visual hierarchy. Accent colours are truecolor for consistency across
 // terminals. nil still means "terminal default" for body text.
+//
+// These initializers are the "gojo" default theme; at boot (and when the
+// user picks another theme) applyTheme rewrites every var from the selected
+// theme's palette — see themes.go.
 
 var (
 	// ── Surface tiers (background → panel → element) ───────────────

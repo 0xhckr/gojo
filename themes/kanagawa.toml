@@ -1,0 +1,19 @@
+# Kanagawa Wave — https://github.com/rebelot/kanagawa.nvim
+name = "Kanagawa"
+
+[dark]
+background = "#1f1f28"
+panel      = "#16161d"
+element    = "#2a2a37"
+hover      = "#23232f"
+text       = "#dcd7ba"
+text_muted = "#727169"
+purple     = "#957fb8"
+blue       = "#7e9cd8"
+green      = "#98bb6c"
+red        = "#e46876"
+yellow     = "#e6c384"
+cyan       = "#7fb4ca"
+orange     = "#ffa066"
+pink       = "#d27e99"
+teal       = "#6a9589"

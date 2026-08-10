@@ -1,0 +1,18 @@
+# Srcery — https://srcery.sh
+name = "Srcery"
+
+[dark]
+background = "#1c1b19"
+panel      = "#121110"
+element    = "#2d2c29"
+hover      = "#282723"
+text       = "#fce8c3"
+text_muted = "#918175"
+blue       = "#2c78bf"
+green      = "#519f50"
+red        = "#ef2f27"
+yellow     = "#fbb829"
+cyan       = "#0aaeb3"
+orange     = "#ff8700"
+pink       = "#e02c6d"
+purple     = "#e02c6d"

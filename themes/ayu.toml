@@ -1,0 +1,32 @@
+# Ayu (dark + light) — https://github.com/ayu-theme/ayu-colors
+name = "Ayu"
+
+[dark]
+background = "#0f1419"
+panel      = "#0b0e14"
+element    = "#273747"
+hover      = "#1c252f"
+text       = "#bfbdb6"
+text_muted = "#5c6773"
+purple     = "#d2a6ff"
+blue       = "#59c2ff"
+green      = "#aad94c"
+red        = "#f07178"
+yellow     = "#ffb454"
+cyan       = "#95e6cb"
+orange     = "#ff8f40"
+
+[light]
+background = "#fafafa"
+panel      = "#f2f2f2"
+element    = "#eaecee"
+hover      = "#eceeed"
+text       = "#575f66"
+text_muted = "#828c99"
+purple     = "#a37acc"
+blue       = "#55b4d4"
+green      = "#86b300"
+red        = "#e65050"
+yellow     = "#f2ae49"
+cyan       = "#4cbf99"
+orange     = "#fa8d3e"

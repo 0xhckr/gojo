@@ -285,25 +285,60 @@ func renderDiff(raw string) []diffRow {
 
 // ── chroma syntax highlighting ─────────────────────────────────────────────
 
-// chromaStyleOnce caches a chroma style chosen to match the terminal
-// background (light vs dark), resolved on first diff render.
+// The chroma style is re-resolvable at runtime: themes may override it (dark
+// and light variants) via setChromaStyleOverride; the default matches the
+// terminal background. The token-foreground cache is invalidated whenever the
+// effective style name changes.
 var (
-	chromaStyleOnce sync.Once
-	chromaStyleVal  *chroma.Style
+	chromaStyleMu       sync.Mutex
+	chromaStyleOverride string // theme override for dark backgrounds ("" = default)
+	chromaStyleOverLite string // theme override for light backgrounds
+	chromaStyleFor      string // name chromaStyleVal was resolved from
+	chromaStyleVal      *chroma.Style
 )
 
+// defaultChromaStyleName picks the built-in style for the terminal bg.
+func defaultChromaStyleName() string {
+	if lipgloss.HasDarkBackground() {
+		return "github-dark"
+	}
+	return "github"
+}
+
+// setChromaStyleOverride sets the theme's syntax styles (dark/light). Empty =
+// fall back to the adaptive default for that background class. The style
+// itself is resolved lazily on the next chromaStyle() call so the terminal's
+// background detection result is honored no matter when this runs.
+func setChromaStyleOverride(dark, light string) {
+	chromaStyleMu.Lock()
+	chromaStyleOverride, chromaStyleOverLite = dark, light
+	chromaStyleMu.Unlock()
+}
+
 func chromaStyle() *chroma.Style {
-	chromaStyleOnce.Do(func() {
-		name := "github-dark"
-		if !lipgloss.HasDarkBackground() {
-			name = "github"
-		}
-		if s := styles.Get(name); s != nil {
-			chromaStyleVal = s
-		} else {
-			chromaStyleVal = styles.Fallback
-		}
-	})
+	chromaStyleMu.Lock()
+	defer chromaStyleMu.Unlock()
+
+	name := defaultChromaStyleName()
+	override := chromaStyleOverride
+	if !lipgloss.HasDarkBackground() {
+		override = chromaStyleOverLite
+	}
+	if override != "" && styles.Get(override) != nil {
+		name = override
+	}
+	if chromaStyleVal != nil && chromaStyleFor == name {
+		return chromaStyleVal
+	}
+	if s := styles.Get(name); s != nil {
+		chromaStyleVal = s
+	} else {
+		chromaStyleVal = styles.Fallback
+	}
+	chromaStyleFor = name
+	chromaFgCacheMu.Lock()
+	clear(chromaFgCache)
+	chromaFgCacheMu.Unlock()
 	return chromaStyleVal
 }
 

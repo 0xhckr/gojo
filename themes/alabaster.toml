@@ -1,0 +1,16 @@
+# Alabaster — https://github.com/tonsky/sublime-scheme-alabaster (light, minimal)
+name = "Alabaster"
+
+[light]
+background = "#f7f7f7"
+panel      = "#efefef"
+element    = "#e0e0e0"
+hover      = "#ebebeb"
+text       = "#212121"
+text_muted = "#696969"
+purple     = "#7a3e9d"
+blue       = "#325cc0"
+green      = "#448c27"
+red        = "#aa3731"
+yellow     = "#cb8f27"
+orange     = "#8f5d15"

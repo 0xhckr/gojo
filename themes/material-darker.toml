@@ -1,0 +1,18 @@
+# Material Theme Darker
+name = "Material Darker"
+
+[dark]
+background = "#212121"
+panel      = "#171717"
+element    = "#303030"
+hover      = "#2a2a2a"
+text       = "#eeffff"
+text_muted = "#545454"
+purple     = "#c792ea"
+blue       = "#82aaff"
+green      = "#c3e88d"
+red        = "#f07178"
+yellow     = "#ffcb6b"
+cyan       = "#89ddff"
+orange     = "#f78c6c"
+pink       = "#ff5370"

@@ -1,0 +1,19 @@
+# Dracula — https://draculatheme.com
+name = "Dracula"
+syntax = "dracula"
+
+[dark]
+background = "#282a36"
+panel      = "#21222c"
+element    = "#44475a"
+text       = "#f8f8f2"
+text_muted = "#6272a4"
+purple     = "#bd93f9"
+blue       = "#8be9fd"
+green      = "#50fa7b"
+red        = "#ff5555"
+yellow     = "#f1fa8c"
+cyan       = "#8be9fd"
+orange     = "#ffb86c"
+pink       = "#ff79c6"
+teal       = "#8be9fd"

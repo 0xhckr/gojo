@@ -1,0 +1,20 @@
+# Catppuccin Mocha — https://catppuccin.com
+name = "Catppuccin Mocha"
+syntax = "catppuccin-mocha"
+
+[dark]
+background = "#1e1e2e"
+panel      = "#181825"
+element    = "#313244"
+hover      = "#292937"
+text       = "#cdd6f4"
+text_muted = "#6c7086"
+purple     = "#cba6f7"
+blue       = "#89b4fa"
+green      = "#a6e3a1"
+red        = "#f38ba8"
+yellow     = "#f9e2af"
+cyan       = "#89dceb"
+orange     = "#fab387"
+pink       = "#f5c2e7"
+teal       = "#94e2d5"

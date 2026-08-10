@@ -1,0 +1,17 @@
+# Material Palenight
+name = "Palenight"
+
+[dark]
+background = "#292d3e"
+panel      = "#1d212e"
+element    = "#444267"
+hover      = "#3b3d5c"
+text       = "#a6accd"
+text_muted = "#676e95"
+purple     = "#c792ea"
+blue       = "#82aaff"
+green      = "#c3e88d"
+red        = "#f07178"
+yellow     = "#ffcb6b"
+cyan       = "#89ddff"
+orange     = "#f78c6c"

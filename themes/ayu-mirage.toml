@@ -1,0 +1,17 @@
+# Ayu Mirage — https://github.com/ayu-theme/ayu-colors
+name = "Ayu Mirage"
+
+[dark]
+background = "#1f2430"
+panel      = "#191e2a"
+element    = "#33415e"
+hover      = "#2a3548"
+text       = "#cbccc6"
+text_muted = "#5c6773"
+purple     = "#d4bfff"
+blue       = "#73d0ff"
+green      = "#bae67e"
+red        = "#f28779"
+yellow     = "#ffd580"
+cyan       = "#95e6cb"
+orange     = "#ffad66"

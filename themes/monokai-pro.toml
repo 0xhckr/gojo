@@ -1,0 +1,19 @@
+# Monokai Pro — https://monokai.pro
+name = "Monokai Pro"
+syntax = "monokai"
+
+[dark]
+background = "#2d2a2e"
+panel      = "#221f22"
+element    = "#403e41"
+hover      = "#363437"
+text       = "#fcfcfa"
+text_muted = "#727072"
+purple     = "#ab9df2"
+blue       = "#78dce8"
+green      = "#a9dc76"
+red        = "#ff6188"
+yellow     = "#ffd866"
+cyan       = "#a1efe4"
+orange     = "#fc9867"
+pink       = "#ff6188"

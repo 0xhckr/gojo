@@ -1,0 +1,20 @@
+# Catppuccin Frappe — https://catppuccin.com
+name = "Catppuccin Frappé"
+syntax = "catppuccin-frappe"
+
+[dark]
+background = "#303446"
+panel      = "#292c3c"
+element    = "#414559"
+hover      = "#393d4f"
+text       = "#c6d0f5"
+text_muted = "#737994"
+purple     = "#ca9ee6"
+blue       = "#8caaee"
+green      = "#a6d189"
+red        = "#e78284"
+yellow     = "#e5c890"
+cyan       = "#99d1db"
+orange     = "#ef9f76"
+pink       = "#f4b8e4"
+teal       = "#81c8be"

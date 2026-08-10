@@ -1,0 +1,18 @@
+# Nightfox — https://github.com/EdenEast/nightfox.nvim
+name = "Nightfox"
+
+[dark]
+background = "#192330"
+panel      = "#131a24"
+element    = "#2b3b51"
+hover      = "#22303f"
+text       = "#cdcefb"
+text_muted = "#738091"
+purple     = "#9d79d6"
+blue       = "#719cd6"
+green      = "#81b29a"
+red        = "#c94f6d"
+yellow     = "#dbc074"
+cyan       = "#63cdcf"
+orange     = "#f4a261"
+pink       = "#d67ad2"

@@ -1,0 +1,18 @@
+# Night Owl — https://github.com/sdras/night-owl-vscode-theme
+name = "Night Owl"
+
+[dark]
+background = "#011627"
+panel      = "#01111d"
+element    = "#0b2942"
+hover      = "#072538"
+text       = "#d6deeb"
+text_muted = "#637777"
+purple     = "#c792ea"
+blue       = "#82aaff"
+green      = "#22da6e"
+red        = "#ef5350"
+yellow     = "#ecc48d"
+cyan       = "#7fdbca"
+orange     = "#f78c6c"
+pink       = "#ff5874"

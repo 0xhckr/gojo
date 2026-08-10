@@ -1,0 +1,18 @@
+# Carbonfox — https://github.com/EdenEast/nightfox.nvim (IBM Carbon palette)
+name = "Carbonfox"
+
+[dark]
+background = "#161616"
+panel      = "#0c0c0c"
+element    = "#353535"
+hover      = "#2a2a2a"
+text       = "#f2f4f8"
+text_muted = "#6f6f6f"
+purple     = "#be95ff"
+blue       = "#78a9ff"
+green      = "#42be65"
+red        = "#ee5396"
+yellow     = "#fddc69"
+cyan       = "#3ddbd9"
+orange     = "#ff832b"
+pink       = "#ff7eb6"

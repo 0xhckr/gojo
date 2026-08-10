@@ -1,0 +1,18 @@
+# Material Theme Ocean
+name = "Material Ocean"
+
+[dark]
+background = "#0f111a"
+panel      = "#090b10"
+element    = "#1f2233"
+hover      = "#191b28"
+text       = "#8f93a2"
+text_muted = "#464b5d"
+purple     = "#c792ea"
+blue       = "#82aaff"
+green      = "#c3e88d"
+red        = "#f07178"
+yellow     = "#ffcb6b"
+cyan       = "#89ddff"
+orange     = "#f78c6c"
+pink       = "#ff5370"

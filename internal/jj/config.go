@@ -28,6 +28,10 @@ type Config struct {
 	// [tools.gojo.keymap] in jj's config.toml) and consumed by the ui
 	// package. An empty value unbinds the action.
 	Keymap map[string]string
+
+	// Theme is the selected color scheme id ("gojo", "terminal", "dracula",
+	// a custom theme from ~/.config/gojo/themes, …). Empty = default theme.
+	Theme string
 }
 
 // DefaultAIBaseURL is used when ai_base_url / openrouter_base_url is unset.
@@ -111,6 +115,8 @@ func applyTOMLConfig(cfg *Config, raw string, section string) {
 			cfg.AIModel = val
 		case "commit_prompt":
 			cfg.CommitPrompt = val
+		case "theme":
+			cfg.Theme = val
 		}
 	}
 }
@@ -137,10 +143,8 @@ func LoadConfig() (Config, error) {
 	}
 
 	// 2. standalone gojo config (higher priority, overrides jj config)
-	if home != "" {
-		if raw, err := os.ReadFile(filepath.Join(home, ".config", "gojo", "gojo.toml")); err == nil {
-			applyTOMLConfig(&cfg, string(raw), "")
-		}
+	if raw, err := os.ReadFile(ConfigPath()); err == nil {
+		applyTOMLConfig(&cfg, string(raw), "")
 	}
 
 	// Repo discovery happens last so user-level config (key bindings, AI
@@ -162,6 +166,91 @@ func findBinary(name string) (string, error) {
 		return "", errors.New(name + " not found in PATH")
 	}
 	return path, nil
+}
+
+// ConfigDir returns the gojo configuration directory ~/.config/gojo
+// ("" when the home directory can't be determined).
+func ConfigDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".config", "gojo")
+}
+
+// ConfigPath returns the standalone gojo config file
+// ~/.config/gojo/gojo.toml ("" when the home directory can't be determined).
+func ConfigPath() string {
+	if dir := ConfigDir(); dir != "" {
+		return filepath.Join(dir, "gojo.toml")
+	}
+	return ""
+}
+
+// ThemesDir returns the custom theme directory ~/.config/gojo/themes.
+func ThemesDir() string {
+	if dir := ConfigDir(); dir != "" {
+		return filepath.Join(dir, "themes")
+	}
+	return ""
+}
+
+// SaveTheme sets theme = "<id>" at the top level of the standalone gojo
+// config, preserving everything else in the file. The directory and file are
+// created when missing. The line is inserted before the first [section]
+// (top-level keys must precede sections in TOML) or appended at the end.
+func SaveTheme(id string) error {
+	path := ConfigPath()
+	if path == "" {
+		return errors.New("no home directory")
+	}
+	raw, _ := os.ReadFile(path) // missing file is fine
+
+	want := "theme = \"" + tomlStringEscape(id) + "\""
+	lines := strings.Split(string(raw), "\n")
+	var out []string
+	replaced, wrote := false, false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") {
+			// First section header: any not-yet-written theme key goes above it.
+			if !replaced && !wrote {
+				out = append(out, want)
+				wrote = true
+			}
+			out = append(out, line)
+			continue
+		}
+		// Replace an existing top-level theme key (only before any section).
+		if !wrote && !replaced && !strings.HasPrefix(trimmed, "#") {
+			if eq := strings.Index(trimmed, "="); eq > 0 {
+				if strings.TrimSpace(trimmed[:eq]) == "theme" {
+					out = append(out, want)
+					replaced = true
+					continue
+				}
+			}
+		}
+		out = append(out, line)
+	}
+	if !replaced && !wrote {
+		// No sections, no existing key — append after trailing content.
+		if n := len(out); n > 0 && out[n-1] == "" {
+			out = out[:n-1]
+		}
+		out = append(out, want, "")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
+}
+
+// tomlStringEscape escapes a string for a double-quoted TOML value.
+func tomlStringEscape(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	return strings.ReplaceAll(s, `"`, `\"`)
 }
 
 // ErrNoRepo signals that no enclosing jj repo was found (no .jj directory in

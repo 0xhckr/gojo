@@ -43,6 +43,9 @@
             postInstall = ''
               wrapProgram $out/bin/gojo --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.jujutsu ]}
               ln -s gojo $out/bin/gj
+              # Theme files: gojo looks for share/gojo/themes next to bin/.
+              mkdir -p $out/share/gojo/themes
+              cp themes/*.toml $out/share/gojo/themes/
             '';
 
             meta = with pkgs.lib; {

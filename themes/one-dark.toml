@@ -1,0 +1,18 @@
+# One Dark — Atom / One Dark Pro
+name = "One Dark"
+syntax = "onedark"
+
+[dark]
+background = "#282c34"
+panel      = "#21252b"
+element    = "#3e4452"
+hover      = "#323741"
+text       = "#abb2bf"
+text_muted = "#5c6370"
+purple     = "#c678dd"
+blue       = "#61afef"
+green      = "#98c379"
+red        = "#e06c75"
+yellow     = "#e5c07b"
+cyan       = "#56b6c2"
+orange     = "#d19a66"

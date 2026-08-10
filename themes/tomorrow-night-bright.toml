@@ -1,0 +1,17 @@
+# Tomorrow Night Bright — https://github.com/chriskempson/tomorrow-theme
+name = "Tomorrow Night Bright"
+
+[dark]
+background = "#000000"
+panel      = "#111111"
+element    = "#424242"
+hover      = "#2e2e2e"
+text       = "#eaeaea"
+text_muted = "#969896"
+purple     = "#c397d8"
+blue       = "#7aa6da"
+green      = "#b9ca4a"
+red        = "#d54e53"
+yellow     = "#e7c547"
+cyan       = "#70c0b1"
+orange     = "#e78c45"

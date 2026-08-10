@@ -1,0 +1,32 @@
+# Rosé Pine — https://rosepinetheme.com (main dark + dawn light)
+name = "Rosé Pine"
+
+[dark]
+background = "#191724"
+panel      = "#1f1d2e"
+element    = "#26233a"
+hover      = "#21202e"
+text       = "#e0def4"
+text_muted = "#6e6a86"
+purple     = "#c4a7e7"
+blue       = "#31748f"
+green      = "#31748f"
+red        = "#eb6f92"
+yellow     = "#f6c177"
+cyan       = "#9ccfd8"
+pink       = "#ebbcba"
+
+[light]
+background = "#faf4ed"
+panel      = "#fffaf3"
+element    = "#f2e9e1"
+hover      = "#f4ede6"
+text       = "#575279"
+text_muted = "#797593"
+purple     = "#907aa9"
+blue       = "#286983"
+green      = "#286983"
+red        = "#b4637a"
+yellow     = "#ea9d34"
+cyan       = "#56949f"
+pink       = "#d7827e"

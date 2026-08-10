@@ -1,0 +1,32 @@
+# Tomorrow (Night + light) — https://github.com/chriskempson/tomorrow-theme
+name = "Tomorrow"
+
+[dark]
+background = "#1d1f21"
+panel      = "#161819"
+element    = "#373b41"
+hover      = "#2a2d31"
+text       = "#c5c8c6"
+text_muted = "#969896"
+purple     = "#b294bb"
+blue       = "#81a2be"
+green      = "#b5bd68"
+red        = "#cc6666"
+yellow     = "#f0c674"
+cyan       = "#8abeb7"
+orange     = "#de935f"
+
+[light]
+background = "#ffffff"
+panel      = "#efefef"
+element    = "#d6d6d6"
+hover      = "#e5e5e5"
+text       = "#4d4d4c"
+text_muted = "#8e908c"
+purple     = "#8959a8"
+blue       = "#4271ae"
+green      = "#718c00"
+red        = "#c82829"
+yellow     = "#eab700"
+cyan       = "#3e999f"
+orange     = "#f5871f"

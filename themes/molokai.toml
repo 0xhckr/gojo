@@ -1,0 +1,19 @@
+# Molokai — tomasr/molokai vim scheme
+name = "Molokai"
+syntax = "monokai"
+
+[dark]
+background = "#1b1d1e"
+panel      = "#151617"
+element    = "#403d3d"
+hover      = "#313030"
+text       = "#f8f8f2"
+text_muted = "#7e8e91"
+purple     = "#ae81ff"
+blue       = "#66d9ef"
+green      = "#a6e22e"
+red        = "#f92672"
+yellow     = "#e6db74"
+cyan       = "#a1efe4"
+orange     = "#fd971f"
+pink       = "#f92672"

@@ -28,6 +28,7 @@ type hoverState struct {
 	conflictLeft  bool
 	refName       string // bookmark/tag name under the mouse, or ""
 	refKind       string // "bookmark" | "tag", or ""
+	themeRow      int    // theme picker row under the mouse, or -1
 }
 
 // bookmarkDragState tracks an in-progress mouse drag of a bookmark from its

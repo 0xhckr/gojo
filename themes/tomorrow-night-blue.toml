@@ -1,0 +1,17 @@
+# Tomorrow Night Blue — https://github.com/chriskempson/tomorrow-theme
+name = "Tomorrow Night Blue"
+
+[dark]
+background = "#002451"
+panel      = "#00112e"
+element    = "#003f8e"
+hover      = "#003173"
+text       = "#ffffff"
+text_muted = "#7285b7"
+purple     = "#ebbbff"
+blue       = "#bbdaff"
+green      = "#d1f1a9"
+red        = "#ff9da4"
+yellow     = "#ffeead"
+cyan       = "#99ffff"
+orange     = "#ffc58f"

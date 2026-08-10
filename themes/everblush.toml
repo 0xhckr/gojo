@@ -1,0 +1,16 @@
+# Everblush — https://github.com/Everblush
+name = "Everblush"
+
+[dark]
+background = "#141b1e"
+panel      = "#0e1416"
+element    = "#232a2d"
+hover      = "#1d2225"
+text       = "#dadada"
+text_muted = "#5e6a6d"
+purple     = "#c47fd5"
+blue       = "#67b0e8"
+green      = "#8ccf7e"
+red        = "#e57474"
+yellow     = "#e5c76b"
+cyan       = "#6cbfbf"

@@ -1,0 +1,16 @@
+# Iceberg — https://cocopon.github.io/iceberg.vim
+name = "Iceberg"
+
+[dark]
+background = "#161821"
+panel      = "#0f1117"
+element    = "#272c42"
+hover      = "#1e2132"
+text       = "#c6c8d1"
+text_muted = "#6b7089"
+purple     = "#a093c7"
+blue       = "#84a0c6"
+green      = "#b4be82"
+red        = "#e27878"
+cyan       = "#89b8c2"
+orange     = "#e2a478"

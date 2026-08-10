@@ -1,0 +1,17 @@
+# Cyberdream — https://github.com/scottmckendry/cyberdream.nvim
+name = "Cyberdream"
+
+[dark]
+background = "#16181a"
+panel      = "#1e2124"
+element    = "#2a2e33"
+hover      = "#23262b"
+text       = "#ffffff"
+text_muted = "#7b8496"
+purple     = "#bd5eff"
+blue       = "#5ea1ff"
+green      = "#5eff6c"
+red        = "#ff6e5e"
+yellow     = "#f1ff5e"
+cyan       = "#5ef1ff"
+orange     = "#ffbd5e"

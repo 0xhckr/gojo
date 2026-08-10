@@ -1,0 +1,17 @@
+# Base16 Ocean — https://github.com/chriskempson/base16
+name = "Base16 Ocean"
+
+[dark]
+background = "#2b303b"
+panel      = "#23282f"
+element    = "#4f5b66"
+hover      = "#343d46"
+text       = "#c0c5ce"
+text_muted = "#65737e"
+purple     = "#b48ead"
+blue       = "#8fa1b3"
+green      = "#a3be8c"
+red        = "#bf616a"
+yellow     = "#ebcb8b"
+cyan       = "#96b5b4"
+orange     = "#d08770"

@@ -1,0 +1,18 @@
+# Tokyo Night Moon — https://github.com/folke/tokyonight.nvim
+name = "Tokyo Night Moon"
+
+[dark]
+background = "#222436"
+panel      = "#1e2030"
+element    = "#2f334d"
+hover      = "#2a2f45"
+text       = "#c8d3f5"
+text_muted = "#636da6"
+purple     = "#c099ff"
+magenta    = "#c099ff"
+blue       = "#82aaff"
+green      = "#c3e88d"
+red        = "#ff757f"
+yellow     = "#ffc777"
+cyan       = "#86e1fc"
+orange     = "#ff966c"

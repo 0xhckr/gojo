@@ -1,0 +1,17 @@
+# Base16 Classic Light — https://github.com/chriskempson/base16
+name = "Base16 Classic Light"
+
+[light]
+background = "#f5f5f5"
+panel      = "#e5e5e5"
+element    = "#d0d0d0"
+hover      = "#e0e0e0"
+text       = "#303030"
+text_muted = "#b0b0b0"
+purple     = "#aa759f"
+blue       = "#6a9fb5"
+green      = "#90a959"
+red        = "#ac4142"
+yellow     = "#c08020"
+cyan       = "#4f9085"
+orange     = "#d28445"

@@ -1,0 +1,17 @@
+# TokyoDark — https://github.com/tiagovla/tokyodark.nvim
+name = "TokyoDark"
+
+[dark]
+background = "#11121d"
+panel      = "#0d0e17"
+element    = "#1e1f30"
+hover      = "#1a1b29"
+text       = "#a0a8cd"
+text_muted = "#4a5057"
+purple     = "#a485dd"
+blue       = "#7199ee"
+green      = "#95c561"
+red        = "#ee6d85"
+yellow     = "#d7a65f"
+cyan       = "#38a89d"
+orange     = "#f6955b"

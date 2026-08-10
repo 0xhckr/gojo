@@ -1,0 +1,18 @@
+# Zenburn — the classic low-contrast vim/emacs scheme
+name = "Zenburn"
+
+[dark]
+background = "#3f3f3f"
+panel      = "#353535"
+element    = "#4f4f4f"
+hover      = "#494949"
+text       = "#dcdccc"
+text_muted = "#8f908e"
+purple     = "#dc8cc3"
+blue       = "#7cb8bb"
+green      = "#7f9f7f"
+red        = "#cc9393"
+yellow     = "#f0dfaf"
+cyan       = "#93e0e3"
+orange     = "#dfaf8f"
+pink       = "#dc8cc3"
