@@ -211,9 +211,9 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 			hs = append(hs, seg{text: " ", bg: bg})
 			hs = append(hs, seg{text: "⚡ conflict", fg: colRed, bold: true, bg: bg})
 		}
-		// Mode markers (rebase/squash/drag source & destination) render flush
-		// at the right edge of the row — always visible and always last, never
-		// pushed off-screen by long authors/bookmarks or dented into mid-line.
+		// Mode markers (rebase/squash/drag source & destination) render at the
+		// end of the row, after all metadata — and are never clipped by long
+		// authors/bookmarks ahead of them.
 		var ms []seg
 		if bd.active && i == bd.sourceIdx {
 			ms = append(ms, seg{text: "● dragging " + bd.name, fg: colMagenta, bold: true, bg: bg})
@@ -237,7 +237,7 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 		if sq.active && i == sq.dest {
 			ms = append(ms, seg{text: "◀ into", fg: colYellow, bold: true, bg: bg})
 		}
-		hs = appendFlushRight(hs, ms, scrollW, bg)
+		hs = appendMarkers(hs, ms, scrollW, bg)
 		lines = append(lines, renderRowWithBar(scrollW, width, bg, hasBar, contentLine, thumbStart, thumbEnd, hs))
 		contentLine++
 
@@ -289,16 +289,15 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 	return padLines(lines, height, width)
 }
 
-// appendFlushRight appends marker segs (mode indicators like the
-// rebase/squash/drag badges) flush at the right edge of a scrollW-wide row by
-// padding hs with background-coloured fill first. Markers always win over
-// trailing metadata: if the row is too narrow to hold both, segments are
-// dropped from the tail of hs until the markers fit.
-func appendFlushRight(hs []seg, markers []seg, scrollW int, bg lipgloss.TerminalColor) []seg {
+// appendMarkers appends mode-indicator segs (rebase/squash/drag badges) at
+// the end of the content. Markers always win over trailing metadata: if the
+// row is too narrow to hold everything, segments are dropped from the tail of
+// hs until the markers fit — they must never be clipped off-screen.
+func appendMarkers(hs []seg, markers []seg, scrollW int, bg lipgloss.TerminalColor) []seg {
 	if len(markers) == 0 {
 		return hs
 	}
-	markerW := 0
+	markerW := 1 // separating space
 	for _, s := range markers {
 		markerW += segTextWidth(s.text)
 	}
@@ -311,13 +310,10 @@ func appendFlushRight(hs []seg, markers []seg, scrollW int, bg lipgloss.Terminal
 	}
 	// Never sacrifice the leading segments (graph prefix + change ID);
 	// anything past those is decorative and may be dropped.
-	for width()+1+markerW > scrollW && len(hs) > 4 {
+	for width()+markerW > scrollW && len(hs) > 4 {
 		hs = hs[:len(hs)-1]
 	}
-	fill := scrollW - width() - markerW
-	if fill > 0 {
-		hs = append(hs, seg{text: strings.Repeat(" ", fill), bg: bg})
-	}
+	hs = append(hs, seg{text: " ", bg: bg})
 	return append(hs, markers...)
 }
 
