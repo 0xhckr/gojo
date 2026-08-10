@@ -48,7 +48,12 @@ internal/
     split.go            — split mode + intermediate-file computation + jj split tool
     helpview.go         — keybinding reference + scroll
 go.mod / go.sum         — module `gojo`, deps: bubbletea, lipgloss, chroma, x/ansi
-flake.nix               — nix flake: devShell (go, gopls, jujutsu) + buildGoModule package
+flake.nix               — nix flake: devShell (go, gopls, jujutsu),
+                          buildGoModule package, `nix run .#bump` —
+                          version bump app (major|minor|patch|X.Y.Z) wrapping
+                          scripts/bump.go from the repo root
+scripts/bump.go         — version bumper: writes VERSION, refreshes the
+                          flake vendorHash via `nix build .#default`
 .goreleaser.yaml        — release pipeline: tarballs, distro packages (nfpm:
                           archlinux pacman pkg + deb + rpm; one entry per
                           format so jujutsu is a hard dep on Arch, recommended

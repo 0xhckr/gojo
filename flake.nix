@@ -59,6 +59,26 @@
           type = "app";
           program = "${self.packages.${pkgs.system}.default}/bin/gojo";
         };
+
+        # Version bump helper: `nix run .#bump -- [major|minor|patch|X.Y.Z]`
+        # (no arg = patch). Run from the repo root: it rewrites VERSION,
+        # then `nix build .#default` and patches vendorHash on mismatch.
+        bump = {
+          type = "app";
+          program = "${pkgs.writeShellApplication {
+            name = "gojo-bump";
+            runtimeInputs = [ pkgs.go ];
+            text = ''
+              if [ ! -f VERSION ] || [ ! -f flake.nix ]; then
+                echo "gojo-bump: run from the gojo repo root" >&2
+                exit 1
+              fi
+              # bump.go is referenced from the flake source (no rebuild of the
+              # script itself into the store needed); writes land in the CWD.
+              exec go run ${./scripts/bump.go} "$@"
+            '';
+          }}/bin/gojo-bump";
+        };
       });
 
       devShells = forAllSystems (pkgs: {
