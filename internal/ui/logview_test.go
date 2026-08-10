@@ -49,3 +49,40 @@ func TestRenderLogElidedPlacement(t *testing.T) {
 			dBody, elided, baseHeader)
 	}
 }
+
+// TestRenderLogMarkersSurviveClipping verifies that rebase/squash/drag mode
+// markers stay visible even on rows whose author/bookmark tail is wider than
+// the terminal: they render right after the change ID, ahead of the clip-prone
+// metadata at the row end.
+func TestRenderLogMarkersSurviveClipping(t *testing.T) {
+	dest := jj.LogEntry{
+		ChangeID: "destdest", CommitID: "c0ffee01",
+		Authors:      strings.Repeat("longauthor", 12), // far wider than the view
+		Bookmarks:    []string{"main", strings.Repeat("b", 30)},
+		HeaderPrefix: "○  ", BodyPrefix: "│  ", Subject: "dest",
+	}
+	src := jj.LogEntry{
+		ChangeID: "srccsrcc", CommitID: "c0ffee02",
+		HeaderPrefix: "@  ", BodyPrefix: "│  ", Subject: "src",
+	}
+	entries := []jj.LogEntry{src, dest}
+
+	plain := func(lines []string) string {
+		return ansi.Strip(strings.Join(lines, "\n"))
+	}
+
+	rb := renderLog(40, 10, entries, 0, 0, -1, nil, 0, rebaseView{active: true, source: 0, dest: 1}, squashView{}, bookmarkDragView{}, -1, -1, "", "")
+	if got := plain(rb); !strings.Contains(got, "● moving") || !strings.Contains(got, "◀ onto") {
+		t.Errorf("rebase markers clipped on a wide row:\n%s", got)
+	}
+
+	sq := renderLog(40, 10, entries, 0, 0, -1, nil, 0, rebaseView{}, squashView{active: true, source: 0, dest: 1}, bookmarkDragView{}, -1, -1, "", "")
+	if got := plain(sq); !strings.Contains(got, "● squashing") || !strings.Contains(got, "◀ into") {
+		t.Errorf("squash markers clipped on a wide row:\n%s", got)
+	}
+
+	bd := renderLog(40, 10, entries, 0, 0, -1, nil, 0, rebaseView{}, squashView{}, bookmarkDragView{active: true, name: "main", sourceIdx: 0, destIdx: 1}, -1, -1, "", "")
+	if got := plain(bd); !strings.Contains(got, "● dragging main") || !strings.Contains(got, "◀ drop") {
+		t.Errorf("bookmark-drag markers clipped on a wide row:\n%s", got)
+	}
+}

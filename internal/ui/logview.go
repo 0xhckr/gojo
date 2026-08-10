@@ -190,27 +190,9 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 		} else {
 			hs = append(hs, seg{text: e.ChangeID, fg: colMagenta, bold: true, bg: bg})
 		}
-		hs = append(hs, seg{text: " ", bg: bg})
-		hs = append(hs, seg{text: e.Authors, fg: colBlue, bg: bg})
-		hs = append(hs, seg{text: " ", bg: bg})
-		hs = append(hs, seg{text: e.Date, fg: colTextMuted, bg: bg})
-		hs = append(hs, seg{text: " ", bg: bg})
-		hs = append(hs, seg{text: e.CommitID, fg: colTextMuted, bg: bg})
-		for _, bm := range e.Bookmarks {
-			hs = append(hs, seg{text: " ", bg: bg})
-			dragging := bd.active && i == bd.sourceIdx && bm == bd.name
-			hovered := hoverRefKind == "bookmark" && hoverRefName == bm
-			hs = append(hs, seg{text: expandTabs(bm), fg: colGreen, bold: true, underline: dragging || hovered, bg: bg})
-		}
-		for _, tg := range e.Tags {
-			hs = append(hs, seg{text: " ", bg: bg})
-			hovered := hoverRefKind == "tag" && hoverRefName == tg
-			hs = append(hs, seg{text: expandTabs(tg), fg: colTeal, bold: true, underline: hovered, bg: bg})
-		}
-		if e.HasConflict {
-			hs = append(hs, seg{text: " ", bg: bg})
-			hs = append(hs, seg{text: "⚡ conflict", fg: colRed, bold: true, bg: bg})
-		}
+		// Mode markers (rebase/squash/drag source & destination) go right after
+		// the change ID — never clipped by long authors/dates/bookmarks at the
+		// row tail, which is where the scrollbar trims the line.
 		if bd.active && i == bd.sourceIdx {
 			hs = append(hs, seg{text: "  ● dragging " + bd.name, fg: colMagenta, bold: true, bg: bg})
 		}
@@ -232,6 +214,27 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 		}
 		if sq.active && i == sq.dest {
 			hs = append(hs, seg{text: "  ◀ into", fg: colYellow, bold: true, bg: bg})
+		}
+		hs = append(hs, seg{text: " ", bg: bg})
+		hs = append(hs, seg{text: e.Authors, fg: colBlue, bg: bg})
+		hs = append(hs, seg{text: " ", bg: bg})
+		hs = append(hs, seg{text: e.Date, fg: colTextMuted, bg: bg})
+		hs = append(hs, seg{text: " ", bg: bg})
+		hs = append(hs, seg{text: e.CommitID, fg: colTextMuted, bg: bg})
+		for _, bm := range e.Bookmarks {
+			hs = append(hs, seg{text: " ", bg: bg})
+			dragging := bd.active && i == bd.sourceIdx && bm == bd.name
+			hovered := hoverRefKind == "bookmark" && hoverRefName == bm
+			hs = append(hs, seg{text: expandTabs(bm), fg: colGreen, bold: true, underline: dragging || hovered, bg: bg})
+		}
+		for _, tg := range e.Tags {
+			hs = append(hs, seg{text: " ", bg: bg})
+			hovered := hoverRefKind == "tag" && hoverRefName == tg
+			hs = append(hs, seg{text: expandTabs(tg), fg: colTeal, bold: true, underline: hovered, bg: bg})
+		}
+		if e.HasConflict {
+			hs = append(hs, seg{text: " ", bg: bg})
+			hs = append(hs, seg{text: "⚡ conflict", fg: colRed, bold: true, bg: bg})
 		}
 		lines = append(lines, renderRowWithBar(scrollW, width, bg, hasBar, contentLine, thumbStart, thumbEnd, hs))
 		contentLine++
