@@ -345,6 +345,115 @@ func TestDiffCursorFreeScrollTop(t *testing.T) {
 	}
 }
 
+// TestDiffWheelScrollsWithoutCursor verifies that mouse-wheel scrolling in the
+// diff panel moves only the viewport — the chunk cursor stays where it is,
+// even when the scroll leaves it off screen. The next cursor movement snaps
+// the view back to the cursor.
+func TestDiffWheelScrollsWithoutCursor(t *testing.T) {
+	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,1 +1,10 @@\n"
+	for i := 0; i < 10; i++ {
+		raw += "+line\n"
+	}
+	m := Model{ready: true, width: 80, height: 11, view: viewLog, diffOpen: true}
+	m.diffRows = renderDiff(raw)
+	m.diffStatus = nil
+	m.diffChunks = computeDiffChunks(m.diffRows, m.diffHeadLen(), nil)
+	// Chunks: [0] a header, [1] 10 additions. Cursor into the addition chunk.
+	m.diffCurChunk, m.diffCurLine = 1, 0
+	m.diffEnterChunkDown()
+	startScroll := m.diffScrollY
+
+	// Message level: one wheel event scrolls the viewport one step without
+	// touching the cursor.
+	nm, _ := m.Update(wheelPress(tea.MouseButtonWheelDown, 10, 5))
+	m = nm.(Model)
+	if m.diffCurChunk != 1 || m.diffCurLine != 0 {
+		t.Fatalf("wheel moved cursor to chunk=%d line=%d, want 1,0", m.diffCurChunk, m.diffCurLine)
+	}
+	if m.diffScrollY != startScroll+1 {
+		t.Fatalf("scrollY = %d after one wheel step, want %d", m.diffScrollY, startScroll+1)
+	}
+
+	// Wheel down directly until the cursor leaves the viewport (wheelStep,
+	// bypassing coalescing): still no cursor movement.
+	bodyH := m.diffBodyHeight()
+	cur := m.diffCursorBodyRow()
+	maxS := m.diffMaxScroll()
+	for m.diffScrollY <= cur && m.diffScrollY < maxS {
+		nm, _ := m.Update(wheelTickMsg{})
+		m = nm.(Model) // flush any pending burst
+		m.wheelStep(1)
+	}
+	if m.diffCurChunk != 1 || m.diffCurLine != 0 {
+		t.Fatalf("wheel moved cursor to chunk=%d line=%d, want 1,0", m.diffCurChunk, m.diffCurLine)
+	}
+	if m.diffScrollY <= cur {
+		t.Fatalf("cursor %d should be above the viewport (scrollY %d) after wheeling down", cur, m.diffScrollY)
+	}
+
+	// The next cursor movement reclaims the viewport: j advances the cursor
+	// and the view snaps back so the cursor is visible again.
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = nm.(Model)
+	if m.diffCurChunk != 1 || m.diffCurLine != 1 {
+		t.Fatalf("after j: chunk=%d line=%d, want 1,1", m.diffCurChunk, m.diffCurLine)
+	}
+	cur = m.diffCursorBodyRow()
+	if cur < m.diffScrollY || cur >= m.diffScrollY+bodyH {
+		t.Fatalf("after j: cursor %d out of view [%d,%d)", cur, m.diffScrollY, m.diffScrollY+bodyH)
+	}
+}
+
+// TestDiffPageKeysScrollWithoutCursor verifies that the page keys scroll the
+// diff viewport by half a screen without touching the chunk cursor, in both
+// directions, clamping at the ends.
+func TestDiffPageKeysScrollWithoutCursor(t *testing.T) {
+	raw := "diff --git a/a b/a\n+++ b/a\n@@ -1,1 +1,40 @@\n"
+	for i := 0; i < 40; i++ {
+		raw += "+line\n"
+	}
+	m := Model{ready: true, width: 80, height: 11, view: viewLog, diffOpen: true}
+	m.diffRows = renderDiff(raw)
+	m.diffStatus = nil
+	m.diffChunks = computeDiffChunks(m.diffRows, m.diffHeadLen(), nil)
+	m.diffCurChunk, m.diffCurLine = 1, 0
+	m.diffEnterChunkDown()
+	half := max(1, m.diffBodyHeight()) / 2
+	cur := m.diffCursorBodyRow()
+
+	press := func(k tea.KeyMsg, want int) {
+		t.Helper()
+		nm, _ := m.Update(k)
+		m = nm.(Model)
+		if m.diffCurChunk != 1 || m.diffCurLine != 0 {
+			t.Fatalf("%v moved cursor to chunk=%d line=%d, want 1,0", k, m.diffCurChunk, m.diffCurLine)
+		}
+		if m.diffScrollY != want {
+			t.Fatalf("%v: scrollY = %d, want %d", k, m.diffScrollY, want)
+		}
+		if m.diffCursorBodyRow() != cur {
+			t.Fatalf("%v changed the cursor row from %d to %d", k, cur, m.diffCursorBodyRow())
+		}
+	}
+	start := m.diffScrollY
+	press(tea.KeyMsg{Type: tea.KeyPgDown}, min(m.diffMaxScroll(), start+half))
+	press(tea.KeyMsg{Type: tea.KeyCtrlD}, min(m.diffMaxScroll(), start+2*half))
+	press(tea.KeyMsg{Type: tea.KeyPgDown}, min(m.diffMaxScroll(), start+3*half))
+	press(tea.KeyMsg{Type: tea.KeyCtrlU}, min(m.diffMaxScroll(), start+2*half))
+
+	// Clamps at the top without touching the cursor.
+	for i := 0; m.diffScrollY > 0; i++ {
+		if i > 10 {
+			t.Fatalf("pgup never clamped: scrollY %d", m.diffScrollY)
+		}
+		nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+		m = nm.(Model)
+	}
+	if m.diffCurChunk != 1 || m.diffCurLine != 0 || m.diffCursorBodyRow() != cur {
+		t.Fatal("clamping moved the cursor")
+	}
+}
+
 // TestDiffCursorRefresh verifies that a poll/focus diff refresh preserves the
 // cursor position instead of snapping back to the first chunk.
 func TestDiffCursorRefresh(t *testing.T) {

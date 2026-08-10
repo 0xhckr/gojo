@@ -1408,6 +1408,14 @@ func (m *Model) diffClampMax() {
 	}
 }
 
+// diffPageScroll scrolls the diff viewport by n body lines (negative = up)
+// without moving the chunk cursor — keyboard counterpart to mouse-wheel
+// scrolling (pgup/b/ctrl+u ↑ half page, pgdown/f/ctrl+d ↓ half page).
+func (m *Model) diffPageScroll(n int) {
+	m.diffScrollY += n
+	m.diffClampMax()
+}
+
 // chunkTerminalSpan returns the [first, last] terminal body-line indices
 // (inclusive, including the head offset) spanned by the focused chunk. Used by
 // the scroll-follow logic to reason about wrapped chunk extents.
@@ -2184,11 +2192,12 @@ func (m *Model) wheelStep(dir int) {
 		m.conflictClampScroll()
 
 	case m.diffOpen:
-		if dir > 0 {
-			m.diffMoveDown()
-		} else {
-			m.diffMoveUp()
-		}
+		// Wheel scrolls the viewport only — the chunk cursor stays put.
+		// Scroll and cursor are independent in the diff panel; the view
+		// jumps back to the cursor only when the cursor itself moves
+		// (j/k, click, g/G, collapse toggles).
+		m.diffScrollY += dir
+		m.diffClampMax()
 
 	case m.view == viewHelp:
 		contentH := m.contentHeight() - 1
@@ -2556,6 +2565,10 @@ func (m Model) handleDiffKey(k string) (tea.Model, tea.Cmd) {
 		m.diffMoveTop()
 	case "end", "G":
 		m.diffMoveBottom()
+	case "pgup", "b", "ctrl+u":
+		m.diffPageScroll(-max(1, m.diffBodyHeight()/2))
+	case "pgdown", "f", "ctrl+d":
+		m.diffPageScroll(max(1, m.diffBodyHeight()/2))
 	case "left", "h":
 		if fileIdx, ok := m.cursorFileHeader(); ok {
 			path := m.diffRows[fileIdx].path
@@ -2663,6 +2676,12 @@ func (m Model) handleSplitKey(k string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "end", "G":
 		m.diffMoveBottom()
+		return m, nil
+	case "pgup", "b", "ctrl+u":
+		m.diffPageScroll(-max(1, m.diffBodyHeight()/2))
+		return m, nil
+	case "pgdown", "f", "ctrl+d":
+		m.diffPageScroll(max(1, m.diffBodyHeight()/2))
 		return m, nil
 	case "left", "h":
 		if fileIdx, ok := m.cursorFileHeader(); ok {
