@@ -21,6 +21,7 @@ adheres to [Semantic Versioning][semver].
   `jujutsu` as a recommended dependency.
 - Fedora/RHEL packages (`.rpm`) attached to each GitHub release, with
   `jujutsu` as a weak recommendation (also usable on openSUSE).
+- openSUSE installation support via the same release `.rpm` (zypper).
 
 ## [1.0.0] - 2026-06-29
 

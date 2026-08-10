@@ -40,7 +40,8 @@ drift silently. The `release` workflow then:
 3. Builds distro packages via nfpm:
    - **Arch Linux** — `.pkg.tar.zst` (pacman -U install)
    - **Debian/Ubuntu** — `.deb` (apt install)
-   - **Fedora/RHEL** — `.rpm` (dnf install; shared with openSUSE)
+   - **Fedora/RHEL** — `.rpm` (dnf install)
+   - **openSUSE** — same `.rpm` (zypper install)
 4. Publishes tarballs, distro packages + checksums to the GitHub Release.
 5. Generates `Casks/gojo.rb` and commits it back to `main` in this repo.
 
@@ -68,6 +69,8 @@ Debian 13+/Ubuntu 24.10+), not required.
 
 **Fedora/RHEL:** grab the `.rpm` from the GitHub release and
 `dnf install ./<file>.rpm`.
+
+**openSUSE:** same `.rpm` via `zypper install ./<file>.rpm`.
 
 **Arch Linux:** grab the `.pkg.tar.zst` from the GitHub release and
 `pacman -U` it (`jujutsu` comes in automatically as a dependency).

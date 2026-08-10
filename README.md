@@ -70,6 +70,19 @@ dnf install ./gojo_<version>_linux_x86_64.rpm
 `jujutsu` is a weak recommendation, so dnf pulls in jj automatically on
 Fedora 39+ (older releases simply skip it).
 
+### openSUSE (Tumbleweed / Leap)
+
+The same RPM from the GitHub release works here:
+
+```sh
+zypper install ./gojo_<version>_linux_x86_64.rpm
+```
+
+zypper honors the weak `jujutsu` recommendation (packaged in Tumbleweed's
+official repos; on Leap, install
+[jj](https://jj-vcs.github.io/jj/latest/install-and-setup/) separately if it
+isn't offered).
+
 ### Arch Linux (and derivatives)
 
 Each GitHub release ships a pacman package
