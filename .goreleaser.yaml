@@ -43,6 +43,23 @@ archives:
 # [extra]) but only recommended elsewhere, so the package still installs on
 # Debian/RHEL-family releases that don't ship a `jujutsu` package yet.
 nfpms:
+  # Debian/Ubuntu: .deb. jujutsu is only a recommendation — it is packaged
+  # as `jujutsu` on Debian 13+/Ubuntu 24.10+, but older releases lack it and
+  # a hard Depends would block installation there.
+  - id: gojo-deb
+    package_name: gojo
+    vendor: 0xhckr
+    homepage: https://github.com/0xhckr/gojo
+    maintainer: 0xhckr
+    description: "Fullscreen terminal UI for jj (Jujutsu VCS)"
+    license: MIT
+    formats: [deb]
+    recommends:
+      - jujutsu
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/gojo/copyright
+
   # Arch Linux (and derivatives): pacman .pkg.tar.zst.
   - id: gojo-arch
     package_name: gojo

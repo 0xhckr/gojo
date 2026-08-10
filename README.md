@@ -47,6 +47,18 @@ nix develop                     # drops you into a shell with go + jujutsu
 go run .
 ```
 
+### Debian / Ubuntu
+
+Each GitHub release ships a `.deb` (`gojo_<version>_linux_<arch>.deb`):
+
+```sh
+apt install ./gojo_<version>_linux_amd64.deb
+```
+
+`jujutsu` is a recommended dependency (packaged on Debian 13+ and Ubuntu
+24.10+); on older releases apt skips it and you install
+[jj](https://jj-vcs.github.io/jj/latest/install-and-setup/) yourself.
+
 ### Arch Linux (and derivatives)
 
 Each GitHub release ships a pacman package

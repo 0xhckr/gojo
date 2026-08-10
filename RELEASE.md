@@ -39,6 +39,7 @@ drift silently. The `release` workflow then:
 2. Stamps `main.version` via ldflags (`gojo --version` → `gojo 1.0.0`).
 3. Builds distro packages via nfpm:
    - **Arch Linux** — `.pkg.tar.zst` (pacman -U install)
+   - **Debian/Ubuntu** — `.deb` (apt install)
 4. Publishes tarballs, distro packages + checksums to the GitHub Release.
 5. Generates `Casks/gojo.rb` and commits it back to `main` in this repo.
 
@@ -60,5 +61,9 @@ extra line at install time for not maintaining a second repo + PAT.)
 This also installs `jj` (jujutsu) as a runtime dependency. The cask prints
 a caveat with instructions for creating the optional `gj` shorthand alias.
 
+**Debian/Ubuntu:** grab the `.deb` from the GitHub release and
+`apt install ./<file>.deb`. `jujutsu` is recommended (auto-installed on
+Debian 13+/Ubuntu 24.10+), not required.
+
 **Arch Linux:** grab the `.pkg.tar.zst` from the GitHub release and
-`pacman -U` it (`pacman -S jujutsu` for the runtime dependency).
+`pacman -U` it (`jujutsu` comes in automatically as a dependency).
