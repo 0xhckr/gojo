@@ -51,9 +51,8 @@ func TestRenderLogElidedPlacement(t *testing.T) {
 }
 
 // TestRenderLogMarkersSurviveClipping verifies that rebase/squash/drag mode
-// markers stay visible even on rows whose author/bookmark tail is wider than
-// the terminal: they render right after the change ID, ahead of the clip-prone
-// metadata at the row end.
+// markers render flush right — always visible and always at the end of the
+// row, even when authors/bookmarks are wider than the terminal.
 func TestRenderLogMarkersSurviveClipping(t *testing.T) {
 	dest := jj.LogEntry{
 		ChangeID: "destdest", CommitID: "c0ffee01",
@@ -70,19 +69,59 @@ func TestRenderLogMarkersSurviveClipping(t *testing.T) {
 	plain := func(lines []string) string {
 		return ansi.Strip(strings.Join(lines, "\n"))
 	}
+	// assertFlushRight: the named marker is the last text on its row —
+	// i.e. the row's visible text ends with it.
+	assertFlushRight := func(lines []string, marker string) {
+		t.Helper()
+		for _, l := range lines {
+			l = strings.TrimRight(ansi.Strip(l), " ")
+			if strings.Contains(l, marker) {
+				if !strings.HasSuffix(l, "┃") && !strings.HasSuffix(l, "│") && !strings.HasSuffix(l, marker) {
+					t.Errorf("row with %q does not end flush at the marker or scrollbar: %q", marker, l)
+				}
+				return
+			}
+		}
+		t.Errorf("marker %q not found in view", marker)
+	}
 
 	rb := renderLog(40, 10, entries, 0, 0, -1, nil, 0, rebaseView{active: true, source: 0, dest: 1}, squashView{}, bookmarkDragView{}, -1, -1, "", "")
 	if got := plain(rb); !strings.Contains(got, "● moving") || !strings.Contains(got, "◀ onto") {
 		t.Errorf("rebase markers clipped on a wide row:\n%s", got)
 	}
+	assertFlushRight(rb, "◀ onto")
 
 	sq := renderLog(40, 10, entries, 0, 0, -1, nil, 0, rebaseView{}, squashView{active: true, source: 0, dest: 1}, bookmarkDragView{}, -1, -1, "", "")
 	if got := plain(sq); !strings.Contains(got, "● squashing") || !strings.Contains(got, "◀ into") {
 		t.Errorf("squash markers clipped on a wide row:\n%s", got)
 	}
+	assertFlushRight(sq, "◀ into")
 
 	bd := renderLog(40, 10, entries, 0, 0, -1, nil, 0, rebaseView{}, squashView{}, bookmarkDragView{active: true, name: "main", sourceIdx: 0, destIdx: 1}, -1, -1, "", "")
 	if got := plain(bd); !strings.Contains(got, "● dragging main") || !strings.Contains(got, "◀ drop") {
 		t.Errorf("bookmark-drag markers clipped on a wide row:\n%s", got)
+	}
+	assertFlushRight(bd, "◀ drop")
+
+	// With a scrollbar (more entries than fit), the marker must sit at the
+	// end of the text area, immediately before the bar's gap+glyph.
+	many := make([]jj.LogEntry, 0, 20)
+	for i := 0; i < 20; i++ {
+		many = append(many, dest)
+	}
+	many[0] = src
+	bar := renderLog(40, 10, many, 0, 0, -1, nil, 0, rebaseView{active: true, source: 0, dest: 1}, squashView{}, bookmarkDragView{}, -1, -1, "", "")
+	found := false
+	for _, l := range bar {
+		l = ansi.Strip(l)
+		if strings.Contains(l, "◀ onto") {
+			found = true
+			if !strings.HasSuffix(strings.TrimRight(l, " "), "◀ onto │") && !strings.HasSuffix(strings.TrimRight(l, " "), "◀ onto ┃") {
+				t.Errorf("marker row not flush before scrollbar: %q", l)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("marker missing with scrollbar: %s", plain(bar))
 	}
 }

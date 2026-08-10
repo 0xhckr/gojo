@@ -190,31 +190,6 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 		} else {
 			hs = append(hs, seg{text: e.ChangeID, fg: colMagenta, bold: true, bg: bg})
 		}
-		// Mode markers (rebase/squash/drag source & destination) go right after
-		// the change ID — never clipped by long authors/dates/bookmarks at the
-		// row tail, which is where the scrollbar trims the line.
-		if bd.active && i == bd.sourceIdx {
-			hs = append(hs, seg{text: "  ● dragging " + bd.name, fg: colMagenta, bold: true, bg: bg})
-		}
-		if bd.active && i == bd.destIdx {
-			hs = append(hs, seg{text: "  ◀ drop", fg: colYellow, bold: true, bg: bg})
-		}
-		if rb.active && i == rb.source {
-			tag := "  ● moving"
-			if rb.subtree {
-				tag = "  ● moving +descendants"
-			}
-			hs = append(hs, seg{text: tag, fg: colMagenta, bold: true, bg: bg})
-		}
-		if rb.active && i == rb.dest {
-			hs = append(hs, seg{text: "  ◀ " + rebasePlaceLabels[rb.place], fg: colYellow, bold: true, bg: bg})
-		}
-		if sq.active && i == sq.source {
-			hs = append(hs, seg{text: "  ● squashing", fg: colMagenta, bold: true, bg: bg})
-		}
-		if sq.active && i == sq.dest {
-			hs = append(hs, seg{text: "  ◀ into", fg: colYellow, bold: true, bg: bg})
-		}
 		hs = append(hs, seg{text: " ", bg: bg})
 		hs = append(hs, seg{text: e.Authors, fg: colBlue, bg: bg})
 		hs = append(hs, seg{text: " ", bg: bg})
@@ -236,6 +211,33 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 			hs = append(hs, seg{text: " ", bg: bg})
 			hs = append(hs, seg{text: "⚡ conflict", fg: colRed, bold: true, bg: bg})
 		}
+		// Mode markers (rebase/squash/drag source & destination) render flush
+		// at the right edge of the row — always visible and always last, never
+		// pushed off-screen by long authors/bookmarks or dented into mid-line.
+		var ms []seg
+		if bd.active && i == bd.sourceIdx {
+			ms = append(ms, seg{text: "● dragging " + bd.name, fg: colMagenta, bold: true, bg: bg})
+		}
+		if bd.active && i == bd.destIdx {
+			ms = append(ms, seg{text: "◀ drop", fg: colYellow, bold: true, bg: bg})
+		}
+		if rb.active && i == rb.source {
+			tag := "● moving"
+			if rb.subtree {
+				tag = "● moving +descendants"
+			}
+			ms = append(ms, seg{text: tag, fg: colMagenta, bold: true, bg: bg})
+		}
+		if rb.active && i == rb.dest {
+			ms = append(ms, seg{text: "◀ " + rebasePlaceLabels[rb.place], fg: colYellow, bold: true, bg: bg})
+		}
+		if sq.active && i == sq.source {
+			ms = append(ms, seg{text: "● squashing", fg: colMagenta, bold: true, bg: bg})
+		}
+		if sq.active && i == sq.dest {
+			ms = append(ms, seg{text: "◀ into", fg: colYellow, bold: true, bg: bg})
+		}
+		hs = appendFlushRight(hs, ms, scrollW, bg)
 		lines = append(lines, renderRowWithBar(scrollW, width, bg, hasBar, contentLine, thumbStart, thumbEnd, hs))
 		contentLine++
 
@@ -285,6 +287,38 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 	}
 
 	return padLines(lines, height, width)
+}
+
+// appendFlushRight appends marker segs (mode indicators like the
+// rebase/squash/drag badges) flush at the right edge of a scrollW-wide row by
+// padding hs with background-coloured fill first. Markers always win over
+// trailing metadata: if the row is too narrow to hold both, segments are
+// dropped from the tail of hs until the markers fit.
+func appendFlushRight(hs []seg, markers []seg, scrollW int, bg lipgloss.TerminalColor) []seg {
+	if len(markers) == 0 {
+		return hs
+	}
+	markerW := 0
+	for _, s := range markers {
+		markerW += segTextWidth(s.text)
+	}
+	width := func() int {
+		w := 0
+		for _, s := range hs {
+			w += segTextWidth(s.text)
+		}
+		return w
+	}
+	// Never sacrifice the leading segments (graph prefix + change ID);
+	// anything past those is decorative and may be dropped.
+	for width()+1+markerW > scrollW && len(hs) > 4 {
+		hs = hs[:len(hs)-1]
+	}
+	fill := scrollW - width() - markerW
+	if fill > 0 {
+		hs = append(hs, seg{text: strings.Repeat(" ", fill), bg: bg})
+	}
+	return append(hs, markers...)
 }
 
 // renderRowWithBar renders a content row to scrollW columns, then appends a
