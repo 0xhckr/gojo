@@ -3,7 +3,6 @@ package ui
 import (
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -56,13 +55,17 @@ type cachedStyle struct {
 }
 
 var (
-	// styleCacheAtomic holds an immutable map[styleKey]cachedStyle snapshot.
-	// Reads are a plain atomic load + map access (no mutex); the rare miss
-	// path takes styleMu, fills, and publishes a fresh snapshot. The set of
-	// styles in use is small and fixed after warm-up.
-	styleCacheAtomic atomic.Value
-	styleMu          sync.Mutex
+	// styleCache is probed styles by (color combo, attrs, profile). Reads
+	// take the read lock; the miss path probes and inserts in place. Themes
+	// can introduce arbitrary color values, so the cache is bounded: on
+	// overflow it is dropped wholesale and re-probed on demand.
+	styleCacheMu sync.RWMutex
+	styleCache   = map[styleKey]cachedStyle{}
 )
+
+// styleCacheMax bounds the probe cache. A frame uses a few dozen styles; a
+// full pass over the theme library uses ~250 per theme.
+const styleCacheMax = 8192
 
 func styleFor(s seg) cachedStyle {
 	r := lipgloss.DefaultRenderer()
@@ -70,19 +73,18 @@ func styleFor(s seg) cachedStyle {
 		fg: s.fg, bg: s.bg, bold: s.bold, underline: s.underline, faint: s.faint,
 		profile: r.ColorProfile(), dark: r.HasDarkBackground(),
 	}
-	if v := styleCacheAtomic.Load(); v != nil {
-		if cs, ok := v.(map[styleKey]cachedStyle)[k]; ok {
-			return cs
-		}
+	styleCacheMu.RLock()
+	cs, ok := styleCache[k]
+	styleCacheMu.RUnlock()
+	if ok {
+		return cs
 	}
 
-	styleMu.Lock()
-	defer styleMu.Unlock()
+	styleCacheMu.Lock()
+	defer styleCacheMu.Unlock()
 	// Re-check under the write lock.
-	if v := styleCacheAtomic.Load(); v != nil {
-		if cs, ok := v.(map[styleKey]cachedStyle)[k]; ok {
-			return cs
-		}
+	if cs, ok := styleCache[k]; ok {
+		return cs
 	}
 
 	st := lipgloss.NewStyle()
@@ -102,15 +104,12 @@ func styleFor(s seg) cachedStyle {
 		st = st.Faint(true)
 	}
 
-	cs := probeStyle(st)
+	cs = probeStyle(st)
 
-	next := map[styleKey]cachedStyle{k: cs}
-	if v := styleCacheAtomic.Load(); v != nil {
-		for k2, cs2 := range v.(map[styleKey]cachedStyle) {
-			next[k2] = cs2
-		}
+	if len(styleCache) >= styleCacheMax {
+		styleCache = map[styleKey]cachedStyle{}
 	}
-	styleCacheAtomic.Store(next)
+	styleCache[k] = cs
 	return cs
 }
 

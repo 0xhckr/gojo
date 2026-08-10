@@ -212,11 +212,11 @@ func parseThemeTOML(id, raw string) (Theme, error) {
 	}
 
 	if dark != (paletteDef{}) {
-		d := dark
+		d := resolve(dark) // resolve once; variants are used per frame
 		t.Dark = &d
 	}
 	if light != (paletteDef{}) {
-		l := light
+		l := resolve(light)
 		t.Light = &l
 	}
 	if t.Dark == nil && t.Light == nil {
@@ -276,7 +276,8 @@ func gojoTheme() Theme {
 		SectionBgA: "#eae6f6", SectionBgB: "#f6e8f0", SectionBarDimA: "#c4bbe0", SectionBarDimB: "#e0bcd0",
 		SectionBarBrightA: "#6b50ff", SectionBarBrightB: "#c44b8a",
 	}
-	return Theme{ID: "gojo", Title: "gojo (default)", Dark: dark, Light: light}
+	d, l := resolve(*dark), resolve(*light)
+	return Theme{ID: "gojo", Title: "gojo (default)", Dark: &d, Light: &l}
 }
 
 // terminalTheme follows the terminal's own color scheme: body text and
@@ -295,5 +296,6 @@ func terminalTheme() Theme {
 		ConfLeftFocusBg: "8", ConfRightFocusBg: "8",
 		SectionBarDimA: "8", SectionBarDimB: "8", SectionBarBrightA: "4", SectionBarBrightB: "5",
 	}
-	return Theme{ID: "terminal", Title: "terminal (follow terminal)", Dark: p, Light: p}
+	r := resolve(*p)
+	return Theme{ID: "terminal", Title: "terminal (follow terminal)", Dark: &r, Light: &r}
 }

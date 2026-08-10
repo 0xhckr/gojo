@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -192,10 +194,10 @@ func TestApplyTheme(t *testing.T) {
 	}
 
 	// Dracula has no light variant: dark pins both.
-	dark := &paletteDef{Background: "#282a36", Element: "#44475a", Text: "#f8f8f2", TextMuted: "#6272a4",
+	dark := resolve(paletteDef{Background: "#282a36", Element: "#44475a", Text: "#f8f8f2", TextMuted: "#6272a4",
 		Purple: "#bd93f9", Blue: "#8be9fd", Green: "#50fa7b", Red: "#ff5555", Yellow: "#f1fa8c",
-		Cyan: "#8be9fd", Orange: "#ffb86c", Pink: "#ff79c6"}
-	applyTheme(Theme{ID: "x", Dark: dark})
+		Cyan: "#8be9fd", Orange: "#ffb86c", Pink: "#ff79c6"})
+	applyTheme(Theme{ID: "x", Dark: &dark})
 	if colPurple != lipgloss.Color("#bd93f9") {
 		t.Fatalf("colPurple = %v", colPurple)
 	}
@@ -249,5 +251,5 @@ func TestCompiledThemesResolve(t *testing.T) {
 
 // fieldByIndex reads a palette string field by struct index.
 func fieldByIndex(p paletteDef, idx int) string {
-	return reflectStringField(&p, idx)
+	return reflect.ValueOf(&p).Elem().Field(idx).String()
 }

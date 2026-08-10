@@ -118,6 +118,21 @@ func BenchmarkViewDiff(b *testing.B) {
 	}
 }
 
+// BenchmarkThemeSwitch measures a picker move: apply the next theme and
+// render a full log frame in it. Theme edits reject anything above a small
+// constant — a slow switch makes live-preview browsing feel broken.
+func BenchmarkThemeSwitch(b *testing.B) {
+	m := benchModel()
+	m.themes = loadThemes("", "", "../..")
+	m.themeOpen = true
+	defer applyTheme(gojoTheme())
+	b.ReportAllocs()
+	for i := 0; b.Loop(); i++ {
+		m.themeMove(i % len(m.themes))
+		_ = m.View()
+	}
+}
+
 // BenchmarkRenderDiff measures end-to-end git-diff parsing + highlighting.
 func BenchmarkRenderDiff(b *testing.B) {
 	var sb strings.Builder

@@ -141,7 +141,9 @@ func (t Theme) variantLabel() string {
 }
 
 // variant returns the resolved palette for the terminal's background class.
-// When the theme has only one variant it is used for both.
+// When the theme has only one variant it is used for both. Palettes are
+// resolved once at load/parse time (see resolve), so this is a cheap copy
+// — it runs on every picker row of every frame and on every theme switch.
 func (t Theme) variant(dark bool) paletteDef {
 	p := t.Dark
 	if !dark {
@@ -156,7 +158,7 @@ func (t Theme) variant(dark bool) paletteDef {
 	if p == nil {
 		return paletteDef{}
 	}
-	return resolve(*p)
+	return *p
 }
 
 // previewColors returns the theme's core accent colors for the picker's
@@ -416,10 +418,14 @@ func resolve(p paletteDef) paletteDef {
 }
 
 // themeColor combines the light and dark values of one slot into a lipgloss
-// color: adaptive when both are set, a plain color for single-variant
-// themes, nil ("terminal default") when both are empty.
+// color: adaptive when the variants differ, a plain color when both are the
+// same (single-variant themes pinned to both backgrounds), nil ("terminal
+// default") when both are empty.
 func themeColor(light, dark string) lipgloss.TerminalColor {
 	if light != "" && dark != "" {
+		if light == dark {
+			return lipgloss.Color(dark)
+		}
 		return lipgloss.AdaptiveColor{Light: light, Dark: dark}
 	}
 	if dark != "" {

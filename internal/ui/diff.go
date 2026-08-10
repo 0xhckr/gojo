@@ -475,9 +475,9 @@ func tokenizeWords(s string) []wordToken {
 type wordDiffClass int
 
 const (
-	wordCommon wordDiffClass = iota // token is in both old and new
-	wordAdded                       // token is only in new
-	wordRemoved                     // token is only in old
+	wordCommon  wordDiffClass = iota // token is in both old and new
+	wordAdded                        // token is only in new
+	wordRemoved                      // token is only in old
 )
 
 // maxWordDiffCells caps the LCS matrix size for word-level diffing. Lines

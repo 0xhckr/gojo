@@ -30,8 +30,6 @@ func (m Model) themeIndex() int {
 func (m Model) openThemePicker() Model {
 	m.themeOpen = true
 	m.themeReturn = m.themeName
-	m.errMsg = ""
-	m.message = ""
 	idx := m.themeIndex()
 	if idx < 0 {
 		idx = 0

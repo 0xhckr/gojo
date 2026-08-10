@@ -2283,6 +2283,13 @@ func (m Model) flushWheel() (tea.Model, tea.Cmd) {
 	if n < 0 {
 		dir, n = -1, -n
 	}
+	if m.themeOpen {
+		// A burst that lands N themes away must preview once, not N times —
+		// each theme switch restyles the whole frame, so stepping per event
+		// is what made trackpad momentum scrolling crawl.
+		m.themeMove(m.themeCursor + dir*n)
+		return m.updateHover(m.wheelX, m.wheelY), nil
+	}
 	for ; n > 0; n-- {
 		m.wheelStep(dir)
 	}
