@@ -47,6 +47,18 @@ nix develop                     # drops you into a shell with go + jujutsu
 go run .
 ```
 
+### Arch Linux (and derivatives)
+
+Each GitHub release ships a pacman package
+(`gojo_<version>_linux_<arch>.pkg.tar.zst`):
+
+```sh
+pacman -U gojo_<version>_linux_x86_64.pkg.tar.zst
+```
+
+The package depends on `jujutsu` (in [extra]), so pacman pulls jj in
+automatically.
+
 ### From source
 
 Requires Go 1.26+ and `jj` in `$PATH`.

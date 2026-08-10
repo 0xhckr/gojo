@@ -14,6 +14,10 @@ adheres to [Semantic Versioning][semver].
 
 ## [Unreleased]
 
+### Added
+- Arch Linux pacman packages (`.pkg.tar.zst`) attached to each GitHub
+  release, with `jujutsu` as a recommended dependency.
+
 ## [1.0.0] - 2026-06-29
 
 First tagged release.

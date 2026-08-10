@@ -49,6 +49,9 @@ internal/
     helpview.go         — keybinding reference + scroll
 go.mod / go.sum         — module `gojo`, deps: bubbletea, lipgloss, chroma, x/ansi
 flake.nix               — nix flake: devShell (go, gopls, jujutsu) + buildGoModule package
+.goreleaser.yaml        — release pipeline: tarballs, distro packages (nfpm:
+                          archlinux pacman pkg), Homebrew cask commit-back to
+                          Casks/. Validates VERSION == tag in a before hook.
 VERSION                 — single source of truth for the version (flake + goreleaser read it)
 .envrc                  — direnv: `use flake`
 ```

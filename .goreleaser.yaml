@@ -38,6 +38,28 @@ archives:
       - LICENSE
       - README.md
 
+# Distro packages (nfpm). One entry per package format, enabled one distro
+# family at a time. jujutsu is a hard dependency on Arch (it is packaged in
+# [extra]) but only recommended elsewhere, so the package still installs on
+# Debian/RHEL-family releases that don't ship a `jujutsu` package yet.
+nfpms:
+  # Arch Linux (and derivatives): pacman .pkg.tar.zst.
+  - id: gojo-arch
+    package_name: gojo
+    vendor: 0xhckr
+    homepage: https://github.com/0xhckr/gojo
+    maintainer: 0xhckr
+    description: "Fullscreen terminal UI for jj (Jujutsu VCS)"
+    license: MIT
+    formats: [archlinux]
+    dependencies:
+      - jujutsu
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/gojo/README.md
+      - src: LICENSE
+        dst: /usr/share/licenses/gojo/LICENSE
+
 checksum:
   name_template: "checksums.txt"
 
