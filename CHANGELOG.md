@@ -14,6 +14,8 @@ adheres to [Semantic Versioning][semver].
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-09
+
 ### Added
 - Arch Linux pacman packages (`.pkg.tar.zst`) attached to each GitHub
   release, depending on the distro `jujutsu` package.
@@ -22,6 +24,8 @@ adheres to [Semantic Versioning][semver].
 - Fedora/RHEL packages (`.rpm`) attached to each GitHub release, with
   `jujutsu` as a weak recommendation (also usable on openSUSE).
 - openSUSE installation support via the same release `.rpm` (zypper).
+- `nix run .#bump -- [major|minor|patch|X.Y.Z]` helper: writes VERSION and
+  refreshes the flake vendorHash.
 
 ## [1.0.0] - 2026-06-29
 
