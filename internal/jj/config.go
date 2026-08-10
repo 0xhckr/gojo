@@ -91,6 +91,8 @@ func applyTOMLConfig(cfg *Config, raw string, section string) {
 
 // LoadConfig resolves the jj binary, repo root, and overlays config from
 // ~/.config/jj/config.toml ([tools.gojo]) then ~/.config/gojo/gojo.toml.
+// When only the repo-root discovery fails, the returned Config still carries
+// JJPath so the caller can run repo-creating commands (jj git init).
 func LoadConfig() (Config, error) {
 	jjPath, err := findBinary("jj")
 	if err != nil {
@@ -98,7 +100,7 @@ func LoadConfig() (Config, error) {
 	}
 	repoRoot, err := findRepoRoot()
 	if err != nil {
-		return Config{}, err
+		return Config{JJPath: jjPath}, err
 	}
 
 	cfg := Config{JJPath: jjPath, RepoRoot: repoRoot}
@@ -131,6 +133,10 @@ func findBinary(name string) (string, error) {
 	return path, nil
 }
 
+// ErrNoRepo signals that no enclosing jj repo was found (no .jj directory in
+// cwd or any ancestor). Callers can branch on it with errors.Is.
+var ErrNoRepo = errors.New("no .jj directory found")
+
 func findRepoRoot() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -142,7 +148,7 @@ func findRepoRoot() (string, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", errors.New("no .jj directory found")
+			return "", ErrNoRepo
 		}
 		dir = parent
 	}

@@ -21,7 +21,9 @@ internal/
                           $left/$base/$right, leaves $output empty so jj aborts
                           — the conflict stays intact), Resolve (tool copies the
                           gojo-composed content into $output)
-    config.go           — Config struct, repo-root discovery, minimal TOML loader
+    config.go           — Config struct, repo-root discovery (ErrNoRepo sentinel
+                          when no .jj dir; Config still carries JJPath so the
+                          boot prompt can init), minimal TOML loader
     ai.go               — AIDescribe: OpenAI-compatible chat-completions client (net/http)
   ui/
     model.go            — Bubble Tea Model: state, Update (msgs + keys), View, commands
@@ -163,7 +165,10 @@ repo dir via `os/exec`, capturing stdout and surfacing stderr on error.
 Operations: Log, Status, Diff (`--git`), DiffSummary, FileShow, Describe, New,
 Edit, Abandon, Absorb, Undo, Redo, Bookmark{Create,Delete,Forget,List,Move,Rename,Set,
 Track,Untrack}, Tag{List,Set,Delete}, GitFetch, GitPush, GitPushTags,
-Remote{Add,List,Remove,Rename,SetURL}, AIDescribe.
+Remote{Add,List,Remove,Rename,SetURL}, AIDescribe. `GitInitDir` (not a Runner
+method — no repo exists yet) wraps `jj git init [--colocate]` for the boot
+prompt: outside any repo gojo asks "initialize here?" then "colocate with
+git?", inits, and re-runs the boot.
 
 ## Color Palette (styles.go — CharmTone)
 

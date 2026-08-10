@@ -82,6 +82,33 @@ func (r *Runner) run(args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
+// GitInitDir initializes a fresh jj repo with a git backend in dir (the
+// boot-prompt flow for starting gojo outside any repo). colocate maps to
+// `jj git init --colocate`, keeping a plain .git repo alongside .jj so
+// regular git tooling works in the same directory. Not a Runner method:
+// there is no repo yet, so no Config with a RepoRoot exists to build one.
+func GitInitDir(jjPath, dir string, colocate bool) error {
+	args := []string{"git", "init"}
+	if colocate {
+		args = append(args, "--colocate")
+	} else {
+		// jj 0.41 colocates by default, so declining needs an explicit opt-out.
+		args = append(args, "--no-colocate")
+	}
+	cmd := exec.Command(jjPath, args...)
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("jj %s: %s", strings.Join(args, " "), msg)
+	}
+	return nil
+}
+
 // Log returns commits for jj's default revset, newest first, with graph
 // data. A non-positive limit defaults to 50.
 func (r *Runner) Log(limit int) ([]LogEntry, error) {

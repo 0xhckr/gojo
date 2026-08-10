@@ -42,6 +42,18 @@ type Model struct {
 	cwd      string
 	home     string
 
+	// Boot init prompt — shown when gojo starts outside a jj repo (boot
+	// error ErrNoRepo). Stage 1 asks whether to initialize a repo in
+	// bootInitDir, stage 2 asks whether to --colocate with git, stage 3
+	// means the init is running. Declining (n at stage 1) or cancelling
+	// (q/esc) falls back to the plain boot-error screen. cfg isn't
+	// populated on a failed boot, so bootInitJJPath keeps the resolved jj
+	// binary for the init exec; bootInitErr shows the last failed init.
+	bootInitStage  int
+	bootInitDir    string
+	bootInitErr    string
+	bootInitJJPath string
+
 	view viewMode
 
 	// File view: browse tracked files, open one with git-blame-style
@@ -261,6 +273,10 @@ type bootMsg struct {
 	err error
 }
 
+// initDoneMsg reports the outcome of jj git init from the boot prompt. On
+// success boot is re-run so the new repo is detected like a normal startup.
+type initDoneMsg struct{ err error }
+
 type refreshMsg struct {
 	entries []jj.LogEntry
 	logErr  error
@@ -391,6 +407,15 @@ func (m Model) Init() tea.Cmd {
 func boot() tea.Msg {
 	cfg, err := jj.LoadConfig()
 	return bootMsg{cfg: cfg, err: err}
+}
+
+// initRepoCmd runs jj git init (--colocate optional) in the directory gojo
+// was started in, answering the boot init prompt. Reports via initDoneMsg.
+func (m Model) initRepoCmd(colocate bool) tea.Cmd {
+	jjPath, dir := m.bootInitJJPath, m.bootInitDir
+	return func() tea.Msg {
+		return initDoneMsg{err: jj.GitInitDir(jjPath, dir, colocate)}
+	}
 }
 
 // ── Commands ────────────────────────────────────────────────────────────────
@@ -751,6 +776,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case bootMsg:
 		if msg.err != nil {
+			// Outside any jj repo: offer to initialize one (and optionally
+			// colocate with git) instead of showing a bare error.
+			if errors.Is(msg.err, jj.ErrNoRepo) {
+				m.bootInitStage = 1
+				m.bootInitDir = m.cwd
+				m.bootInitErr = ""
+				m.bootInitJJPath = msg.cfg.JJPath
+				return m, nil
+			}
 			m.bootErr = msg.err.Error()
 			return m, nil
 		}
@@ -760,6 +794,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		m.message = "refreshing…"
 		return m, m.refreshCmd()
+
+	case initDoneMsg:
+		if msg.err != nil {
+			// Back to the init question so the user sees what failed.
+			m.bootInitStage = 1
+			m.bootInitErr = msg.err.Error()
+			return m, nil
+		}
+		m.bootInitStage = 0
+		m.bootInitErr = ""
+		// The repo now exists; re-run the full boot against it.
+		return m, boot
 
 	case refreshMsg:
 		if msg.logErr != nil {
@@ -1724,6 +1770,43 @@ func (m Model) selectedEntry() *jj.LogEntry {
 
 // ── Keyboard ────────────────────────────────────────────────────────────────
 
+// handleBootInitKey answers the two-step boot prompt: (1) initialize a repo
+// here? (2) colocate with git? y advances, n declines (at stage 1 falling back
+// to the plain boot-error screen, at stage 2 initializing without --colocate),
+// q/esc quit.
+func (m Model) handleBootInitKey(k string) (tea.Model, tea.Cmd) {
+	switch m.bootInitStage {
+	case 1:
+		switch k {
+		case "y", "Y":
+			m.bootInitStage = 2
+			return m, nil
+		case "n", "N":
+			m.bootInitStage = 0
+			m.bootErr = jj.ErrNoRepo.Error()
+			return m, nil
+		case "q", "esc":
+			return m, tea.Quit
+		}
+	case 2:
+		switch k {
+		case "y", "Y":
+			m.bootInitStage = 3
+			return m, m.initRepoCmd(true)
+		case "n", "N":
+			m.bootInitStage = 3
+			return m, m.initRepoCmd(false)
+		case "esc":
+			// Step back to the init question.
+			m.bootInitStage = 1
+			return m, nil
+		case "q":
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 
@@ -1733,7 +1816,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if !m.ready {
-		// Boot failed (e.g. no .jj directory). q / esc also quits so the
+		if m.bootInitStage > 0 {
+			return m.handleBootInitKey(k)
+		}
+		// Boot failed (e.g. jj not in PATH). q / esc also quits so the
 		// user is never trapped in the alt screen with no escape.
 		if m.bootErr != "" && (k == "q" || k == "esc") {
 			return m, tea.Quit
@@ -3780,6 +3866,38 @@ func (m Model) renderTopBar() string {
 	return bgRow(m.width, colElement, segs...)
 }
 
+// bootInitLines renders the outside-a-repo boot prompt (initialize? →
+// colocate? → initializing…) as full-width panel rows.
+func (m Model) bootInitLines() []string {
+	dir := m.bootInitDir
+	if m.home != "" && strings.HasPrefix(dir, m.home) {
+		dir = "~" + dir[len(m.home):]
+	}
+	lines := []string{
+		bgRow(m.width, colPanel, seg{text: " gojo init", fg: colPurple, bold: true}),
+		blankRow(m.width, colPanel),
+		bgRow(m.width, colPanel, seg{text: " " + dir + " is not inside a jj repository.", fg: colWhite}),
+	}
+	if m.bootInitErr != "" {
+		lines = append(lines, bgRow(m.width, colPanel, seg{text: " last attempt failed: " + m.bootInitErr, fg: colRed}))
+	}
+	lines = append(lines, blankRow(m.width, colPanel))
+	switch m.bootInitStage {
+	case 1:
+		lines = append(lines, bgRow(m.width, colPanel, seg{text: " initialize a new repo here? ", fg: colYellow}))
+		lines = append(lines, blankRow(m.width, colPanel))
+		lines = append(lines, bgRow(m.width, colPanel, seg{text: " y — yes    n — no    q/esc — quit", fg: colGray}))
+	case 2:
+		lines = append(lines, bgRow(m.width, colPanel, seg{text: " colocate with git (--colocate)? ", fg: colYellow}))
+		lines = append(lines, bgRow(m.width, colPanel, seg{text: " y — plain .git next to .jj (jj default)    n — jj-internal git store only (--no-colocate)", fg: colGray}))
+		lines = append(lines, blankRow(m.width, colPanel))
+		lines = append(lines, bgRow(m.width, colPanel, seg{text: " y — yes    n — no    esc — back    q — quit", fg: colGray}))
+	default: // 3 — running
+		lines = append(lines, bgRow(m.width, colPanel, seg{text: " initializing repo in " + dir + "…", fg: colYellow}))
+	}
+	return lines
+}
+
 // View renders the full screen.
 func (m Model) View() string {
 	if m.width <= 0 || m.height <= 0 {
@@ -3791,6 +3909,10 @@ func (m Model) View() string {
 			blankRow(m.width, colPanel),
 			bgRow(m.width, colPanel, seg{text: " press q or ctrl+c to quit", fg: colGray}),
 		}
+		return strings.Join(padLines(lines, m.height, m.width), "\n")
+	}
+	if m.bootInitStage > 0 {
+		lines := m.bootInitLines()
 		return strings.Join(padLines(lines, m.height, m.width), "\n")
 	}
 	if !m.ready || (len(m.entries) == 0 && m.errMsg == "") {
