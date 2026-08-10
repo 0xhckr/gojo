@@ -22,11 +22,12 @@ The **VERSION** file at the repo root is the single source of truth for the
 version number. To release:
 
 ```sh
-# 1. bump VERSION (it must match the tag, minus the leading `v`)
-echo "1.0.0" > VERSION
+# 1. bump VERSION (it must match the tag, minus the leading `v`).
+#    The flake app also refreshes flake.nix's vendorHash if it is stale.
+nix run .#bump -- minor   # …or major / patch / explicit X.Y.Z
+git add VERSION flake.nix   # (whichever changed)
 
 # 2. commit and tag
-git add VERSION
 git commit -m "chore: release v1.0.0"
 git tag v1.0.0
 git push origin v1.0.0

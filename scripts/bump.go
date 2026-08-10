@@ -2,8 +2,12 @@
 //
 // Usage:
 //
+//	go run scripts/bump.go            # bump patch (1.2.2 -> 1.2.3)
+//	go run scripts/bump.go major      # 1.2.2 -> 2.0.0
+//	go run scripts/bump.go minor      # 1.2.2 -> 1.3.0
+//	go run scripts/bump.go patch      # 1.2.2 -> 1.2.3
 //	go run scripts/bump.go 1.2.2      # set a specific version
-//	go run scripts/bump.go            # auto-bump patch (1.2.2 -> 1.2.3)
+//	nix run .#bump -- [major|minor|patch|X.Y.Z]   (same, via the flake app)
 //
 // Leading `v` is stripped.  After writing VERSION the script runs
 // `nix build .#default` and, if the vendorHash is stale, captures the
@@ -23,17 +27,26 @@ import (
 func main() {
 	var version string
 
-	switch len(os.Args) {
-	case 1:
+	readCurrent := func() string {
 		old, err := os.ReadFile("VERSION")
 		if err != nil {
 			die("reading VERSION: %v", err)
 		}
-		version = bumpPatch(strings.TrimSpace(string(old)))
+		return strings.TrimSpace(string(old))
+	}
+
+	switch len(os.Args) {
+	case 1:
+		version = bumpPart(readCurrent(), "patch")
 	case 2:
-		version = strings.TrimPrefix(os.Args[1], "v")
+		switch arg := strings.TrimPrefix(os.Args[1], "v"); arg {
+		case "major", "minor", "patch":
+			version = bumpPart(readCurrent(), arg)
+		default:
+			version = arg
+		}
 	default:
-		die("usage: go run scripts/bump.go [version]")
+		die("usage: go run scripts/bump.go [major|minor|patch|version]")
 	}
 
 	if !semverRE.MatchString(version) {
@@ -56,17 +69,34 @@ func main() {
 
 var semverRE = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
-func bumpPatch(v string) string {
+// bumpPart bumps the given part ("major", "minor", "patch") of an X.Y.Z
+// version, resetting lower parts per semantic versioning.
+func bumpPart(v, part string) string {
 	parts := strings.Split(v, ".")
 	if len(parts) != 3 {
-		die("can't auto-bump %q — pass an explicit version", v)
+		die("can't bump %q — want X.Y.Z, pass an explicit version", v)
 	}
-	p, err := strconv.Atoi(parts[2])
-	if err != nil {
-		die("bad patch in %q: %v", v, err)
+	nums := [3]int{}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			die("bad number in %q: %v", v, err)
+		}
+		nums[i] = n
 	}
-	parts[2] = strconv.Itoa(p + 1)
-	return strings.Join(parts, ".")
+	switch part {
+	case "major":
+		nums[0]++
+		nums[1], nums[2] = 0, 0
+	case "minor":
+		nums[1]++
+		nums[2] = 0
+	case "patch":
+		nums[2]++
+	default:
+		die("unknown bump part %q (want major|minor|patch)", part)
+	}
+	return fmt.Sprintf("%d.%d.%d", nums[0], nums[1], nums[2])
 }
 
 var hashRE = regexp.MustCompile(`got:\s*(sha256-[A-Za-z0-9+/=]+)`)
