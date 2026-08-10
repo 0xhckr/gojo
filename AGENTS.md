@@ -50,10 +50,11 @@ internal/
 go.mod / go.sum         — module `gojo`, deps: bubbletea, lipgloss, chroma, x/ansi
 flake.nix               — nix flake: devShell (go, gopls, jujutsu) + buildGoModule package
 .goreleaser.yaml        — release pipeline: tarballs, distro packages (nfpm:
-                          archlinux pacman pkg + deb; one entry per format so
-                          jujutsu is a hard dep on Arch, recommended on deb),
-                          Homebrew cask commit-back to Casks/. Validates
-                          VERSION == tag in a before hook.
+                          archlinux pacman pkg + deb + rpm; one entry per
+                          format so jujutsu is a hard dep on Arch, recommended
+                          on deb, weak recommend on rpm), Homebrew cask
+                          commit-back to Casks/. Validates VERSION == tag in a
+                          before hook.
 VERSION                 — single source of truth for the version (flake + goreleaser read it)
 .envrc                  — direnv: `use flake`
 ```

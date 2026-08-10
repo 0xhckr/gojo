@@ -19,6 +19,8 @@ adheres to [Semantic Versioning][semver].
   release, depending on the distro `jujutsu` package.
 - Debian/Ubuntu packages (`.deb`) attached to each GitHub release, with
   `jujutsu` as a recommended dependency.
+- Fedora/RHEL packages (`.rpm`) attached to each GitHub release, with
+  `jujutsu` as a weak recommendation (also usable on openSUSE).
 
 ## [1.0.0] - 2026-06-29
 

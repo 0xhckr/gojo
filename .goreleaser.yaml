@@ -43,6 +43,28 @@ archives:
 # [extra]) but only recommended elsewhere, so the package still installs on
 # Debian/RHEL-family releases that don't ship a `jujutsu` package yet.
 nfpms:
+  # Fedora/RHEL: .rpm. Weak Recommends so dnf auto-installs jj where a
+  # `jujutsu` package exists (Fedora 39+), without blocking installs on
+  # releases that don't ship one. The same rpm also serves openSUSE.
+  - id: gojo-rpm
+    package_name: gojo
+    vendor: 0xhckr
+    homepage: https://github.com/0xhckr/gojo
+    maintainer: 0xhckr
+    description: "Fullscreen terminal UI for jj (Jujutsu VCS)"
+    license: MIT
+    formats: [rpm]
+    recommends:
+      - jujutsu
+    rpm:
+      summary: Fullscreen terminal UI for jj (Jujutsu VCS)
+      group: Development/Tools
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/gojo/README.md
+      - src: LICENSE
+        dst: /usr/share/licenses/gojo/LICENSE
+
   # Debian/Ubuntu: .deb. jujutsu is only a recommendation — it is packaged
   # as `jujutsu` on Debian 13+/Ubuntu 24.10+, but older releases lack it and
   # a hard Depends would block installation there.

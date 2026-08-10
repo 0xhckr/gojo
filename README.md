@@ -59,6 +59,17 @@ apt install ./gojo_<version>_linux_amd64.deb
 24.10+); on older releases apt skips it and you install
 [jj](https://jj-vcs.github.io/jj/latest/install-and-setup/) yourself.
 
+### Fedora / RHEL
+
+Each GitHub release ships an RPM (`gojo_<version>_linux_<arch>.rpm`):
+
+```sh
+dnf install ./gojo_<version>_linux_x86_64.rpm
+```
+
+`jujutsu` is a weak recommendation, so dnf pulls in jj automatically on
+Fedora 39+ (older releases simply skip it).
+
 ### Arch Linux (and derivatives)
 
 Each GitHub release ships a pacman package
