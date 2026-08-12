@@ -29,6 +29,14 @@ func main() {
 	// syntax-highlighting theme then read this cached value.
 	_ = lipgloss.HasDarkBackground()
 
+	// Ask the terminal to report OS dark/light scheme changes as DSR replies
+	// (xterm mode 2031; supported by kitty, Ghostty, VTE, Contour, …). The UI
+	// picks the CSI ? 997 ; 1|2 n replies out of bubbletea's unrecognized-CSI
+	// messages and re-themes (see internal/ui/darkmode.go). Terminals without
+	// support ignore the mode silently.
+	fmt.Fprint(os.Stdout, "\x1b[?2031h")
+	defer fmt.Fprint(os.Stdout, "\x1b[?2031l")
+
 	p := tea.NewProgram(
 		ui.NewModel(),
 		tea.WithAltScreen(),

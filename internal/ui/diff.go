@@ -287,8 +287,9 @@ func renderDiff(raw string) []diffRow {
 
 // The chroma style is re-resolvable at runtime: themes may override it (dark
 // and light variants) via setChromaStyleOverride; the default matches the
-// terminal background. The token-foreground cache is invalidated whenever the
-// effective style name changes.
+// terminal background, which itself can flip at runtime (terminal dark/light
+// scheme reports, see darkmode.go). The token-foreground cache is keyed by
+// the effective style name, so any such flip just produces new entries.
 var (
 	chromaStyleMu       sync.Mutex
 	chromaStyleOverride string // theme override for dark backgrounds ("" = default)
@@ -315,7 +316,9 @@ func setChromaStyleOverride(dark, light string) {
 	chromaStyleMu.Unlock()
 }
 
-func chromaStyle() *chroma.Style {
+// chromaStyle resolves the effective chroma style and its name, refreshing
+// the cache when the background class or theme override changed.
+func chromaStyle() (*chroma.Style, string) {
 	chromaStyleMu.Lock()
 	defer chromaStyleMu.Unlock()
 
@@ -328,7 +331,7 @@ func chromaStyle() *chroma.Style {
 		name = override
 	}
 	if chromaStyleVal != nil && chromaStyleFor == name {
-		return chromaStyleVal
+		return chromaStyleVal, name
 	}
 	if s := styles.Get(name); s != nil {
 		chromaStyleVal = s
@@ -336,10 +339,7 @@ func chromaStyle() *chroma.Style {
 		chromaStyleVal = styles.Fallback
 	}
 	chromaStyleFor = name
-	chromaFgCacheMu.Lock()
-	clear(chromaFgCache)
-	chromaFgCacheMu.Unlock()
-	return chromaStyleVal
+	return chromaStyleVal, chromaStyleFor
 }
 
 // matchLexer resolves a chroma lexer for filename, caching the result
@@ -417,24 +417,32 @@ func highlightLines(filename string, lines []string) [][]span {
 
 // chromaFgCache caches the hex foreground for a token type under the chosen
 // chroma style — Style.Get walks the type hierarchy and Colour.String()
-// formats hex, both per token otherwise.
+// formats hex, both per token otherwise. Keyed by style name so a background
+// flip or theme-syntax override can't serve another style's colors.
+type chromaFgKey struct {
+	style string
+	tok   chroma.TokenType
+}
+
 var (
 	chromaFgCacheMu sync.RWMutex
-	chromaFgCache   = map[chroma.TokenType]string{}
+	chromaFgCache   = map[chromaFgKey]string{}
 )
 
 func chromaFgFor(t chroma.TokenType) string {
+	style, name := chromaStyle()
+	k := chromaFgKey{style: name, tok: t}
 	chromaFgCacheMu.RLock()
-	fg, ok := chromaFgCache[t]
+	fg, ok := chromaFgCache[k]
 	chromaFgCacheMu.RUnlock()
 	if ok {
 		return fg
 	}
-	if c := chromaStyle().Get(t).Colour; c.IsSet() {
+	if c := style.Get(t).Colour; c.IsSet() {
 		fg = c.String()
 	}
 	chromaFgCacheMu.Lock()
-	chromaFgCache[t] = fg
+	chromaFgCache[k] = fg
 	chromaFgCacheMu.Unlock()
 	return fg
 }

@@ -767,6 +767,13 @@ func (m Model) refreshFocusedCmds() []tea.Cmd {
 
 // Update handles incoming messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Terminal-reported OS dark/light scheme change (mode 2031 DSR — arrives
+	// as an unrecognized-CSI message, see darkmode.go). Applies in every view.
+	if dark, ok := decodeColorScheme(msg); ok {
+		m.applyColorScheme(dark)
+		return m, nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
