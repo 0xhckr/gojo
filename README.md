@@ -1,6 +1,8 @@
 # gojo
 
-A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), built in [Go](https://go.dev) with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lip Gloss](https://github.com/charmbracelet/lipgloss).
+A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), built in [Go](https://go.dev) with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lip Gloss](https://github.com/charmbracelet/lipgloss). Commit graph, diffs, bookmarks, git remotes, and AI commit messages — without leaving your terminal.
+
+**Website: [gojo.rocks](https://gojo.rocks)**
 
 <p align="center">
   <img src="https://img.shields.io/badge/go-1.26+-00ADD8?style=flat&logo=go" alt="Go">
@@ -11,20 +13,43 @@ A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), b
 
 > ⚠️ **This project was developed using AI assistance.** It's been reviewed by a developer now and should be generally safe to use.
 
-<img width="2880" height="946" alt="image" src="https://github.com/user-attachments/assets/ffe4f80c-6ab5-4c8e-865a-48c5c00c3eca" />
+<img width="1800" height="940" alt="gojo log view: commit graph with change IDs, authors, dates, bookmarks, a conflicted merge marked ×, and a dirty working copy" src="https://gojo.rocks/screenshots/01-log.png" />
 
 
 ## Features
 
 - **Log view** — scrollable commit graph with change IDs, authors, dates, bookmarks, and working copy highlighting
 - **Diff panel** — file status summary + syntax-highlighted diff for any commit
+- **Conflict resolution** — side-by-side 3-way merge view: pick left / right / both per hunk, apply with `jj resolve`
 - **Bookmark management** — create, delete, move, rename, set, track, untrack, and list bookmarks
 - **Git integration** — fetch, push, and remote management from within the TUI
 - **AI commit messages** — generate a description from a commit's diff via any OpenAI-compatible API
 - **Undo / redo** — one-key `jj undo` / `jj redo`
 - **Graph rendering** — native jj graph output with styled nodes (@/○/◆) and edges
 
+## Views
+
+Captured live with [VHS](https://github.com/charmbracelet/vhs) — see the
+[gallery on gojo.rocks](https://gojo.rocks#views).
+
+| Diff panel | Conflict resolution |
+|:---:|:---:|
+| ![diff panel — file summary + chroma-highlighted diff with word-level changes](https://gojo.rocks/screenshots/03-diff.png) | ![conflict resolution — side-by-side 3-way merge, pick l / r / both per hunk and apply with ⏎](https://gojo.rocks/screenshots/02-conflict.png) |
+| **Bookmark mode** | **Help** |
+| ![bookmark mode — create, move, rename, track, with tab-completion](https://gojo.rocks/screenshots/05-bookmark.png) | ![help — the full keybinding reference, one ? away](https://gojo.rocks/screenshots/04-help.png) |
+
 ## Installation
+
+### Install script (auto-detect)
+
+```sh
+curl -fsSL https://gojo.rocks/install.sh | sh
+```
+
+Detects your OS/distro and runs the right installer below: macOS
+(Homebrew), Arch (pacman), Debian/Ubuntu (apt), Fedora/RHEL (dnf),
+openSUSE (zypper), or a plain tarball into `~/.local/bin` on other Linux.
+NixOS users get pointed at the [Nix/NixOS](#nixnixos) instructions.
 
 ### Homebrew
 
@@ -154,6 +179,7 @@ commit_prompt = "You are a software developer. Write a clear, concise commit mes
 | `e` | `jj edit` (set working copy) |
 | `n` | `jj new` (create change) |
 | `a` | `jj abandon` (remove commit) |
+| `c` | Conflict resolution view (on conflicted commits) |
 | `b` | Bookmark mode |
 | `g` | Git mode |
 | `u` | `jj undo` |
@@ -165,6 +191,19 @@ commit_prompt = "You are a software developer. Write a clear, concise commit mes
 |-----|--------|
 | `↑`/`k`, `↓`/`j` | Scroll |
 | `enter` / `q` | Close panel |
+
+### Conflict view
+
+Press `c` on a conflicted commit (from the log view or diff panel), then:
+
+| Key | Action |
+|-----|--------|
+| `↑`/`k`, `↓`/`j` | Navigate conflict hunks |
+| `[` / `]` | Switch conflicted file |
+| `l` / `r` / `b` | Take left / right / both sides for the hunk |
+| `u` | Clear the hunk's pick |
+| `enter` | Apply the resolution (`jj resolve`) |
+| `q` / `esc` | Close view |
 
 ### Bookmark mode
 
