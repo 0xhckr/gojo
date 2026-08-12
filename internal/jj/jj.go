@@ -445,26 +445,13 @@ func (r *Runner) TagDelete(name string, extra ...string) error {
 	return err
 }
 
-// GitPushTags pushes all tags to the default remote using git directly. jj's
-// `git push` doesn't support pushing new tags in 0.41, so this shells out to
-// `git push --tags` as a workaround.
+// GitPushTags pushes all local tags to the default remote. jj ≥ 0.44 pushes
+// tags natively: "--tag *" pushes every local tag (new ones are auto-tracked
+// on push); an up-to-date remote — or no tags at all — is a no-op. Tag
+// deletions are deliberately not pushed (same semantics as git push --tags).
 func (r *Runner) GitPushTags() error {
-	if r.cfg.GitPath == "" {
-		return fmt.Errorf("git not found in PATH")
-	}
-	cmd := exec.Command(r.cfg.GitPath, "push", "--tags")
-	cmd.Dir = r.cfg.RepoRoot
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return fmt.Errorf("git push --tags: %s", msg)
-	}
-	return nil
+	_, err := r.run("git", "push", "--tag", "*")
+	return err
 }
 
 // GitFetch fetches from the git remote. Extra flags are appended for elevation

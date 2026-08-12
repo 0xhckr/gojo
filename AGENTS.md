@@ -99,7 +99,8 @@ VERSION                 — single source of truth for the version (flake + gore
 
 - **Go 1.24+** (build)
 - **gopls**, **go-tools** (tooling)
-- **jj v0.41** (jujutsu VCS, runtime dependency — gojo shells out to it)
+- **jj v0.44+** (jujutsu VCS, runtime dependency — gojo shells out to it; 0.44
+  stabilized `jj tag` + tag fetch/push, which gojo relies on)
 - `nix develop` drops you into the shell; direnv auto-loads it.
 
 ### Critical: the jj package name

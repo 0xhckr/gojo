@@ -3567,10 +3567,6 @@ func (m Model) handleTagKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 			m.tagMode = false
 			m.tagAction = ""
 			m.tagInput = ""
-			if action == actPush {
-				r := m.runner
-				return m.busySimpleCmd("pushing tags…", func() error { return r.GitPushTags() }, "pushed tags")
-			}
 			m, tick := m.startBusy("tag " + action + "…")
 			return m, tea.Batch(tick, m.execTag(action, input))
 		case actComplete:

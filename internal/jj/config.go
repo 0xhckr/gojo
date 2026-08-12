@@ -11,7 +11,6 @@ import (
 // Config holds resolved runtime configuration.
 type Config struct {
 	JJPath   string
-	GitPath  string
 	RepoRoot string
 
 	// AI configuration — any OpenAI-compatible chat-completions endpoint.
@@ -155,7 +154,6 @@ func LoadConfig() (Config, error) {
 		return cfg, err
 	}
 	cfg.RepoRoot = repoRoot
-	cfg.GitPath, _ = findBinary("git")
 
 	return cfg, nil
 }

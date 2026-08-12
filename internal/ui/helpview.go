@@ -173,7 +173,7 @@ func (m Model) helpSections() []helpSection {
 			{kv(ctxTag, actMove), "move tag  (move existing to selected revision)"},
 			{kv(ctxTag, actDelete), "delete tag"},
 			{kv(ctxTag, actList), "list tags"},
-			{kv(ctxTag, actPush), "push tags  (git push --tags)"},
+			{kv(ctxTag, actPush), "push tags  (jj native: all local tags)"},
 			{kv(ctxInput, actComplete), "autocomplete  (cycle suggestions)"},
 			{kv(ctxTag, actCancel), "dismiss / cancel / exit"},
 		}},
