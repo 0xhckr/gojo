@@ -11,8 +11,6 @@ A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), b
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat" alt="MIT">
 </p>
 
-> ⚠️ **This project was developed using AI assistance.** It's been reviewed by a developer now and should be generally safe to use.
-
 <img width="1800" height="940" alt="gojo log view: commit graph with change IDs, authors, dates, bookmarks, a conflicted merge marked ×, and a dirty working copy" src="https://gojo.rocks/screenshots/01-log.png" />
 
 
