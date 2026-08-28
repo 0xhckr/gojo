@@ -11,7 +11,7 @@
       # (see .goreleaser.yaml's before-hook, which verifies it matches the
       # git tag), so bumping VERSION is the only place the version lives.
       version = nixpkgs.lib.strings.trim (builtins.readFile ./VERSION);
-      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       forAllSystems = fn: nixpkgs.lib.genAttrs systems (system: fn nixpkgs.legacyPackages.${system});
     in
     {
@@ -36,12 +36,9 @@
             # Hash of the downloaded Go modules. When go.sum changes, run
             # `nix build` once and replace this with the "got:" value.
             # Stable across systems thanks to proxyVendor above.
-            vendorHash = "sha256-K81au2jpYoRcKvGIGwnwXkXLpPK7NBfuLxb9PinC6VM=";
+            vendorHash = "sha256-6USp0GS+LOP7uXT0XpjY7QVLpTCgKw/J96vIKZsm8/4=";
 
-            # gojo shells out to `jj` at runtime; keep it on PATH.
-            nativeBuildInputs = [ pkgs.makeWrapper ];
             postInstall = ''
-              wrapProgram $out/bin/gojo --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.jujutsu ]}
               ln -s gojo $out/bin/gj
               # Theme files: gojo looks for share/gojo/themes next to bin/.
               mkdir -p $out/share/gojo/themes
@@ -90,7 +87,6 @@
             go
             gopls
             go-tools
-            jujutsu
           ];
 
           shellHook = ''
