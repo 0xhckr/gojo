@@ -168,8 +168,8 @@ func TestFileViewPickerBlameHistory(t *testing.T) {
 		t.Fatalf("expected history phase, got %v", m.fileView.phase)
 	}
 
-	// esc returns to blame; q from blame steps back to the picker (like esc),
-	// and q from the picker then leaves the file view entirely.
+	// esc returns to blame; q from blame steps back to the picker. In the
+	// picker q starts fuzzy search, while esc closes it and then leaves.
 	m = step(t, m, keyCode(tea.KeyEsc))
 	if m.fileView.phase != fileBlame {
 		t.Fatalf("expected blame phase after esc from history, got %v", m.fileView.phase)
@@ -179,8 +179,13 @@ func TestFileViewPickerBlameHistory(t *testing.T) {
 		t.Fatalf("expected picker phase after q from blame, got %v", m.fileView.phase)
 	}
 	m = step(t, m, keyPress("q"))
+	if !m.fileView.fzfActive || m.fileView.fzfQuery != "q" {
+		t.Fatalf("q did not start fuzzy search: active=%v query=%q", m.fileView.fzfActive, m.fileView.fzfQuery)
+	}
+	m = step(t, m, keyCode(tea.KeyEsc))
+	m = step(t, m, keyCode(tea.KeyEsc))
 	if m.view != viewLog {
-		t.Fatalf("expected to return to log view, got %v", m.view)
+		t.Fatalf("expected esc to return to log view, got %v", m.view)
 	}
 }
 

@@ -5,10 +5,55 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"gojo/internal/jj"
 )
+
+func TestFilePickerAlphanumericsStartFuzzySearch(t *testing.T) {
+	const queryChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	for _, r := range queryChars {
+		m := NewModel()
+		m.ready = true
+		m.view = viewFile
+		m.fileView = newFileViewState([]string{"query.go"})
+
+		next, _ := m.handleFilePickerKey(keyPress(string(r)), string(r))
+		m = next.(Model)
+		if !m.fileView.fzfActive {
+			t.Fatalf("%q did not start fuzzy search", r)
+		}
+		if m.fileView.fzfQuery != string(r) {
+			t.Fatalf("query after %q = %q", r, m.fileView.fzfQuery)
+		}
+	}
+}
+
+func TestActiveFileFuzzySearchAcceptsShortcutLetters(t *testing.T) {
+	m := NewModel()
+	m.ready = true
+	m.view = viewFile
+	m.fileView = newFileViewState([]string{"qgjk.go"})
+	m.fileView.fzfActive = true
+	m.fileView.fzfFilter()
+
+	for _, r := range "qgjk" {
+		next, _ := m.handleFzfKey(keyPress(string(r)), string(r))
+		m = next.(Model)
+	}
+	if !m.fileView.fzfActive {
+		t.Fatal("typing q closed fuzzy search")
+	}
+	if m.fileView.fzfQuery != "qgjk" {
+		t.Fatalf("fzfQuery = %q, want qgjk", m.fileView.fzfQuery)
+	}
+
+	next, _ := m.handleFzfKey(keyCode(tea.KeyEscape), "esc")
+	if next.(Model).fileView.fzfActive {
+		t.Fatal("escape did not close fuzzy search")
+	}
+}
 
 // TestAnnotateToDiffRows verifies that annotate lines are converted to
 // context-style diff rows with single line numbers and tab expansion.

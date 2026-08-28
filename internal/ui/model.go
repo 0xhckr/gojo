@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -2545,6 +2546,17 @@ func (m Model) handleFilePickerKey(msg tea.KeyPressMsg, k string) (tea.Model, te
 	if fv.fzfActive {
 		return m.handleFzfKey(msg, k)
 	}
+	if s, ok := typedAlphanumeric(msg); ok {
+		if len(fv.files) == 0 {
+			return m, nil
+		}
+		fv.fzfActive = true
+		fv.fzfQuery = s
+		fv.fzfCursor = 0
+		fv.fzfOffset = 0
+		fv.fzfFilter()
+		return m, nil
+	}
 	switch m.keys.resolve(ctxPicker, k) {
 	case actQuit:
 		// Leave the file view entirely.
@@ -2630,6 +2642,11 @@ func (m Model) handleFilePickerKey(msg tea.KeyPressMsg, k string) (tea.Model, te
 // the selected file; esc returns to the tree.
 func (m Model) handleFzfKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 	fv := &m.fileView
+	if s, ok := typedAlphanumeric(msg); ok {
+		fv.fzfQuery += s
+		fv.fzfFilter()
+		return m, nil
+	}
 	switch m.keys.resolve(ctxFzf, k) {
 	case actCancel:
 		fv.fzfActive = false
@@ -3186,8 +3203,13 @@ func (m Model) handleLogKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) 
 // handleSearchKey drives the fzf-style search overlay. Typed characters
 // append to the query and re-filter; backspace removes the last character;
 // ctrl+u clears the query; enter jumps the cursor to the selected result;
-// navigation keys move through results; esc/q cancels and returns to the log.
+// navigation keys move through results; esc cancels and returns to the log.
 func (m Model) handleSearchKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
+	if s, ok := typedAlphanumeric(msg); ok {
+		m.searchQuery += s
+		m.searchFilter()
+		return m, nil
+	}
 	switch m.keys.resolve(ctxSearch, k) {
 	case actCancel:
 		m.searchMode = false
@@ -3972,6 +3994,19 @@ func typed(msg tea.KeyPressMsg) (string, bool) {
 		return "", false
 	}
 	return msg.Text, true
+}
+
+func typedAlphanumeric(msg tea.KeyPressMsg) (string, bool) {
+	s, ok := typed(msg)
+	if !ok {
+		return "", false
+	}
+	for _, r := range s {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return "", false
+		}
+	}
+	return s, true
 }
 
 func trimLastRune(s string) string {

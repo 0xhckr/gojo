@@ -208,6 +208,22 @@ func TestSearchJKAreText(t *testing.T) {
 	}
 }
 
+func TestSearchAlphanumericsAreText(t *testing.T) {
+	m := searchTestModel()
+	m = step(t, m, keyPress("/"))
+
+	const query = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	for _, r := range query {
+		m = step(t, m, keyPress(string(r)))
+	}
+	if !m.searchMode {
+		t.Fatal("typing an alphanumeric cancelled search")
+	}
+	if m.searchQuery != query {
+		t.Fatalf("searchQuery = %q, want %q", m.searchQuery, query)
+	}
+}
+
 // TestSearchBackspace verifies that backspace removes the last query character
 // and re-filters.
 func TestSearchBackspace(t *testing.T) {
