@@ -2,6 +2,7 @@ package ui
 
 import (
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,6 +72,8 @@ type pFile struct {
 	contents  []pContent
 	newSide   []string
 	oldSide   []string
+	newSpans  [][]span
+	oldSpans  [][]span
 }
 
 var hunkRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
@@ -218,15 +221,10 @@ func renderDiff(raw string) []diffRow {
 		}
 	}
 
+	highlightDiffFiles(files)
+
 	var rows []diffRow
 	for _, f := range files {
-		filename := f.toPath
-		if filename == "" {
-			filename = f.fromPath
-		}
-		newSpans := highlightLines(filename, f.newSide)
-		oldSpans := highlightLines(filename, f.oldSide)
-
 		changeType := "modified"
 		path := f.toPath
 		prevPath := ""
@@ -256,10 +254,10 @@ func renderDiff(raw string) []diffRow {
 				continue
 			}
 			var sp []span
-			if c.side == 0 && newSpans != nil && c.idx < len(newSpans) {
-				sp = newSpans[c.idx]
-			} else if c.side == 1 && oldSpans != nil && c.idx < len(oldSpans) {
-				sp = oldSpans[c.idx]
+			if c.side == 0 && f.newSpans != nil && c.idx < len(f.newSpans) {
+				sp = f.newSpans[c.idx]
+			} else if c.side == 1 && f.oldSpans != nil && c.idx < len(f.oldSpans) {
+				sp = f.oldSpans[c.idx]
 			}
 			if sp == nil {
 				if c.text != "" {
@@ -280,6 +278,55 @@ func renderDiff(raw string) []diffRow {
 	}
 	applyWordDiffToRows(rows)
 	return rows
+}
+
+// highlightDiffFiles highlights independent file sides concurrently for large
+// diffs. Small diffs stay synchronous to avoid paying worker setup overhead.
+func highlightDiffFiles(files []*pFile) {
+	type job struct {
+		filename string
+		lines    []string
+		out      *[][]span
+	}
+
+	jobs := make([]job, 0, len(files)*2)
+	totalLines := 0
+	for _, f := range files {
+		filename := f.toPath
+		if filename == "" {
+			filename = f.fromPath
+		}
+		jobs = append(jobs,
+			job{filename: filename, lines: f.newSide, out: &f.newSpans},
+			job{filename: filename, lines: f.oldSide, out: &f.oldSpans},
+		)
+		totalLines += len(f.newSide) + len(f.oldSide)
+	}
+
+	workers := min(len(jobs), runtime.GOMAXPROCS(0), 8)
+	if workers <= 1 || totalLines < 256 {
+		for _, j := range jobs {
+			*j.out = highlightLines(j.filename, j.lines)
+		}
+		return
+	}
+
+	queue := make(chan job)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for j := range queue {
+				*j.out = highlightLines(j.filename, j.lines)
+			}
+		}()
+	}
+	for _, j := range jobs {
+		queue <- j
+	}
+	close(queue)
+	wg.Wait()
 }
 
 // ── chroma syntax highlighting ─────────────────────────────────────────────
@@ -389,6 +436,7 @@ func highlightLines(filename string, lines []string) [][]span {
 	if len(perLine) > len(lines) {
 		return nil // unexpected misalignment — fall back to plain
 	}
+	style, styleName := chromaStyle()
 
 	out := make([][]span, len(lines))
 	for i := range out {
@@ -402,7 +450,7 @@ func highlightLines(filename string, lines []string) [][]span {
 			if text == "" {
 				continue
 			}
-			fg := chromaFgFor(t.Type)
+			fg := chromaFgForStyle(style, styleName, t.Type)
 			if n := len(spans); n > 0 && spans[n-1].fg == fg {
 				spans[n-1].text += text
 			} else {
@@ -428,8 +476,7 @@ var (
 	chromaFgCache   = map[chromaFgKey]string{}
 )
 
-func chromaFgFor(t chroma.TokenType) string {
-	style, name := chromaStyle()
+func chromaFgForStyle(style *chroma.Style, name string, t chroma.TokenType) string {
 	k := chromaFgKey{style: name, tok: t}
 	chromaFgCacheMu.RLock()
 	fg, ok := chromaFgCache[k]
