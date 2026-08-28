@@ -9,7 +9,6 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // span is a styled run of text within a rendered diff line.
@@ -45,8 +44,8 @@ type diffRow struct {
 	oldNum        int // 0 = none
 	newNum        int // 0 = none
 	spans         []span
-	sectionBg     lipgloss.TerminalColor // file mode only: alternating blame section background
-	sectionParity int                    // file mode only: 0 or 1, for bar colour lookup
+	sectionBg     terminalColor // file mode only: alternating blame section background
+	sectionParity int           // file mode only: 0 or 1, for bar colour lookup
 }
 
 // ── git diff parsing ───────────────────────────────────────────────────────
@@ -300,7 +299,7 @@ var (
 
 // defaultChromaStyleName picks the built-in style for the terminal bg.
 func defaultChromaStyleName() string {
-	if lipgloss.HasDarkBackground() {
+	if hasDarkBackground {
 		return "github-dark"
 	}
 	return "github"
@@ -324,7 +323,7 @@ func chromaStyle() (*chroma.Style, string) {
 
 	name := defaultChromaStyleName()
 	override := chromaStyleOverride
-	if !lipgloss.HasDarkBackground() {
+	if !hasDarkBackground {
 		override = chromaStyleOverLite
 	}
 	if override != "" && styles.Get(override) != nil {
@@ -655,25 +654,13 @@ func spansText(spans []span) string {
 	return sb.String()
 }
 
-var (
-	diffWordBgOnce    sync.Once
-	diffAddedWordBg   string
-	diffRemovedWordBg string
-)
-
 // diffWordBgColors returns the hex background colors for word-level added and
 // removed token highlights, adapted to the terminal's background.
 func diffWordBgColors() (added, removed string) {
-	diffWordBgOnce.Do(func() {
-		if lipgloss.HasDarkBackground() {
-			diffAddedWordBg = "#2d5a3d"
-			diffRemovedWordBg = "#5a2d3d"
-		} else {
-			diffAddedWordBg = "#b8e6c8"
-			diffRemovedWordBg = "#e8c8cc"
-		}
-	})
-	return diffAddedWordBg, diffRemovedWordBg
+	if hasDarkBackground {
+		return "#2d5a3d", "#5a2d3d"
+	}
+	return "#b8e6c8", "#e8c8cc"
 }
 
 // maxWordDiffLen is the maximum line length for which word-level diff is

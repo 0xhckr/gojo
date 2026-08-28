@@ -3,8 +3,6 @@ package ui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"gojo/internal/jj"
 )
 
@@ -57,8 +55,8 @@ type squashView struct {
 // can be marked. name is the dragged bookmark; sourceIdx is its origin; destIdx
 // is the current drop target (or -1 when the cursor is off any row).
 type bookmarkDragView struct {
-	active   bool
-	name     string
+	active    bool
+	name      string
 	sourceIdx int
 	destIdx   int
 }
@@ -170,7 +168,7 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 		// When the edge cursor is active, the entry's header/body lose their
 		// highlight and the selected edge line gets it instead.
 		edgeHighlighted := highlighted && edgeCursor >= 0 && edgeCursor < len(e.EdgeLines)
-		var bg lipgloss.TerminalColor = colPanel
+		var bg terminalColor = colPanel
 		if edgeHighlighted {
 			bg = colPanel
 		} else if highlighted {
@@ -293,7 +291,7 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 // the end of the content. Markers always win over trailing metadata: if the
 // row is too narrow to hold everything, segments are dropped from the tail of
 // hs until the markers fit — they must never be clipped off-screen.
-func appendMarkers(hs []seg, markers []seg, scrollW int, bg lipgloss.TerminalColor) []seg {
+func appendMarkers(hs []seg, markers []seg, scrollW int, bg terminalColor) []seg {
 	if len(markers) == 0 {
 		return hs
 	}
@@ -321,7 +319,7 @@ func appendMarkers(hs []seg, markers []seg, scrollW int, bg lipgloss.TerminalCol
 // scrollbar track (scrollbarWidth columns) to fill the full width. lineIdx is
 // the 0-based index within the content area (excluding top padding), used to
 // determine thumb position.
-func renderRowWithBar(scrollW, fullW int, bg lipgloss.TerminalColor, hasBar bool, lineIdx, thumbStart, thumbEnd int, segs []seg) string {
+func renderRowWithBar(scrollW, fullW int, bg terminalColor, hasBar bool, lineIdx, thumbStart, thumbEnd int, segs []seg) string {
 	if !hasBar {
 		return bgRow(fullW, bg, segs...)
 	}
@@ -358,7 +356,7 @@ func renderRowWithBar(scrollW, fullW int, bg lipgloss.TerminalColor, hasBar bool
 
 // scrollbarSegs renders the scrollbarWidth-wide track cell for one row: the
 // thumb glyph where the thumb covers the row, the track glyph elsewhere.
-func scrollbarSegs(bg lipgloss.TerminalColor, lineIdx, thumbStart, thumbEnd int) string {
+func scrollbarSegs(bg terminalColor, lineIdx, thumbStart, thumbEnd int) string {
 	if lineIdx >= thumbStart && lineIdx < thumbEnd {
 		return renderSegs([]seg{{text: " ", bg: bg}, {text: "┃", fg: colBorderActive, bg: bg}})
 	}
@@ -372,7 +370,7 @@ func scrollbarSegs(bg lipgloss.TerminalColor, lineIdx, thumbStart, thumbEnd int)
 // unnecessary. The composition must never exceed fullW cells: overflowing the
 // terminal soft-wraps the line and scrambles the screen, so a defensive clip
 // guards the (already consistent) cases.
-func renderRowWithBarFromString(scrollW, fullW int, bg lipgloss.TerminalColor, hasBar bool, lineIdx, thumbStart, thumbEnd int, row string) string {
+func renderRowWithBarFromString(scrollW, fullW int, bg terminalColor, hasBar bool, lineIdx, thumbStart, thumbEnd int, row string) string {
 	if !hasBar {
 		if scrollW < fullW {
 			return clip(row, fullW)

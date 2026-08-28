@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"gojo/internal/jj"
@@ -56,7 +56,7 @@ func conflictTestModel(t *testing.T) Model {
 	return m
 }
 
-func keyRune(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
+func keyRune(r rune) tea.KeyPressMsg { return keyPress(string(r)) }
 
 func TestConflictViewRender(t *testing.T) {
 	m := conflictTestModel(t)
@@ -115,7 +115,7 @@ func TestConflictViewKeys(t *testing.T) {
 	}
 
 	// enter with unresolved hunks refuses and explains.
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = m.Update(keyCode(tea.KeyEnter))
 	m = next.(Model)
 	if !strings.Contains(m.errMsg, "unresolved") {
 		t.Fatalf("enter errMsg = %q, want unresolved complaint", m.errMsg)
@@ -130,7 +130,7 @@ func TestConflictViewKeys(t *testing.T) {
 	if n := m.curConflictFile().unresolved(); n != 0 {
 		t.Fatalf("unresolved after picks %d, want 0", n)
 	}
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(keyCode(tea.KeyEnter))
 	m = next.(Model)
 	if cmd == nil {
 		t.Fatal("enter on fully-resolved file should produce a command")
@@ -190,7 +190,7 @@ func TestConflictViewMouse(t *testing.T) {
 		t.Fatal("no conflict line row in a.txt")
 	}
 	y := contentTopBarHeight + 2 + lineRow - m.conflict.scrollY
-	click := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 1, Y: y}
+	click := mousePress(tea.MouseLeft, 1, y)
 	next, _ := m.Update(click)
 	m = next.(Model)
 	f = m.curConflictFile()
@@ -207,7 +207,7 @@ func TestConflictViewMouse(t *testing.T) {
 		}
 	}
 	y = contentTopBarHeight + 2 + lineRow2 - m.conflict.scrollY
-	click = tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 60, Y: y}
+	click = mousePress(tea.MouseLeft, 60, y)
 	next, _ = m.Update(click)
 	m = next.(Model)
 	f = m.curConflictFile()
@@ -221,7 +221,7 @@ func TestConflictViewMouse(t *testing.T) {
 		t.Fatalf("tab spans %v, want 2", spans)
 	}
 	tx := (spans[1][0] + spans[1][1]) / 2
-	click = tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: tx, Y: contentTopBarHeight}
+	click = mousePress(tea.MouseLeft, tx, contentTopBarHeight)
 	next, _ = m.Update(click)
 	m = next.(Model)
 	if m.conflict.cur != 1 {
@@ -247,14 +247,14 @@ func TestConflictViewWheel(t *testing.T) {
 	f.deriveRows()
 	m.conflict.files[0] = *f
 
-	next, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: 10, Y: 10})
+	next, _ := m.Update(mousePress(tea.MouseWheelDown, 10, 10))
 	m = next.(Model)
 	next, _ = m.Update(wheelTickMsg{}) // flush the coalescing tick
 	m = next.(Model)
 	if m.conflict.scrollY == 0 {
 		t.Fatal("wheel down should scroll the conflict view")
 	}
-	next, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: 10, Y: 10})
+	next, _ = m.Update(mousePress(tea.MouseWheelUp, 10, 10))
 	m = next.(Model)
 	next, _ = m.Update(wheelTickMsg{})
 	m = next.(Model)
@@ -268,7 +268,7 @@ func TestConflictViewGeometry(t *testing.T) {
 		m := conflictTestModel(t)
 		next, _ := m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		m = next.(Model)
-		view := m.View()
+		view := m.View().Content
 		got := strings.Count(view, "\n") + 1
 		if got != size[1] {
 			t.Fatalf("size %v: view has %d lines, want %d", size, got, size[1])

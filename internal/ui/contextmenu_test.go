@@ -4,18 +4,18 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"gojo/internal/jj"
 )
 
 func rightClick(x, y int) tea.MouseMsg {
-	return tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonRight,
-		X:      x,
-		Y:      y,
-	}
+	return mousePress(
+
+		tea.MouseRight,
+		x,
+		y)
+
 }
 
 // TestContextMenuOpenOnRightClick verifies a right-click opens the menu and
@@ -49,7 +49,7 @@ func TestContextMenuClosesOnEsc(t *testing.T) {
 		t.Fatal("menu did not open")
 	}
 
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m2, cmd := m.Update(keyCode(tea.KeyEscape))
 	m = m2.(Model)
 	if cmd != nil {
 		t.Error("esc produced a command")
@@ -88,7 +88,7 @@ func TestContextMenuEnterActivates(t *testing.T) {
 		t.Fatalf("first item = %q, want open diff", m.contextMenuItems[0].label)
 	}
 
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, cmd := m.Update(keyCode(tea.KeyEnter))
 	m = m2.(Model)
 	if m.contextMenuOpen {
 		t.Fatal("menu stayed open after activation")
@@ -131,7 +131,7 @@ func TestContextMenuDownNavigation(t *testing.T) {
 	m2, _ := m.Update(rightClick(10, 5))
 	m = m2.(Model)
 
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m2, _ = m.Update(keyPress(string('j')))
 	m = m2.(Model)
 	if m.contextMenuCursor != 1 {
 		t.Fatalf("cursor = %d, want 1", m.contextMenuCursor)
@@ -218,7 +218,7 @@ func TestContextMenuInSplitMode(t *testing.T) {
 	if m.contextMenuItems[0].label != "toggle mark" {
 		t.Fatalf("first item = %q, want toggle mark", m.contextMenuItems[0].label)
 	}
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(keyCode(tea.KeyEnter))
 	m = m2.(Model)
 	if !m.splitMarked[addIdx] {
 		t.Errorf("toggle mark did not mark row %d", addIdx)
@@ -248,7 +248,7 @@ func TestContextMenuInFzf(t *testing.T) {
 		t.Fatalf("first item = %q, want open file", m.contextMenuItems[0].label)
 	}
 
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(keyCode(tea.KeyEnter))
 	m = m2.(Model)
 	if m.contextMenuOpen {
 		t.Fatal("menu stayed open after activation")
@@ -369,7 +369,7 @@ func TestContextMenuRenameFlow(t *testing.T) {
 
 	// Activate "rename" (third item, index 2).
 	m.contextMenuCursor = 2
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(keyCode(tea.KeyEnter))
 	m = m2.(Model)
 	if m.contextMenuOpen {
 		t.Fatal("menu stayed open after rename activation")
@@ -382,14 +382,14 @@ func TestContextMenuRenameFlow(t *testing.T) {
 	}
 
 	// Type a new name.
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("master")})
+	m2, _ = m.Update(keyPress("master"))
 	m = m2.(Model)
 	if m.renameInput != "master" {
 		t.Fatalf("renameInput = %q, want master", m.renameInput)
 	}
 
 	// Enter should exit rename mode and produce a command.
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, cmd := m.Update(keyCode(tea.KeyEnter))
 	m = m2.(Model)
 	if m.renameMode {
 		t.Fatal("rename mode not exited after enter")
@@ -406,7 +406,7 @@ func TestContextMenuRenameEsc(t *testing.T) {
 	m.renameInput = "test"
 	m.renameTarget = renameRef{kind: "bookmark", oldName: "main", rev: "aaaa0000"}
 
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m2, cmd := m.Update(keyCode(tea.KeyEscape))
 	m = m2.(Model)
 	if m.renameMode {
 		t.Fatal("esc did not exit rename mode")

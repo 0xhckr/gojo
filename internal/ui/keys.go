@@ -19,7 +19,7 @@ import (
 	"strings"
 	"sync"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Key contexts — the config-key prefix before the dot.
@@ -210,7 +210,7 @@ var defaultKeymap = []struct {
 	{ctxSplit, []keyBind{
 		{actCancel, []string{"esc", "q"}},
 		{actConfirm, []string{"c"}},
-		{actToggle, []string{" "}},
+		{actToggle, []string{"space"}},
 		{actUp, []string{"up", "k"}},
 		{actDown, []string{"down", "j"}},
 		{actTop, []string{"g", "home"}},
@@ -324,7 +324,7 @@ var defaultKeymap = []struct {
 		{actPageDown, []string{"pgdown"}},
 		{actExpand, []string{"l", "right"}},
 		{actCollapse, []string{"h", "left"}},
-		{actOpen, []string{"enter", " "}},
+		{actOpen, []string{"enter", "space"}},
 	}},
 	{ctxFzf, []keyBind{
 		{actCancel, []string{"esc"}},
@@ -374,7 +374,7 @@ var defaultKeymap = []struct {
 func normalizeKeyName(s string) string {
 	switch strings.ToLower(s) {
 	case "space":
-		return " "
+		return "space"
 	case "escape":
 		return "esc"
 	case "return":
@@ -473,7 +473,7 @@ func (km KeyMap) primary(ctx, action string) string {
 // prettyKey renders a key name for display in hints.
 func prettyKey(k string) string {
 	switch k {
-	case " ":
+	case "space":
 		return "space"
 	case "enter":
 		return "⏎"
@@ -502,7 +502,7 @@ func prettyKey(k string) string {
 // displayKey renders a raw key name for word-style hints (context menus,
 // help rows): the space key becomes "space", everything else stays literal.
 func displayKey(k string) string {
-	if k == " " {
+	if k == "space" {
 		return "space"
 	}
 	return k
@@ -562,10 +562,10 @@ func (m Model) modeHints(ctx string, extra ...string) string {
 
 // keyMsg returns a KeyMsg and its string form for an action's primary key
 // (both zero when unbound), for synthetic dispatch (context-menu activation).
-func (m Model) keyMsg(ctx, action string) (tea.KeyMsg, string) {
+func (m Model) keyMsg(ctx, action string) (tea.KeyPressMsg, string) {
 	k := m.keys.primary(ctx, action)
 	if k == "" {
-		return tea.KeyMsg{}, ""
+		return tea.KeyPressMsg{}, ""
 	}
 	return keyMsgFromName(k), k
 }
@@ -573,36 +573,46 @@ func (m Model) keyMsg(ctx, action string) (tea.KeyMsg, string) {
 // keyMsgFromName constructs a KeyMsg whose String() equals the given key
 // name. Named keys map to their KeyType; everything else (including "ctrl+x"
 // combos, which round-trip through Runes) is produced as runes.
-func keyMsgFromName(k string) tea.KeyMsg {
+func keyMsgFromName(k string) tea.KeyPressMsg {
 	switch k {
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEscape}
-	case " ":
-		return tea.KeyMsg{Type: tea.KeySpace}
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	case "space":
+		return tea.KeyPressMsg{Code: ' ', Text: " "}
 	case "tab":
-		return tea.KeyMsg{Type: tea.KeyTab}
+		return tea.KeyPressMsg{Code: tea.KeyTab}
 	case "backspace":
-		return tea.KeyMsg{Type: tea.KeyBackspace}
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	case "delete":
-		return tea.KeyMsg{Type: tea.KeyDelete}
+		return tea.KeyPressMsg{Code: tea.KeyDelete}
 	case "up":
-		return tea.KeyMsg{Type: tea.KeyUp}
+		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
-		return tea.KeyMsg{Type: tea.KeyDown}
+		return tea.KeyPressMsg{Code: tea.KeyDown}
 	case "left":
-		return tea.KeyMsg{Type: tea.KeyLeft}
+		return tea.KeyPressMsg{Code: tea.KeyLeft}
 	case "right":
-		return tea.KeyMsg{Type: tea.KeyRight}
+		return tea.KeyPressMsg{Code: tea.KeyRight}
 	case "home":
-		return tea.KeyMsg{Type: tea.KeyHome}
+		return tea.KeyPressMsg{Code: tea.KeyHome}
 	case "end":
-		return tea.KeyMsg{Type: tea.KeyEnd}
+		return tea.KeyPressMsg{Code: tea.KeyEnd}
 	case "pgup":
-		return tea.KeyMsg{Type: tea.KeyPgUp}
+		return tea.KeyPressMsg{Code: tea.KeyPgUp}
 	case "pgdown":
-		return tea.KeyMsg{Type: tea.KeyPgDown}
+		return tea.KeyPressMsg{Code: tea.KeyPgDown}
 	}
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+	if strings.HasPrefix(k, "ctrl+") {
+		r := []rune(strings.TrimPrefix(k, "ctrl+"))
+		if len(r) == 1 {
+			return tea.KeyPressMsg{Code: r[0], Mod: tea.ModCtrl}
+		}
+	}
+	r := []rune(k)
+	if len(r) == 1 {
+		return tea.KeyPressMsg{Code: r[0], Text: k}
+	}
+	return tea.KeyPressMsg{Code: tea.KeyExtended, Text: k}
 }

@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"gojo/internal/jj"
 )
@@ -44,7 +44,7 @@ func lineNumText(r diffRow, digits int) string {
 	return " " + padNum(r.oldNum, digits) + " " + padNum(r.newNum, digits) + " "
 }
 
-var statusColors = map[jj.StatusKind]lipgloss.TerminalColor{
+var statusColors = map[jj.StatusKind]terminalColor{
 	jj.StatusAdded:      colGreen,
 	jj.StatusModified:   colYellow,
 	jj.StatusRemoved:    colRed,
@@ -365,7 +365,7 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 			inChunk := chunkFirst >= 0 && headLen+ri >= chunkFirst && headLen+ri <= chunkLast
 			isCollapsed := r.kind == rowFileHeader && collapsed != nil && collapsed[r.path]
 			splitInd := splitIndicatorForRow(rows, ri, sv)
-			var barColor lipgloss.TerminalColor
+			var barColor terminalColor
 			if fileMode {
 				p := r.sectionParity
 				if isCursor {
@@ -380,7 +380,7 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 				barColor = colHover
 			}
 			str := renderDiffRowSubLine(scrollW, digits, r, sub, barColor, isCollapsed, isCursor, splitInd, sv.active, fileMode)
-			var rowBg lipgloss.TerminalColor
+			var rowBg terminalColor
 			if fileMode {
 				rowBg = fileRowBg(r)
 			} else {
@@ -399,7 +399,7 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 }
 
 // diffRowBg is the background colour for a diff row's terminal lines.
-func diffRowBg(r diffRow) lipgloss.TerminalColor {
+func diffRowBg(r diffRow) terminalColor {
 	switch {
 	case r.kind == rowFileHeader:
 		return diffFileHeaderBg
@@ -416,7 +416,7 @@ func diffRowBg(r diffRow) lipgloss.TerminalColor {
 
 // fileRowBg is the background colour for a file-view row: the row's
 // alternating section tint (falling back to colPanel when unset).
-func fileRowBg(r diffRow) lipgloss.TerminalColor {
+func fileRowBg(r diffRow) terminalColor {
 	if r.sectionBg != nil {
 		return r.sectionBg
 	}
@@ -442,7 +442,7 @@ func renderRawSubLine(scrollW int, line string, sub int) string {
 // aligns under the original content while the gutter columns keep the row's
 // background. The left cursor bar (┃) is drawn on every sub-line so a focused
 // wrapped line stays visually marked end-to-end.
-func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipgloss.TerminalColor, fileCollapsed bool, isCursor bool, splitIndicator string, splitActive bool, fileMode bool) string {
+func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor terminalColor, fileCollapsed bool, isCursor bool, splitIndicator string, splitActive bool, fileMode bool) string {
 	switch r.kind {
 	case rowFileHeader:
 		indicator := "▼ "
@@ -538,7 +538,7 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 
 			var bodySegs []seg
 			for _, s := range r.spans {
-				var fg lipgloss.TerminalColor = lineFg
+				var fg terminalColor = lineFg
 				if s.fg != "" {
 					fg = lipgloss.Color(s.fg)
 				}
@@ -570,7 +570,7 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 			return bgRow(scrollW, bg, segs...)
 		}
 
-		var lineFg, lineBg lipgloss.TerminalColor
+		var lineFg, lineBg terminalColor
 		switch r.lineKind {
 		case "addition":
 			lineFg, lineBg = diffAddedSign, diffAddedBg
@@ -591,7 +591,7 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 		// Spans with a per-token word-diff bg override use that instead.
 		var bodySegs []seg
 		for _, s := range r.spans {
-			var fg lipgloss.TerminalColor = lineFg
+			var fg terminalColor = lineFg
 			if s.fg != "" {
 				fg = lipgloss.Color(s.fg)
 			}
@@ -614,7 +614,7 @@ func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor lipg
 		// dimmer tint than the content area so the gutter is less opaque.
 		// In split mode, the leading space is replaced by a 3-char indicator
 		// slot ([x]/[ ]/[~] for selectable lines, 3 spaces for context lines).
-		var gutterBg lipgloss.TerminalColor
+		var gutterBg terminalColor
 		switch r.lineKind {
 		case "addition":
 			gutterBg = diffAddedGutterBg
@@ -818,7 +818,7 @@ func visibleRange(scrollY, count, total int) (int, int) {
 // dim tint; everything else gets nothing. File header rows get a yellow cursor
 // bar when focused. The bar is drawn on every wrapped sub-line of the row, so
 // it is evaluated per logical row (not per terminal line).
-func cursorBar(r diffRow, isCursor, inChunk bool) lipgloss.TerminalColor {
+func cursorBar(r diffRow, isCursor, inChunk bool) terminalColor {
 	if r.kind == rowFileHeader {
 		if isCursor {
 			return colYellow
@@ -849,7 +849,7 @@ func cursorBar(r diffRow, isCursor, inChunk bool) lipgloss.TerminalColor {
 // splitIndicatorColor returns the foreground color for a split-mode indicator
 // glyph: green for marked ([x]), yellow for partial ([~]), gray for unmarked
 // ([ ]). Returns nil for unknown indicators.
-func splitIndicatorColor(indicator string) lipgloss.TerminalColor {
+func splitIndicatorColor(indicator string) terminalColor {
 	switch indicator {
 	case "[x]":
 		return splitMarked

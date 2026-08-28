@@ -3,8 +3,8 @@ package ui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -396,20 +396,21 @@ func (m Model) handleContextMenuKey(k string) (tea.Model, tea.Cmd) {
 // The menu's clickable item area starts one row below the top border and one
 // column inside the left/right borders.
 func (m Model) handleContextMenuMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	mouse := msg.Mouse()
 	mw := m.contextMenuWidth(m.contextMenuItems)
 	mh := min(len(m.contextMenuItems), contextMenuMaxHeight)
 	menuTop := m.contextMenuY
 	menuBottom := m.contextMenuY + mh + 1 // +1 top border, inclusive bottom border
 	menuRight := m.contextMenuX + mw + 2
-	inMenu := msg.X >= m.contextMenuX && msg.X < menuRight &&
-		msg.Y >= menuTop && msg.Y <= menuBottom
+	inMenu := mouse.X >= m.contextMenuX && mouse.X < menuRight &&
+		mouse.Y >= menuTop && mouse.Y <= menuBottom
 
-	switch msg.Action {
-	case tea.MouseActionPress:
-		switch msg.Button {
-		case tea.MouseButtonLeft:
+	switch msg.(type) {
+	case tea.MouseClickMsg:
+		switch mouse.Button {
+		case tea.MouseLeft:
 			if inMenu {
-				itemY := msg.Y - m.contextMenuY - 1 // -1 for top border
+				itemY := mouse.Y - m.contextMenuY - 1 // -1 for top border
 				if itemY >= 0 && itemY < mh {
 					idx := m.contextMenuOffset + itemY
 					if idx >= 0 && idx < len(m.contextMenuItems) {
@@ -420,23 +421,26 @@ func (m Model) handleContextMenuMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 			m.closeContextMenu()
 			return m, nil
-		case tea.MouseButtonRight:
+		case tea.MouseRight:
 			m.closeContextMenu()
 			return m, nil
-		case tea.MouseButtonWheelUp:
+		}
+	case tea.MouseWheelMsg:
+		switch mouse.Button {
+		case tea.MouseWheelUp:
 			if m.contextMenuCursor > 0 {
 				m.contextMenuCursor--
 			}
 			return m, nil
-		case tea.MouseButtonWheelDown:
+		case tea.MouseWheelDown:
 			if m.contextMenuCursor < len(m.contextMenuItems)-1 {
 				m.contextMenuCursor++
 			}
 			return m, nil
 		}
-	case tea.MouseActionMotion:
+	case tea.MouseMotionMsg:
 		if inMenu {
-			itemY := msg.Y - m.contextMenuY - 1
+			itemY := mouse.Y - m.contextMenuY - 1
 			if itemY >= 0 && itemY < mh {
 				idx := m.contextMenuOffset + itemY
 				if idx >= 0 && idx < len(m.contextMenuItems) {
@@ -669,7 +673,7 @@ func (m Model) splitContextMenuItems() []contextMenuItem {
 
 // msgKeyItem builds a menu item that runs handler with a synthesized KeyMsg
 // for the key currently bound to action in ctx.
-func (m Model) msgKeyItem(label, ctx, action string, handler func(Model, tea.KeyMsg, string) (tea.Model, tea.Cmd)) contextMenuItem {
+func (m Model) msgKeyItem(label, ctx, action string, handler func(Model, tea.KeyPressMsg, string) (tea.Model, tea.Cmd)) contextMenuItem {
 	msg, k := m.keyMsg(ctx, action)
 	return menuItem(label, displayKey(k), func(m Model) (tea.Model, tea.Cmd) {
 		return handler(m, msg, k)
@@ -682,24 +686,30 @@ func (m Model) pickerContextMenuItems() []contextMenuItem {
 		var items []contextMenuItem
 		if fv.fzfCursor >= 0 && fv.fzfCursor < len(fv.fzfResults) {
 			items = append(items, m.msgKeyItem("open file", ctxFzf, actAccept,
-				func(mm Model, msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) { return mm.handleFzfKey(msg, k) }))
+				func(mm Model, msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) { return mm.handleFzfKey(msg, k) }))
 		}
 		items = append(items, m.msgKeyItem("close finder", ctxFzf, actCancel,
-			func(mm Model, msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) { return mm.handleFzfKey(msg, k) }))
+			func(mm Model, msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) { return mm.handleFzfKey(msg, k) }))
 		return items
 	}
 	var items []contextMenuItem
 	if row := fv.curRow(); row != nil {
 		if row.node.isDir {
 			items = append(items, m.msgKeyItem("expand/collapse", ctxPicker, actOpen,
-				func(mm Model, msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) { return mm.handleFilePickerKey(msg, k) }))
+				func(mm Model, msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
+					return mm.handleFilePickerKey(msg, k)
+				}))
 		} else {
 			items = append(items, m.msgKeyItem("open file", ctxPicker, actOpen,
-				func(mm Model, msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) { return mm.handleFilePickerKey(msg, k) }))
+				func(mm Model, msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
+					return mm.handleFilePickerKey(msg, k)
+				}))
 		}
 	}
 	items = append(items, m.msgKeyItem("leave file view", ctxPicker, actQuit,
-		func(mm Model, msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) { return mm.handleFilePickerKey(msg, k) }))
+		func(mm Model, msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
+			return mm.handleFilePickerKey(msg, k)
+		}))
 	return items
 }
 

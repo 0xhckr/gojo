@@ -1,10 +1,6 @@
 package ui
 
-import (
-	"testing"
-
-	tea "github.com/charmbracelet/bubbletea"
-)
+import "testing"
 
 func TestKeymapDefaultsResolve(t *testing.T) {
 	km := DefaultKeyMap()
@@ -21,7 +17,7 @@ func TestKeymapDefaultsResolve(t *testing.T) {
 		{ctxConflict, "[", actPrevFile},
 		{ctxBookmark, "T", actUntrack},
 		{ctxGit, "P", actPushMark},
-		{ctxSplit, " ", actToggle},
+		{ctxSplit, "space", actToggle},
 		{ctxGlobal, "ctrl+c", actForceQuit},
 		{ctxGlobal, "?", actHelp},
 		{ctxInput, "tab", actComplete},
@@ -89,7 +85,7 @@ func TestKeymapCollisionFirstDeclaredWins(t *testing.T) {
 
 func TestNormalizeKeyName(t *testing.T) {
 	cases := map[string]string{
-		"space":    " ",
+		"space":    "space",
 		"escape":   "esc",
 		"return":   "enter",
 		"pgdn":     "pgdown", // old bubbletea spelling must still match
@@ -109,7 +105,7 @@ func TestNormalizeKeyName(t *testing.T) {
 
 func TestPrettyKey(t *testing.T) {
 	cases := map[string]string{
-		" ": "space", "enter": "⏎", "up": "↑", "down": "↓",
+		"space": "space", "enter": "⏎", "up": "↑", "down": "↓",
 		"left": "←", "right": "→", "home": "Home", "end": "End",
 		"pgdown": "pgdn", "backspace": "⌫", "delete": "del",
 		"esc": "esc", "d": "d", "ctrl+c": "ctrl+c",
@@ -122,7 +118,7 @@ func TestPrettyKey(t *testing.T) {
 }
 
 func TestKeyMsgFromNameRoundTrip(t *testing.T) {
-	for _, k := range []string{"enter", "esc", " ", "tab", "backspace", "delete",
+	for _, k := range []string{"enter", "esc", "space", "tab", "backspace", "delete",
 		"up", "down", "left", "right", "home", "end", "pgup", "pgdown",
 		"d", "D", "?", "/", "[", "]", "ctrl+u", "ctrl+c"} {
 		if got := keyMsgFromName(k).String(); got != k {
@@ -138,13 +134,13 @@ func TestReboundLogKeysDrivesModel(t *testing.T) {
 	m.keys = newKeyMap(map[string]string{"log.down": "n"})
 
 	// "j" no longer moves the cursor.
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	nm, _ := m.Update(keyPress(string('j')))
 	m = nm.(Model)
 	if m.cursor != 0 {
 		t.Fatalf("cursor = %d after unbound j, want 0", m.cursor)
 	}
 	// "n" now moves down.
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	nm, _ = m.Update(keyPress(string('n')))
 	m = nm.(Model)
 	if m.cursor != 1 {
 		t.Fatalf("cursor = %d after rebound n, want 1", m.cursor)

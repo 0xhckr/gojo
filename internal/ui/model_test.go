@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"gojo/internal/jj"
@@ -14,7 +14,7 @@ import (
 
 // stripView renders the model and strips ANSI for assertions.
 func stripView(m Model) string {
-	return ansi.Strip(m.View())
+	return ansi.Strip(m.View().Content)
 }
 
 // step applies a message and synchronously drains plain (closure) commands
@@ -72,25 +72,25 @@ func TestBootErrorQuit(t *testing.T) {
 	}
 
 	// q should produce a quit command.
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	_, cmd := m.Update(keyPress("q"))
 	if cmd == nil {
 		t.Fatal("q did not produce a quit command from boot error screen")
 	}
 
 	// esc should produce a quit command.
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	_, cmd = m.Update(keyCode(tea.KeyEscape))
 	if cmd == nil {
 		t.Fatal("esc did not produce a quit command from boot error screen")
 	}
 
 	// ctrl+c should produce a quit command.
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd = m.Update(keyCtrl('c'))
 	if cmd == nil {
 		t.Fatal("ctrl+c did not produce a quit command from boot error screen")
 	}
 
 	// A random key should be swallowed (no command, no panic).
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	_, cmd = m.Update(keyPress("x"))
 	if cmd != nil {
 		t.Error("random key should not produce a command from boot error screen")
 	}
@@ -111,11 +111,11 @@ func TestFileViewPickerBlameHistory(t *testing.T) {
 		t.Fatalf("expected >=4 visible rows, got %d (%+v)", len(m.fileView.rows), m.fileView.rows)
 	}
 	// Move down to the first file inside a/ (index 1) and open it.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = step(t, m, keyCode(tea.KeyDown))
 	if m.fileView.rows[m.fileView.cursor].node.full == "" {
 		t.Fatalf("cursor not on a file: %+v", m.fileView.rows[m.fileView.cursor].node)
 	}
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = step(t, m, keyCode(tea.KeyEnter))
 
 	// Annotate result arrives asynchronously; feed it directly.
 	// Lines 1-2 are commit mwqwmwpp (multi-line section, has a description);
@@ -150,8 +150,8 @@ func TestFileViewPickerBlameHistory(t *testing.T) {
 
 	// Move down to line 3 (single-line section kxmyusxx). Its description
 	// ("add main") shows on the line below and the section expands.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = step(t, m, keyCode(tea.KeyDown))
+	m = step(t, m, keyCode(tea.KeyDown))
 	bar = m.renderFileStatusBar()[0]
 	if !strings.Contains(bar, "kxmyusxx") {
 		t.Fatalf("status bar didn't follow cursor to new commit: %s", bar)
@@ -162,7 +162,7 @@ func TestFileViewPickerBlameHistory(t *testing.T) {
 	}
 
 	// 'h' opens file history.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	m = step(t, m, keyPress("h"))
 	m = step(t, m, fileHistoryMsg{entries: []jj.LogEntry{{ChangeID: "kxmyusxx", CommitID: "aa0100ff", Subject: "edit b"}}})
 	if m.fileView.phase != fileHistory {
 		t.Fatalf("expected history phase, got %v", m.fileView.phase)
@@ -170,15 +170,15 @@ func TestFileViewPickerBlameHistory(t *testing.T) {
 
 	// esc returns to blame; q from blame steps back to the picker (like esc),
 	// and q from the picker then leaves the file view entirely.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = step(t, m, keyCode(tea.KeyEsc))
 	if m.fileView.phase != fileBlame {
 		t.Fatalf("expected blame phase after esc from history, got %v", m.fileView.phase)
 	}
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	m = step(t, m, keyPress("q"))
 	if m.fileView.phase != filePicker {
 		t.Fatalf("expected picker phase after q from blame, got %v", m.fileView.phase)
 	}
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	m = step(t, m, keyPress("q"))
 	if m.view != viewLog {
 		t.Fatalf("expected to return to log view, got %v", m.view)
 	}
@@ -194,7 +194,7 @@ func TestViewBootAndLayout(t *testing.T) {
 		t.Fatal("no log entries loaded")
 	}
 
-	view := m.View()
+	view := m.View().Content
 	lines := strings.Split(view, "\n")
 	if len(lines) != 30 {
 		t.Errorf("view has %d lines, want 30", len(lines))
@@ -231,7 +231,7 @@ func TestEnterOnElidedEdgeLineTogglesAllRevs(t *testing.T) {
 	}
 
 	// Cursor starts on entry 0. Press j to step onto the ~ edge line.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = step(t, m, keyPress("j"))
 	if m.logEdgeCursor != 0 {
 		t.Fatalf("logEdgeCursor = %d, want 0 after stepping onto ~ line", m.logEdgeCursor)
 	}
@@ -240,7 +240,7 @@ func TestEnterOnElidedEdgeLineTogglesAllRevs(t *testing.T) {
 	}
 
 	// Now enter should toggle all-revisions, not open the diff.
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, cmd := m.Update(keyCode(tea.KeyEnter))
 	m = m2.(Model)
 	if !m.showAllRev {
 		t.Fatal("enter on ~ edge line did not toggle showAllRev on")
@@ -272,7 +272,7 @@ func TestEnterOnElidedEntryOpensDiff(t *testing.T) {
 	}
 
 	// logEdgeCursor is -1 (on the entry, not the edge line).
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ := m.Update(keyCode(tea.KeyEnter))
 	m = m2.(Model)
 	if !m.diffOpen {
 		t.Fatal("enter on entry with elided lines but no edge cursor should open the diff")
@@ -295,7 +295,7 @@ func TestEnterOnNonElidedEntryOpensDiff(t *testing.T) {
 		{ChangeID: "bbbb1111", CommitID: "c0ffee02", Subject: "second"},
 	}
 
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ := m.Update(keyCode(tea.KeyEnter))
 	m = m2.(Model)
 	if !m.diffOpen {
 		t.Fatal("enter on non-elided entry should open the diff")
@@ -321,20 +321,20 @@ func TestLogEdgeCursorNavigation(t *testing.T) {
 	}
 
 	// j from entry 0 → step onto ~ edge line (cursor stays, edgeCursor=0).
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = step(t, m, keyPress("j"))
 	if m.cursor != 0 || m.logEdgeCursor != 0 {
 		t.Fatalf("after j onto ~: cursor=%d edgeCursor=%d, want 0/0", m.cursor, m.logEdgeCursor)
 	}
 
 	// k from edge line → back to entry (edgeCursor=-1, cursor stays).
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	m = step(t, m, keyPress("k"))
 	if m.cursor != 0 || m.logEdgeCursor != -1 {
 		t.Fatalf("after k back: cursor=%d edgeCursor=%d, want 0/-1", m.cursor, m.logEdgeCursor)
 	}
 
 	// j onto edge line again, then j → next entry (cursor=1, edgeCursor=-1).
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = step(t, m, keyPress("j"))
+	m = step(t, m, keyPress("j"))
 	if m.cursor != 1 || m.logEdgeCursor != -1 {
 		t.Fatalf("after j past ~: cursor=%d edgeCursor=%d, want 1/-1", m.cursor, m.logEdgeCursor)
 	}
@@ -355,7 +355,7 @@ func TestLogEdgeCursorResetsOnOtherKeys(t *testing.T) {
 	}
 
 	// Step onto ~ edge line.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = step(t, m, keyPress("j"))
 	if m.logEdgeCursor != 0 {
 		t.Fatalf("edgeCursor = %d, want 0", m.logEdgeCursor)
 	}
@@ -363,7 +363,7 @@ func TestLogEdgeCursorResetsOnOtherKeys(t *testing.T) {
 	// Press 'd' (describe) — should reset edge cursor.
 	// (We can't actually run the editor, but the key should be handled and
 	// edge cursor reset.)
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m2, _ := m.Update(keyPress("x"))
 	m = m2.(Model)
 	if m.logEdgeCursor != -1 {
 		t.Errorf("edgeCursor = %d after non-nav key, want -1", m.logEdgeCursor)
@@ -374,7 +374,7 @@ func TestNavigationAndHelp(t *testing.T) {
 	m := bootedModel(t)
 
 	// Toggle help.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m = step(t, m, keyPress("?"))
 	if m.view != viewHelp {
 		t.Fatal("? did not open help")
 	}
@@ -385,15 +385,15 @@ func TestNavigationAndHelp(t *testing.T) {
 	}
 
 	// Scroll help down then close.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	m = step(t, m, keyPress("j"))
+	m = step(t, m, keyPress("q"))
 	if m.view != viewLog {
 		t.Error("q did not close help")
 	}
 
 	// Cursor down should move within bounds.
 	start := m.cursor
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = step(t, m, keyPress("j"))
 	if len(m.entries) > 1 && m.cursor != start+1 {
 		t.Errorf("cursor = %d, want %d", m.cursor, start+1)
 	}
@@ -403,7 +403,7 @@ func TestBookmarkModeRendering(t *testing.T) {
 	m := bootedModel(t)
 
 	// Enter bookmark mode.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	m = step(t, m, keyPress("b"))
 	if !m.bookmarkMode {
 		t.Fatal("b did not enter bookmark mode")
 	}
@@ -412,9 +412,9 @@ func TestBookmarkModeRendering(t *testing.T) {
 	}
 
 	// Choose create, type a name.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	m = step(t, m, keyPress("c"))
 	for _, r := range "feat" {
-		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = step(t, m, keyPress(string(r)))
 	}
 	if m.bookmarkInput != "feat" {
 		t.Errorf("bookmark input = %q, want feat", m.bookmarkInput)
@@ -424,11 +424,11 @@ func TestBookmarkModeRendering(t *testing.T) {
 	}
 
 	// Escape clears the action, escape again exits bookmark mode.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = step(t, m, keyCode(tea.KeyEscape))
 	if m.bookmarkAction != "" {
 		t.Error("escape did not clear action")
 	}
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = step(t, m, keyCode(tea.KeyEscape))
 	if m.bookmarkMode {
 		t.Error("escape did not exit bookmark mode")
 	}
@@ -441,7 +441,7 @@ func TestRebaseModeFlow(t *testing.T) {
 	}
 
 	// Pick up the selected commit as the rebase source.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = step(t, m, keyPress("r"))
 	if !m.rebaseMode {
 		t.Fatal("r did not enter rebase mode")
 	}
@@ -460,11 +460,11 @@ func TestRebaseModeFlow(t *testing.T) {
 	}
 
 	// Toggle scope (-r → -s) and cycle placement (onto → after).
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = step(t, m, keyPress("s"))
 	if !m.rebaseSubtree {
 		t.Error("s did not toggle subtree scope")
 	}
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	m = step(t, m, keyCode(tea.KeyTab))
 	if m.rebasePlace != 1 {
 		t.Errorf("rebasePlace = %d, want 1 (after)", m.rebasePlace)
 	}
@@ -473,7 +473,7 @@ func TestRebaseModeFlow(t *testing.T) {
 	}
 
 	// Escape cancels without leaving rebase mode active.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = step(t, m, keyCode(tea.KeyEscape))
 	if m.rebaseMode {
 		t.Error("esc did not exit rebase mode")
 	}
@@ -486,7 +486,7 @@ func TestSquashModeFlow(t *testing.T) {
 	}
 
 	// Pick up the selected commit as the squash source.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = step(t, m, keyPress("s"))
 	if !m.squashMode {
 		t.Fatal("s did not enter squash mode")
 	}
@@ -506,14 +506,14 @@ func TestSquashModeFlow(t *testing.T) {
 
 	// Destination moves within bounds.
 	dest := m.squashDest
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = step(t, m, keyPress("j"))
 	if m.squashDest < 0 || m.squashDest >= len(m.entries) {
 		t.Errorf("squashDest out of bounds: %d", m.squashDest)
 	}
 	_ = dest
 
 	// Escape cancels without leaving squash mode active.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = step(t, m, keyCode(tea.KeyEscape))
 	if m.squashMode {
 		t.Error("esc did not exit squash mode")
 	}
@@ -521,7 +521,7 @@ func TestSquashModeFlow(t *testing.T) {
 
 func TestGitModeRendering(t *testing.T) {
 	m := bootedModel(t)
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	m = step(t, m, keyPress("g"))
 	if !m.gitMode {
 		t.Fatal("g did not enter git mode")
 	}
@@ -529,7 +529,7 @@ func TestGitModeRendering(t *testing.T) {
 		t.Error("status bar missing git menu")
 	}
 	// Enter remote submode.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = step(t, m, keyPress("r"))
 	if !m.remoteMode {
 		t.Fatal("r did not enter remote mode")
 	}
@@ -541,7 +541,7 @@ func TestGitModeRendering(t *testing.T) {
 func TestGitPushCustomInput(t *testing.T) {
 	m := bootedModel(t)
 
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	m = step(t, m, keyPress("g"))
 	if !m.gitMode {
 		t.Fatal("g did not enter git mode")
 	}
@@ -550,7 +550,7 @@ func TestGitPushCustomInput(t *testing.T) {
 	}
 
 	// P opens the custom-push input; type "main origin".
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+	m = step(t, m, keyPress("P"))
 	if !m.pushMode {
 		t.Fatal("P did not enter push input mode")
 	}
@@ -558,7 +558,7 @@ func TestGitPushCustomInput(t *testing.T) {
 		t.Error("status bar missing push prompt")
 	}
 	for _, r := range "main origin" {
-		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = step(t, m, keyPress(string(r)))
 	}
 	if m.pushInput != "main origin" {
 		t.Errorf("push input = %q, want \"main origin\"", m.pushInput)
@@ -566,7 +566,7 @@ func TestGitPushCustomInput(t *testing.T) {
 
 	// Enter closes both modes and queues the push (the batch's inner cmds are
 	// not executed by step, so no jj subprocess runs).
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = step(t, m, keyCode(tea.KeyEnter))
 	if m.pushMode || m.gitMode {
 		t.Error("enter did not close push input / git mode")
 	}
@@ -578,13 +578,13 @@ func TestGitPushCustomInput(t *testing.T) {
 func TestGitPushCustomInputEscape(t *testing.T) {
 	m := bootedModel(t)
 
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+	m = step(t, m, keyPress("g"))
+	m = step(t, m, keyPress("P"))
 	for _, r := range "ma" {
-		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = step(t, m, keyPress(string(r)))
 	}
 	// esc returns to the git menu; a second esc exits git mode.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = step(t, m, keyCode(tea.KeyEscape))
 	if m.pushMode {
 		t.Error("esc did not leave push input mode")
 	}
@@ -594,7 +594,7 @@ func TestGitPushCustomInputEscape(t *testing.T) {
 	if m.pushInput != "" {
 		t.Errorf("push input = %q, want empty after esc", m.pushInput)
 	}
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = step(t, m, keyCode(tea.KeyEscape))
 	if m.gitMode {
 		t.Error("esc did not exit git mode")
 	}
@@ -604,7 +604,7 @@ func TestTagModeRendering(t *testing.T) {
 	m := bootedModel(t)
 
 	// Enter tag mode.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	m = step(t, m, keyPress("t"))
 	if !m.tagMode {
 		t.Fatal("t did not enter tag mode")
 	}
@@ -613,9 +613,9 @@ func TestTagModeRendering(t *testing.T) {
 	}
 
 	// Choose set, type a name.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = step(t, m, keyPress("s"))
 	for _, r := range "v2.0" {
-		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = step(t, m, keyPress(string(r)))
 	}
 	if m.tagInput != "v2.0" {
 		t.Errorf("tag input = %q, want v2.0", m.tagInput)
@@ -625,11 +625,11 @@ func TestTagModeRendering(t *testing.T) {
 	}
 
 	// Escape clears the action, escape again exits tag mode.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = step(t, m, keyCode(tea.KeyEscape))
 	if m.tagAction != "" {
 		t.Error("escape did not clear action")
 	}
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = step(t, m, keyCode(tea.KeyEscape))
 	if m.tagMode {
 		t.Error("escape did not exit tag mode")
 	}
@@ -662,7 +662,7 @@ func TestElevationPromptFlow(t *testing.T) {
 	}
 
 	// Confirming runs the elevated retry.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = step(t, m, keyPress("y"))
 	if m.pendingElev != nil {
 		t.Error("confirm did not clear pendingElev")
 	}
@@ -686,7 +686,7 @@ func TestElevationCancel(t *testing.T) {
 		t.Fatal("elevation failure did not set pendingElev")
 	}
 
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = step(t, m, keyCode(tea.KeyEscape))
 	if m.pendingElev != nil {
 		t.Error("esc did not cancel pendingElev")
 	}
@@ -708,7 +708,7 @@ func TestDescribeImmutablePromptsElevation(t *testing.T) {
 	m.entries[m.cursor].IsImmutable = true
 	changeID := m.entries[m.cursor].ChangeID
 
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = step(t, m, keyPress("d"))
 	if m.pendingElev == nil {
 		t.Fatal("'d' on immutable commit did not surface an elevation prompt")
 	}
@@ -723,7 +723,7 @@ func TestDescribeImmutablePromptsElevation(t *testing.T) {
 	// Confirming builds the elevated describe command (ExecProcess) for the
 	// same change id.
 	var cmd tea.Cmd
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m2, cmd := m.Update(keyPress("y"))
 	mm := m2.(Model)
 	if mm.pendingElev != nil {
 		t.Error("confirm did not clear pendingElev")
@@ -759,7 +759,7 @@ func TestAIDescribeDedup(t *testing.T) {
 	m := aiTestModel()
 
 	// First D press: should set aiLoading and return a command.
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	m2, cmd := m.Update(keyPress("D"))
 	m = m2.(Model)
 	if !m.aiLoading["abc12345"] {
 		t.Fatal("first D did not set aiLoading")
@@ -769,7 +769,7 @@ func TestAIDescribeDedup(t *testing.T) {
 	}
 
 	// Second D press on the same commit: should be a no-op.
-	m2, cmd2 := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	m2, cmd2 := m.Update(keyPress("D"))
 	m = m2.(Model)
 	if cmd2 != nil {
 		t.Error("second D on same commit should be a no-op, got a command")
@@ -973,7 +973,7 @@ func TestDiffNewRevision(t *testing.T) {
 	}
 
 	// Press 'n' in the diff view — should start busy and return a command.
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m2, cmd := m.Update(keyPress("n"))
 	m = m2.(Model)
 	if cmd == nil {
 		t.Fatal("'n' in diff view did not produce a command")
@@ -1035,7 +1035,7 @@ func TestDiffReopenLoadingFrameNoPanic(t *testing.T) {
 	}
 
 	// Open the diff (the returned command loads it async; ignored here).
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ := m.Update(keyCode(tea.KeyEnter))
 	m = m2.(Model)
 	if !m.diffOpen {
 		t.Fatal("enter should open the diff")
@@ -1067,10 +1067,10 @@ func TestDiffReopenLoadingFrameNoPanic(t *testing.T) {
 	if len(m.diffLayout.starts) != len(rows) {
 		t.Fatalf("layout not built for loaded diff: starts=%d rows=%d", len(m.diffLayout.starts), len(rows))
 	}
-	_ = m.View()
+	_ = m.View().Content
 
 	// Close: the rows and layout stay cached on the model.
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	m2, _ = m.Update(keyPress("q"))
 	m = m2.(Model)
 	if m.diffOpen {
 		t.Fatal("q should close the diff")
@@ -1079,7 +1079,7 @@ func TestDiffReopenLoadingFrameNoPanic(t *testing.T) {
 	// Reopen: the loading frame renders with empty rows while the new diff is
 	// fetched. The stale layout must have been dropped, and rendering the
 	// loading frame must not panic.
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(keyCode(tea.KeyEnter))
 	m = m2.(Model)
 	if !m.diffOpen || !m.diffLoading {
 		t.Fatal("second enter should reopen the diff in loading state")
@@ -1087,7 +1087,7 @@ func TestDiffReopenLoadingFrameNoPanic(t *testing.T) {
 	if len(m.diffRows) != 0 {
 		t.Fatal("reopen should clear diffRows")
 	}
-	_ = m.View() // panics (rows[0] on empty slice) on the v1.3.0 code path
+	_ = m.View().Content // panics (rows[0] on empty slice) on the v1.3.0 code path
 	if len(m.diffLayout.starts) != 0 {
 		t.Fatal("reopen should clear the stale diffLayout")
 	}

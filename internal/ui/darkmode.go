@@ -10,38 +10,22 @@ package ui
 //	CSI ? 997 ; 1 n   (dark)
 //	CSI ? 997 ; 2 n   (light)
 //
-// bubbletea's input parser doesn't know these sequences, but surfaces each
-// unrecognized CSI as one unexported unknownCSISequenceMsg (a named []byte
-// holding the full escape). decodeColorScheme finds it structurally instead
-// of by type. Terminals that never report simply emit nothing — gojo then
-// keeps the scheme detected at startup, exactly as before.
+// Bubble Tea v2's input parser exposes these as Ultraviolet color-scheme
+// events. Terminals that never report simply emit nothing, so gojo keeps the
+// scheme reported by the initial background-color query.
 
 import (
-	"bytes"
-	"reflect"
-
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-)
-
-var (
-	schemeDarkDSR  = []byte("\x1b[?997;1n")
-	schemeLightDSR = []byte("\x1b[?997;2n")
+	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // decodeColorScheme extracts the terminal's dark/light scheme report from a
-// message. ok=false for anything that is not one of the two DSR sequences.
-// Matching is exact, so byte-stream corruption never produces the opposite
-// scheme — at worst a report is dropped (the next toggle recovers).
+// message. ok=false for anything that is not one of the two scheme events.
 func decodeColorScheme(msg tea.Msg) (dark, ok bool) {
-	v := reflect.ValueOf(msg)
-	if v.Kind() != reflect.Slice || v.Type().Elem().Kind() != reflect.Uint8 {
-		return false, false
-	}
-	switch b := v.Bytes(); {
-	case bytes.Equal(b, schemeDarkDSR):
+	switch msg.(type) {
+	case uv.DarkColorSchemeEvent:
 		return true, true
-	case bytes.Equal(b, schemeLightDSR):
+	case uv.LightColorSchemeEvent:
 		return false, true
 	}
 	return false, false
@@ -52,14 +36,11 @@ func decodeColorScheme(msg tea.Msg) (dark, ok bool) {
 // resolved colors against the startup-time background detection is refreshed;
 // a no-op when the reported scheme already applies.
 func (m *Model) applyColorScheme(dark bool) {
-	if dark == lipgloss.HasDarkBackground() {
+	if dark == hasDarkBackground {
 		return
 	}
 
-	// lipgloss caches the auto-detected background on first use and consults
-	// it at render time for AdaptiveColor resolution; the style and blank-row
-	// caches key on it, so the next repaint picks the other palette half.
-	lipgloss.SetHasDarkBackground(dark)
+	hasDarkBackground = dark
 
 	// Re-run the active theme so chroma syntax-style bookkeeping
 	// (setChromaStyleOverride) and any detection-time consumers refresh

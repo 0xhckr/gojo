@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2/styles"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // repoThemeDir is the shipped themes/ directory (repo root), relative to the
@@ -186,9 +186,11 @@ func TestMix(t *testing.T) {
 
 func TestApplyTheme(t *testing.T) {
 	defer applyTheme(gojoTheme())
+	restoreDarkBackground(t)
+	hasDarkBackground = true
 
 	applyTheme(gojoTheme())
-	want := lipgloss.AdaptiveColor{Light: "#6b50ff", Dark: "#9d7cd8"}
+	want := lipgloss.Color("#9d7cd8")
 	if colPurple != want {
 		t.Fatalf("colPurple = %v, want %v", colPurple, want)
 	}

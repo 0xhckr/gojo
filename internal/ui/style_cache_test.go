@@ -4,9 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 )
 
 // TestSegTextWidthParity pins the ASCII fast path to the grapheme-aware
@@ -27,48 +26,41 @@ func TestSegTextWidthParity(t *testing.T) {
 // byte-identical output to a fresh lipgloss Render for a matrix of styles and
 // texts.
 func TestStyleCacheEquivalence(t *testing.T) {
-	r := lipgloss.DefaultRenderer()
-	old := r.ColorProfile()
-	defer r.SetColorProfile(old)
-
-	for _, profile := range []termenv.Profile{termenv.TrueColor, termenv.ANSI256, termenv.Ascii} {
-		r.SetColorProfile(profile)
-		combos := []seg{
-			{},
-			{fg: colPurple},
-			{bg: colPanel},
-			{fg: colGreen, bg: diffAddedBg},
-			{fg: colPurple, bg: colElement, bold: true},
-			{fg: colTextMuted, bg: colPanel, faint: true},
-			{fg: colGreen, bg: colPanel, underline: true},
-			{fg: colMagenta, bold: true, underline: true, faint: true, bg: colPanel},
-		}
-		texts := []string{"x", "hello world", "   ", "→", "multi → rune  tail  ", "s1337 text"}
-		for _, s := range combos {
-			cs := styleFor(s)
-			for _, text := range texts {
-				st := lipgloss.NewStyle()
-				if s.fg != nil {
-					st = st.Foreground(s.fg)
-				}
-				if s.bg != nil {
-					st = st.Background(s.bg)
-				}
-				if s.bold {
-					st = st.Bold(true)
-				}
-				if s.underline {
-					st = st.Underline(true)
-				}
-				if s.faint {
-					st = st.Faint(true)
-				}
-				var b strings.Builder
-				cs.apply(&b, text)
-				got := b.String()
-				if want := st.Render(text); got != want {
-					t.Errorf("profile %v seg %+v text %q:\n got %q\nwant %q", profile, s, text, got, want)
-				}
+	combos := []seg{
+		{},
+		{fg: colPurple},
+		{bg: colPanel},
+		{fg: colGreen, bg: diffAddedBg},
+		{fg: colPurple, bg: colElement, bold: true},
+		{fg: colTextMuted, bg: colPanel, faint: true},
+		{fg: colGreen, bg: colPanel, underline: true},
+		{fg: colMagenta, bold: true, underline: true, faint: true, bg: colPanel},
+	}
+	texts := []string{"x", "hello world", "   ", "→", "multi → rune  tail  ", "s1337 text"}
+	for _, s := range combos {
+		cs := styleFor(s)
+		for _, text := range texts {
+			st := lipgloss.NewStyle()
+			if s.fg != nil {
+				st = st.Foreground(s.fg)
+			}
+			if s.bg != nil {
+				st = st.Background(s.bg)
+			}
+			if s.bold {
+				st = st.Bold(true)
+			}
+			if s.underline {
+				st = st.Underline(true)
+			}
+			if s.faint {
+				st = st.Faint(true)
+			}
+			var b strings.Builder
+			cs.apply(&b, text)
+			got := b.String()
+			if want := st.Render(text); got != want {
+				t.Errorf("seg %+v text %q:\n got %q\nwant %q", s, text, got, want)
 			}
 		}
 	}

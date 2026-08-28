@@ -4,16 +4,18 @@ import (
 	"reflect"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
-// restoreDarkBackground preserves lipgloss's shared background-detection
-// state — applyColorScheme flips it via SetHasDarkBackground.
+// restoreDarkBackground preserves the UI's shared color-scheme state.
 func restoreDarkBackground(t *testing.T) {
 	t.Helper()
-	old := lipgloss.HasDarkBackground()
-	t.Cleanup(func() { lipgloss.SetHasDarkBackground(old) })
+	old := hasDarkBackground
+	t.Cleanup(func() {
+		hasDarkBackground = old
+		applyTheme(gojoTheme())
+	})
 }
 
 // The bubbletea msg carrying the DSR is unexported but structurally a named
@@ -25,12 +27,10 @@ func TestDecodeColorScheme(t *testing.T) {
 		wantDark bool
 		wantOK   bool
 	}{
-		{"dark report", []byte("\x1b[?997;1n"), true, true},
-		{"light report", []byte("\x1b[?997;2n"), false, true},
-		{"unknown value", []byte("\x1b[?997;3n"), false, false},
-		{"other csi", []byte("\x1b[?2004h"), false, false},
-		{"plain text", []byte("hello"), false, false},
-		{"key msg", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")}, false, false},
+		{"dark report", uv.DarkColorSchemeEvent{}, true, true},
+		{"light report", uv.LightColorSchemeEvent{}, false, true},
+		{"other event", uv.UnknownCsiEvent("\x1b[?997;3n"), false, false},
+		{"key msg", keyPress("x"), false, false},
 		{"nil", nil, false, false},
 	}
 	for _, tc := range cases {
@@ -50,13 +50,13 @@ func TestApplyColorSchemeSwitchesBackground(t *testing.T) {
 	restoreDarkBackground(t)
 	defer applyTheme(gojoTheme())
 
-	lipgloss.SetHasDarkBackground(true)
+	hasDarkBackground = true
 	m := NewModel()
 	m.themes = []Theme{gojoTheme()}
 	m.themeName = "gojo"
 
 	m.applyColorScheme(false)
-	if lipgloss.HasDarkBackground() {
+	if hasDarkBackground {
 		t.Fatal("still dark after light scheme report")
 	}
 	if got := defaultChromaStyleName(); got != "github" {
@@ -64,7 +64,7 @@ func TestApplyColorSchemeSwitchesBackground(t *testing.T) {
 	}
 
 	m.applyColorScheme(true)
-	if !lipgloss.HasDarkBackground() {
+	if !hasDarkBackground {
 		t.Fatal("still light after dark scheme report")
 	}
 	if got := defaultChromaStyleName(); got != "github-dark" {
@@ -78,7 +78,7 @@ func TestApplyColorSchemeNoopForCurrentScheme(t *testing.T) {
 	restoreDarkBackground(t)
 	defer applyTheme(gojoTheme())
 
-	lipgloss.SetHasDarkBackground(false)
+	hasDarkBackground = false
 	m := NewModel()
 	m.themes = []Theme{gojoTheme()}
 	m.themeName = "gojo"
@@ -89,7 +89,7 @@ func TestApplyColorSchemeNoopForCurrentScheme(t *testing.T) {
 	m.diffRows = sentinel
 
 	m.applyColorScheme(false)
-	if lipgloss.HasDarkBackground() {
+	if hasDarkBackground {
 		t.Fatal("background flipped on same-scheme report")
 	}
 	if !reflect.DeepEqual(m.diffRows, sentinel) {
@@ -110,7 +110,7 @@ func TestApplyColorSchemeReHighlightsOpenDiff(t *testing.T) {
 		"-func old() int\n" +
 		"+func new() int\n"
 
-	lipgloss.SetHasDarkBackground(true)
+	hasDarkBackground = true
 	applyTheme(gojoTheme())
 
 	m := NewModel()
@@ -122,18 +122,35 @@ func TestApplyColorSchemeReHighlightsOpenDiff(t *testing.T) {
 	m.diffRows = renderDiff(raw)
 
 	before := spanColors(m.diffRows)
+	beforeBg := spanBackgrounds(m.diffRows)
 	if len(before) == 0 {
 		t.Fatal("expected chroma spans in the parsed diff")
 	}
 
 	m.applyColorScheme(false)
 	after := spanColors(m.diffRows)
+	afterBg := spanBackgrounds(m.diffRows)
 	if len(after) == 0 {
 		t.Fatal("spans lost after scheme switch")
 	}
 	if reflect.DeepEqual(before, after) {
 		t.Fatalf("span colors unchanged after switch: %v", before)
 	}
+	if len(beforeBg) > 0 && reflect.DeepEqual(beforeBg, afterBg) {
+		t.Fatalf("word-diff backgrounds unchanged after switch: %v", beforeBg)
+	}
+}
+
+func spanBackgrounds(rows []diffRow) map[string]int {
+	out := map[string]int{}
+	for _, r := range rows {
+		for _, s := range r.spans {
+			if s.bg != "" {
+				out[s.bg]++
+			}
+		}
+	}
+	return out
 }
 
 func spanColors(rows []diffRow) map[string]int {
@@ -152,10 +169,10 @@ func TestUpdateHandlesColorSchemeReport(t *testing.T) {
 	restoreDarkBackground(t)
 	defer applyTheme(gojoTheme())
 
-	lipgloss.SetHasDarkBackground(true)
+	hasDarkBackground = true
 	m := NewModel()
-	m = step(t, m, []byte("\x1b[?997;2n"))
-	if lipgloss.HasDarkBackground() {
+	m = step(t, m, uv.LightColorSchemeEvent{})
+	if hasDarkBackground {
 		t.Fatal("Update did not apply the light scheme report")
 	}
 }
@@ -165,7 +182,7 @@ func TestApplyColorSchemeInvalidatesFileViewHighlights(t *testing.T) {
 	restoreDarkBackground(t)
 	defer applyTheme(gojoTheme())
 
-	lipgloss.SetHasDarkBackground(true)
+	hasDarkBackground = true
 	m := NewModel()
 	m.themes = []Theme{gojoTheme()}
 	m.themeName = "gojo"

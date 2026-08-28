@@ -4,19 +4,19 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"gojo/internal/jj"
 )
 
 func motion(x, y int) tea.MouseMsg {
-	return tea.MouseMsg{
-		Action: tea.MouseActionMotion,
-		Button: tea.MouseButtonNone,
-		X:      x,
-		Y:      y,
-	}
+	return mouseMotion(
+
+		tea.MouseNone,
+		x,
+		y)
+
 }
 
 // TestHoverLogHighlight verifies that moving the mouse over a log entry
@@ -29,7 +29,7 @@ func TestHoverLogHighlight(t *testing.T) {
 		t.Fatalf("hover = %+v, want logIdx 1", m.hover)
 	}
 
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(m.View().Content)
 	// The hovered entry's subject should appear.
 	if !strings.Contains(view, "second") {
 		t.Fatal("hovered entry not rendered")
@@ -59,7 +59,7 @@ func TestHoverDiffBar(t *testing.T) {
 		t.Fatalf("hover = %+v, want diffRow 0", m.hover)
 	}
 	// View should render without errors.
-	_ = ansi.Strip(m.View())
+	_ = ansi.Strip(m.View().Content)
 }
 
 // TestHoverPickerHighlight verifies moving the mouse over a picker row sets

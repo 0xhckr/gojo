@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"gojo/internal/jj"
 )
@@ -85,7 +85,7 @@ func BenchmarkViewLog(b *testing.B) {
 	m := benchModel()
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = m.View()
+		_ = m.View().Content
 	}
 }
 
@@ -114,7 +114,7 @@ func BenchmarkViewDiff(b *testing.B) {
 	m.diffCurChunk, m.diffCurLine = 1, 2
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = m.View()
+		_ = m.View().Content
 	}
 }
 
@@ -129,7 +129,7 @@ func BenchmarkThemeSwitch(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; b.Loop(); i++ {
 		m.themeMove(i % len(m.themes))
-		_ = m.View()
+		_ = m.View().Content
 	}
 }
 

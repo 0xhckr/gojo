@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"gojo/internal/jj"
 )
@@ -581,7 +581,7 @@ func renderTreeRowString(width int, row treeRow, selected, hovered bool) string 
 		barFg = colYellow
 	}
 
-	var nameFg lipgloss.TerminalColor
+	var nameFg terminalColor
 	switch {
 	case n.isDir:
 		nameFg = colBlue

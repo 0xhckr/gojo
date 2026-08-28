@@ -3,8 +3,8 @@ package ui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"gojo/internal/jj"
 )
@@ -782,38 +782,38 @@ func (m Model) dispatchShortcutKey(keyHint string) (Model, tea.Cmd, bool) {
 // keyMsgFromHint converts a display key hint string into a (KeyMsg, string)
 // pair suitable for handleKey. Simple letter keys map directly; special glyphs
 // map to their corresponding KeyType.
-func keyMsgFromHint(hint string) (tea.KeyMsg, string) {
+func keyMsgFromHint(hint string) (tea.KeyPressMsg, string) {
 	switch hint {
 	case "⏎":
-		return tea.KeyMsg{Type: tea.KeyEnter}, "enter"
+		return keyMsgFromName("enter"), "enter"
 	case "↑":
-		return tea.KeyMsg{Type: tea.KeyUp}, "up"
+		return keyMsgFromName("up"), "up"
 	case "↓":
-		return tea.KeyMsg{Type: tea.KeyDown}, "down"
+		return keyMsgFromName("down"), "down"
 	case "←":
-		return tea.KeyMsg{Type: tea.KeyLeft}, "left"
+		return keyMsgFromName("left"), "left"
 	case "→":
-		return tea.KeyMsg{Type: tea.KeyRight}, "right"
+		return keyMsgFromName("right"), "right"
 	case "esc", "esc/q", "esc/back":
-		return tea.KeyMsg{Type: tea.KeyEscape}, "esc"
+		return keyMsgFromName("esc"), "esc"
 	case "space":
-		return tea.KeyMsg{Type: tea.KeySpace}, " "
+		return keyMsgFromName("space"), "space"
 	case "tab":
-		return tea.KeyMsg{Type: tea.KeyTab}, "tab"
+		return keyMsgFromName("tab"), "tab"
 	case "backspace", "⌫":
-		return tea.KeyMsg{Type: tea.KeyBackspace}, "backspace"
+		return keyMsgFromName("backspace"), "backspace"
 	case "del", "delete":
-		return tea.KeyMsg{Type: tea.KeyDelete}, "delete"
+		return keyMsgFromName("delete"), "delete"
 	case "Home", "home":
-		return tea.KeyMsg{Type: tea.KeyHome}, "home"
+		return keyMsgFromName("home"), "home"
 	case "End", "end":
-		return tea.KeyMsg{Type: tea.KeyEnd}, "end"
+		return keyMsgFromName("end"), "end"
 	case "pgup":
-		return tea.KeyMsg{Type: tea.KeyPgUp}, "pgup"
+		return keyMsgFromName("pgup"), "pgup"
 	case "pgdn", "pgdown":
-		return tea.KeyMsg{Type: tea.KeyPgDown}, "pgdown"
+		return keyMsgFromName("pgdown"), "pgdown"
 	default:
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(hint)}, hint
+		return keyMsgFromName(hint), hint
 	}
 }
 

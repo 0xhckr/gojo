@@ -1,6 +1,21 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"image/color"
+
+	"charm.land/lipgloss/v2"
+)
+
+type terminalColor = color.Color
+
+var hasDarkBackground = true
+
+func adaptiveColor(light, dark string) terminalColor {
+	if hasDarkBackground {
+		return lipgloss.Color(dark)
+	}
+	return lipgloss.Color(light)
+}
 
 // The palette uses truecolor hex values with adaptive light/dark pairs, so
 // gojo renders with its own refined colour scheme inspired by modern TUI
@@ -14,35 +29,35 @@ import "github.com/charmbracelet/lipgloss"
 
 var (
 	// ── Surface tiers (background → panel → element) ───────────────
-	colBackground lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#f6f6f8", Dark: "#0d0d12"}
-	colPanel      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#14141c"}
-	colElement    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#ececf0", Dark: "#1c1c26"}
-	colHover      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#f0f0f5", Dark: "#181824"}
+	colBackground terminalColor = adaptiveColor("#f6f6f8", "#0d0d12")
+	colPanel      terminalColor = adaptiveColor("#ffffff", "#14141c")
+	colElement    terminalColor = adaptiveColor("#ececf0", "#1c1c26")
+	colHover      terminalColor = adaptiveColor("#f0f0f5", "#181824")
 
 	// ── Border hierarchy ───────────────────────────────────────────
-	colBorder       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#c4c4cc", Dark: "#343440"}
-	colBorderActive lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9898a4", Dark: "#545462"}
-	colBorderSubtle lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#dadde0", Dark: "#24242e"}
-	colGraph        lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9494a4", Dark: "#5a5a72"} // jj commit-graph edges/symbols
+	colBorder       terminalColor = adaptiveColor("#c4c4cc", "#343440")
+	colBorderActive terminalColor = adaptiveColor("#9898a4", "#545462")
+	colBorderSubtle terminalColor = adaptiveColor("#dadde0", "#24242e")
+	colGraph        terminalColor = adaptiveColor("#9494a4", "#5a5a72") // jj commit-graph edges/symbols
 
 	// ── Text ───────────────────────────────────────────────────────
-	colText      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#1a1a22", Dark: "#e2e2ec"}
-	colTextMuted lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#787884", Dark: "#787886"}
+	colText      terminalColor = adaptiveColor("#1a1a22", "#e2e2ec")
+	colTextMuted terminalColor = adaptiveColor("#787884", "#787886")
 
 	// ── Accents ────────────────────────────────────────────────────
-	colPurple     lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#6B50FF", Dark: "#9d7cd8"} // change IDs, primary accent
-	colMagenta    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#7b3fb5", Dark: "#c487f0"} // change ID prefix
-	colBlue       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#5c9cf5"} // author names
-	colGreen      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#3d9a57", Dark: "#7fd88f"} // bookmarks, additions
-	colRed        lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d1383d", Dark: "#e06c75"} // errors, deletions
-	colYellow     lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#b0851f", Dark: "#f5a742"} // working copy, cursor
-	colCyan       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#318795", Dark: "#56b6c2"} // bookmark mode, hunk headers
-	colOrange     lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d68c27", Dark: "#f5a742"} // git mode
-	colDarkOrange lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#a06b1a", Dark: "#b08030"} // git mode hint
-	colPink       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#c44b8a", Dark: "#ff7eb6"} // remote mode
-	colDarkPink   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#9a3868", Dark: "#b85a90"} // remote mode hint
-	colTeal       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#00897B", Dark: "#4DB6AC"} // tag mode, tags
-	colDarkTeal   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#00695C", Dark: "#2E7D72"} // tag mode hint
+	colPurple     terminalColor = adaptiveColor("#6B50FF", "#9d7cd8") // change IDs, primary accent
+	colMagenta    terminalColor = adaptiveColor("#7b3fb5", "#c487f0") // change ID prefix
+	colBlue       terminalColor = adaptiveColor("#2563eb", "#5c9cf5") // author names
+	colGreen      terminalColor = adaptiveColor("#3d9a57", "#7fd88f") // bookmarks, additions
+	colRed        terminalColor = adaptiveColor("#d1383d", "#e06c75") // errors, deletions
+	colYellow     terminalColor = adaptiveColor("#b0851f", "#f5a742") // working copy, cursor
+	colCyan       terminalColor = adaptiveColor("#318795", "#56b6c2") // bookmark mode, hunk headers
+	colOrange     terminalColor = adaptiveColor("#d68c27", "#f5a742") // git mode
+	colDarkOrange terminalColor = adaptiveColor("#a06b1a", "#b08030") // git mode hint
+	colPink       terminalColor = adaptiveColor("#c44b8a", "#ff7eb6") // remote mode
+	colDarkPink   terminalColor = adaptiveColor("#9a3868", "#b85a90") // remote mode hint
+	colTeal       terminalColor = adaptiveColor("#00897B", "#4DB6AC") // tag mode, tags
+	colDarkTeal   terminalColor = adaptiveColor("#00695C", "#2E7D72") // tag mode hint
 
 	// ── Legacy aliases (map old names to new palette) ─────────────
 	colWhite     = colText
@@ -60,56 +75,56 @@ var (
 // a subdued shade for the rest of the hunk and an intense shade for the
 // cursor line, so the ┃ bar always tints toward the section it belongs to.
 var (
-	fileSectionBg = []lipgloss.TerminalColor{
-		lipgloss.AdaptiveColor{Light: "#eae6f6", Dark: "#1a1a2e"}, // blue-purple
-		lipgloss.AdaptiveColor{Light: "#f6e8f0", Dark: "#241a26"}, // pink-purple
+	fileSectionBg = []terminalColor{
+		adaptiveColor("#eae6f6", "#1a1a2e"), // blue-purple
+		adaptiveColor("#f6e8f0", "#241a26"), // pink-purple
 	}
-	fileSectionBarDim = []lipgloss.TerminalColor{
-		lipgloss.AdaptiveColor{Light: "#c4bbe0", Dark: "#2e2e48"}, // dim blue-purple
-		lipgloss.AdaptiveColor{Light: "#e0bcd0", Dark: "#3e2840"}, // dim pink-purple
+	fileSectionBarDim = []terminalColor{
+		adaptiveColor("#c4bbe0", "#2e2e48"), // dim blue-purple
+		adaptiveColor("#e0bcd0", "#3e2840"), // dim pink-purple
 	}
-	fileSectionBarBright = []lipgloss.TerminalColor{
-		lipgloss.AdaptiveColor{Light: "#6B50FF", Dark: "#8a8cf5"}, // intense blue-purple
-		lipgloss.AdaptiveColor{Light: "#c44b8a", Dark: "#e08ad8"}, // intense pink-purple
+	fileSectionBarBright = []terminalColor{
+		adaptiveColor("#6B50FF", "#8a8cf5"), // intense blue-purple
+		adaptiveColor("#c44b8a", "#e08ad8"), // intense pink-purple
 	}
 )
 
 // Diff panel colors — subtle tinted backgrounds, refined foregrounds.
 var (
-	diffAddedSign    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#3d9a57", Dark: "#7fd88f"}
-	diffRemovedSign  lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d1383d", Dark: "#e06c75"}
-	diffContextFg    lipgloss.TerminalColor = colText
-	diffHunkHeaderFg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#7086b5", Dark: "#828bb8"}
-	diffFileHeaderFg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#b0851f", Dark: "#f5a742"}
-	diffLineNumber   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#595959", Dark: "#8f8f8f"}
+	diffAddedSign    terminalColor = adaptiveColor("#3d9a57", "#7fd88f")
+	diffRemovedSign  terminalColor = adaptiveColor("#d1383d", "#e06c75")
+	diffContextFg    terminalColor = colText
+	diffHunkHeaderFg terminalColor = adaptiveColor("#7086b5", "#828bb8")
+	diffFileHeaderFg terminalColor = adaptiveColor("#b0851f", "#f5a742")
+	diffLineNumber   terminalColor = adaptiveColor("#595959", "#8f8f8f")
 
-	diffAddedBg      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d8edd8", Dark: "#1a2a22"}
-	diffRemovedBg    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#f0d8dc", Dark: "#2a1a22"}
-	diffHunkHeaderBg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d8e4ec", Dark: "#1a2230"}
-	diffFileHeaderBg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#eee4cc", Dark: "#24221a"}
+	diffAddedBg      terminalColor = adaptiveColor("#d8edd8", "#1a2a22")
+	diffRemovedBg    terminalColor = adaptiveColor("#f0d8dc", "#2a1a22")
+	diffHunkHeaderBg terminalColor = adaptiveColor("#d8e4ec", "#1a2230")
+	diffFileHeaderBg terminalColor = adaptiveColor("#eee4cc", "#24221a")
 
 	// Gutter backgrounds — a dimmer blend toward the panel surface, so the
 	// coloured tint between the ┃ bars is less opaque than the content area.
-	diffAddedGutterBg   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#ebf6eb", Dark: "#171f1f"}
-	diffRemovedGutterBg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#f7ebed", Dark: "#1f171f"}
+	diffAddedGutterBg   terminalColor = adaptiveColor("#ebf6eb", "#171f1f")
+	diffRemovedGutterBg terminalColor = adaptiveColor("#f7ebed", "#1f171f")
 
 	// Chunk cursor — ┃ bar marking the focused change chunk.
-	diffCursorAddBright lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#3d9a57", Dark: "#7fd88f"}
-	diffCursorDelBright lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d1383d", Dark: "#e06c75"}
-	diffCursorAddDim    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#a8d8a8", Dark: "#2e4a2e"}
-	diffCursorDelDim    lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#d8a8a8", Dark: "#4a2e2e"}
+	diffCursorAddBright terminalColor = adaptiveColor("#3d9a57", "#7fd88f")
+	diffCursorDelBright terminalColor = adaptiveColor("#d1383d", "#e06c75")
+	diffCursorAddDim    terminalColor = adaptiveColor("#a8d8a8", "#2e4a2e")
+	diffCursorDelDim    terminalColor = adaptiveColor("#d8a8a8", "#4a2e2e")
 
 	// Split mode — indicators for marked/unmarked/partial selection.
-	splitMarked   lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#3d9a57", Dark: "#7fd88f"}
-	splitPartial  lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#b0851f", Dark: "#f5a742"}
-	splitUnmarked lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#999999", Dark: "#555560"}
+	splitMarked   terminalColor = adaptiveColor("#3d9a57", "#7fd88f")
+	splitPartial  terminalColor = adaptiveColor("#b0851f", "#f5a742")
+	splitUnmarked terminalColor = adaptiveColor("#999999", "#555560")
 
 	// Conflict view — side-by-side pane tints (blue = side 1, green = side 2).
-	confLeftBg       lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#dde5f4", Dark: "#192230"}
-	confLeftFocusBg  lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#ccdaf2", Dark: "#213144"}
-	confRightBg      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#dcf0dc", Dark: "#1a291d"}
-	confRightFocusBg lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#cbeacc", Dark: "#233a28"}
-	confLoserBg      lipgloss.TerminalColor = lipgloss.AdaptiveColor{Light: "#eaeaef", Dark: "#17171d"}
+	confLeftBg       terminalColor = adaptiveColor("#dde5f4", "#192230")
+	confLeftFocusBg  terminalColor = adaptiveColor("#ccdaf2", "#213144")
+	confRightBg      terminalColor = adaptiveColor("#dcf0dc", "#1a291d")
+	confRightFocusBg terminalColor = adaptiveColor("#cbeacc", "#233a28")
+	confLoserBg      terminalColor = adaptiveColor("#eaeaef", "#17171d")
 )
 
 // spinnerFrames cycles a braille spinner.

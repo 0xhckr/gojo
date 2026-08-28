@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"gojo/internal/jj"
 )
@@ -26,12 +26,12 @@ func mouseTestModel() Model {
 }
 
 func leftClick(x, y int) tea.MouseMsg {
-	return tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
-		X:      x,
-		Y:      y,
-	}
+	return mousePress(
+
+		tea.MouseLeft,
+		x,
+		y)
+
 }
 
 // TestMouseLogClickSelectsCommit verifies that clicking a commit row moves
@@ -83,7 +83,7 @@ func TestMouseLogClickPadding(t *testing.T) {
 }
 
 func wheelPress(dir tea.MouseButton, x, y int) tea.MouseMsg {
-	return tea.MouseMsg{Action: tea.MouseActionPress, Button: dir, X: x, Y: y}
+	return mousePress(dir, x, y)
 }
 
 // wheelTestModel builds a ready log-view model with a scrollable list of
@@ -108,7 +108,7 @@ func TestWheelCoalescing(t *testing.T) {
 	m := wheelTestModel()
 
 	// First step applies immediately (no added latency) and schedules a flush.
-	m2, cmd := m.Update(wheelPress(tea.MouseButtonWheelDown, 10, 5))
+	m2, cmd := m.Update(wheelPress(tea.MouseWheelDown, 10, 5))
 	m = m2.(Model)
 	if m.cursor != 1 {
 		t.Fatalf("first wheel step: cursor = %d, want 1", m.cursor)
@@ -126,7 +126,7 @@ func TestWheelCoalescing(t *testing.T) {
 	// Events arriving while the tick is pending only accumulate: no scroll
 	// happens and no command is scheduled (the tick is still in flight).
 	for i := 0; i < 5; i++ {
-		m2, cmd = m.Update(wheelPress(tea.MouseButtonWheelDown, 10, 5))
+		m2, cmd = m.Update(wheelPress(tea.MouseWheelDown, 10, 5))
 		m = m2.(Model)
 		if cmd != nil {
 			t.Fatal("coalesced wheel events must not schedule extra ticks")
@@ -158,11 +158,11 @@ func TestWheelCoalescing(t *testing.T) {
 func TestWheelCoalescingDirectionNet(t *testing.T) {
 	m := wheelTestModel()
 
-	m2, _ := m.Update(wheelPress(tea.MouseButtonWheelDown, 10, 5)) // cursor 1 (immediate)
+	m2, _ := m.Update(wheelPress(tea.MouseWheelDown, 10, 5)) // cursor 1 (immediate)
 	m = m2.(Model)
-	m2, _ = m.Update(wheelPress(tea.MouseButtonWheelDown, 10, 5)) // accum +1
+	m2, _ = m.Update(wheelPress(tea.MouseWheelDown, 10, 5)) // accum +1
 	m = m2.(Model)
-	m2, _ = m.Update(wheelPress(tea.MouseButtonWheelUp, 10, 5)) // accum 0
+	m2, _ = m.Update(wheelPress(tea.MouseWheelUp, 10, 5)) // accum 0
 	m = m2.(Model)
 
 	m2, _ = m.Update(wheelTickMsg{})

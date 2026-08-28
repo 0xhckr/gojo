@@ -15,8 +15,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
 
 	"gojo/internal/jj"
 )
@@ -433,7 +432,7 @@ func (m Model) conflictTabBar() ([]seg, [][2]int) {
 		label := conflictTabLabel(f)
 		segs = append(segs, seg{text: " ", bg: colElement})
 		x++
-		chipBg := lipgloss.TerminalColor(colPanel)
+		chipBg := terminalColor(colPanel)
 		fg := colTextMuted
 		bold := false
 		if i == c.cur {
@@ -590,7 +589,7 @@ func (m *Model) conflictHover(x, y int) {
 
 // paneCell renders one pane's content to exactly w cells: the (tab-expanded,
 // clipped) text over a background fill.
-func paneCell(text string, w int, fg, bg lipgloss.TerminalColor, underline, faint bool, hasContent bool) string {
+func paneCell(text string, w int, fg, bg terminalColor, underline, faint bool, hasContent bool) string {
 	text = expandTabs(text)
 	var b strings.Builder
 	if hasContent {
@@ -661,7 +660,7 @@ func (m Model) renderConflictView(width, height int) []string {
 				out = append(out, blankRow(width, colPanel))
 				continue
 			}
-			var fg lipgloss.TerminalColor = colTextMuted
+			var fg terminalColor = colTextMuted
 			if strings.HasPrefix(line, " ✗") {
 				fg = colRed
 			}
@@ -706,7 +705,7 @@ func (m Model) renderConflictRow(f *conflictFile, row conflictRow, focusBlock in
 	case cRowAuto:
 		{
 			b := f.blocks[row.block]
-			fg := lipgloss.TerminalColor(colGreen) // auto lines from the right side tint green
+			fg := terminalColor(colGreen) // auto lines from the right side tint green
 			if b.autoLeft {
 				fg = colBlue
 			}
@@ -758,7 +757,7 @@ func (m Model) renderConflictRow(f *conflictFile, row conflictRow, focusBlock in
 		cell := paneCell(row.l, paneW, colText, lbg, lUnderline, lFaint, row.hasL)
 		rcell := paneCell(row.r, rightW, colText, rbg, rUnderline, rFaint, row.hasR)
 
-		divFg := lipgloss.TerminalColor(colBorderSubtle)
+		divFg := terminalColor(colBorderSubtle)
 		if focused {
 			divFg = colYellow
 		}

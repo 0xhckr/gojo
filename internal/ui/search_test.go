@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"gojo/internal/jj"
 )
@@ -28,7 +28,7 @@ func searchTestModel() Model {
 func TestSearchEnter(t *testing.T) {
 	m := searchTestModel()
 
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = step(t, m, keyPress("/"))
 	if !m.searchMode {
 		t.Fatal("/ did not enter search mode")
 	}
@@ -52,11 +52,11 @@ func TestSearchEnter(t *testing.T) {
 // change ID, commit ID, description, author, bookmark, and tag fields.
 func TestSearchFilter(t *testing.T) {
 	m := searchTestModel()
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = step(t, m, keyPress("/"))
 
 	// Type "hackr" — should match the author of entry 0.
 	for _, r := range "hackr" {
-		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = step(t, m, keyPress(string(r)))
 	}
 	if len(m.searchResults) != 1 {
 		t.Fatalf("after 'hackr': searchResults = %d, want 1", len(m.searchResults))
@@ -66,12 +66,12 @@ func TestSearchFilter(t *testing.T) {
 	}
 
 	// Clear and try matching by bookmark "dev" — entry 2.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = step(t, m, keyCtrl('u'))
 	if m.searchQuery != "" {
 		t.Fatalf("ctrl+u did not clear query, got %q", m.searchQuery)
 	}
 	for _, r := range "dev" {
-		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = step(t, m, keyPress(string(r)))
 	}
 	if len(m.searchResults) != 1 {
 		t.Fatalf("after 'dev': searchResults = %d, want 1", len(m.searchResults))
@@ -84,10 +84,10 @@ func TestSearchFilter(t *testing.T) {
 // TestSearchFilterByTag verifies matching against git tags.
 func TestSearchFilterByTag(t *testing.T) {
 	m := searchTestModel()
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = step(t, m, keyPress("/"))
 
 	for _, r := range "v1" {
-		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = step(t, m, keyPress(string(r)))
 	}
 	if len(m.searchResults) != 1 {
 		t.Fatalf("after 'v1': searchResults = %d, want 1", len(m.searchResults))
@@ -100,10 +100,10 @@ func TestSearchFilterByTag(t *testing.T) {
 // TestSearchFilterByCommitID verifies matching against git commit IDs.
 func TestSearchFilterByCommitID(t *testing.T) {
 	m := searchTestModel()
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = step(t, m, keyPress("/"))
 
 	for _, r := range "cafe" {
-		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = step(t, m, keyPress(string(r)))
 	}
 	if len(m.searchResults) != 1 {
 		t.Fatalf("after 'cafe': searchResults = %d, want 1", len(m.searchResults))
@@ -116,33 +116,33 @@ func TestSearchFilterByCommitID(t *testing.T) {
 // TestSearchNavigation verifies j/k moves the search cursor through results.
 func TestSearchNavigation(t *testing.T) {
 	m := searchTestModel()
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = step(t, m, keyPress("/"))
 	if m.searchCursor != 0 {
 		t.Fatalf("initial searchCursor = %d, want 0", m.searchCursor)
 	}
 
 	// Move down.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = step(t, m, keyCode(tea.KeyDown))
 	if m.searchCursor != 1 {
 		t.Errorf("after down: searchCursor = %d, want 1", m.searchCursor)
 	}
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = step(t, m, keyCode(tea.KeyDown))
 	if m.searchCursor != 2 {
 		t.Errorf("after down: searchCursor = %d, want 2", m.searchCursor)
 	}
 
 	// Move up.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	m = step(t, m, keyCode(tea.KeyUp))
 	if m.searchCursor != 1 {
 		t.Errorf("after up: searchCursor = %d, want 1", m.searchCursor)
 	}
 
 	// Home / End.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyHome})
+	m = step(t, m, keyCode(tea.KeyHome))
 	if m.searchCursor != 0 {
 		t.Errorf("after home: searchCursor = %d, want 0", m.searchCursor)
 	}
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnd})
+	m = step(t, m, keyCode(tea.KeyEnd))
 	if m.searchCursor != 2 {
 		t.Errorf("after end: searchCursor = %d, want 2", m.searchCursor)
 	}
@@ -152,11 +152,11 @@ func TestSearchNavigation(t *testing.T) {
 // selected result and exits search mode.
 func TestSearchEnterJumpsCursor(t *testing.T) {
 	m := searchTestModel()
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = step(t, m, keyPress("/"))
 
 	// Move to result index 1 (entry 1).
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = step(t, m, keyCode(tea.KeyDown))
+	m = step(t, m, keyCode(tea.KeyEnter))
 
 	if m.searchMode {
 		t.Fatal("enter did not exit search mode")
@@ -171,11 +171,11 @@ func TestSearchEnterJumpsCursor(t *testing.T) {
 func TestSearchEscCancels(t *testing.T) {
 	m := searchTestModel()
 	m.cursor = 0
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = step(t, m, keyPress("/"))
 
 	// Move down in search results.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = step(t, m, keyCode(tea.KeyDown))
+	m = step(t, m, keyCode(tea.KeyEscape))
 
 	if m.searchMode {
 		t.Fatal("esc did not exit search mode")
@@ -189,11 +189,11 @@ func TestSearchEscCancels(t *testing.T) {
 // instead of navigating (so you can search for "jk" etc.).
 func TestSearchJKAreText(t *testing.T) {
 	m := searchTestModel()
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = step(t, m, keyPress("/"))
 	startCursor := m.searchCursor
 
 	// Typing 'j' should add to the query, not move the cursor.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = step(t, m, keyPress("j"))
 	if m.searchQuery != "j" {
 		t.Errorf("after typing 'j': searchQuery = %q, want 'j'", m.searchQuery)
 	}
@@ -202,7 +202,7 @@ func TestSearchJKAreText(t *testing.T) {
 	}
 
 	// Typing 'k' should also add to the query.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	m = step(t, m, keyPress("k"))
 	if m.searchQuery != "jk" {
 		t.Errorf("after typing 'k': searchQuery = %q, want 'jk'", m.searchQuery)
 	}
@@ -212,18 +212,18 @@ func TestSearchJKAreText(t *testing.T) {
 // and re-filters.
 func TestSearchBackspace(t *testing.T) {
 	m := searchTestModel()
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = step(t, m, keyPress("/"))
 
 	// Type "add" — matches entry 1 (subject "add search feature").
 	for _, r := range "add" {
-		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = step(t, m, keyPress(string(r)))
 	}
 	if len(m.searchResults) != 1 {
 		t.Fatalf("after 'add': searchResults = %d, want 1", len(m.searchResults))
 	}
 
 	// Backspace removes 'd' → "ad" — may match more entries.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m = step(t, m, keyCode(tea.KeyBackspace))
 	if m.searchQuery != "ad" {
 		t.Errorf("after backspace: searchQuery = %q, want 'ad'", m.searchQuery)
 	}
@@ -232,10 +232,10 @@ func TestSearchBackspace(t *testing.T) {
 // TestSearchNoMatches verifies the UI shows a no-matches message.
 func TestSearchNoMatches(t *testing.T) {
 	m := searchTestModel()
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = step(t, m, keyPress("/"))
 
 	for _, r := range "zzzzz" {
-		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = step(t, m, keyPress(string(r)))
 	}
 	if len(m.searchResults) != 0 {
 		t.Fatalf("searchResults = %d, want 0", len(m.searchResults))
@@ -250,7 +250,7 @@ func TestSearchNoMatches(t *testing.T) {
 // search-specific content while search is active.
 func TestSearchStatusHelpBars(t *testing.T) {
 	m := searchTestModel()
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = step(t, m, keyPress("/"))
 
 	view := stripView(m)
 	if !strings.Contains(view, "search") {

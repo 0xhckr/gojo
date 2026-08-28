@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"gojo/internal/jj"
 )
@@ -94,7 +94,7 @@ func TestDiffPanelGeometryMatrix(t *testing.T) {
 
 						for _, sy := range []int{0, m.diffMaxScroll() / 2, m.diffMaxScroll()} {
 							m.diffScrollY = sy
-							out := strings.Split(m.View(), "\n")
+							out := strings.Split(m.View().Content, "\n")
 							tag := fmt.Sprintf("w=%d h=%d diff=%d status=%d desc=%q scrollY=%d", width, height, di, si, desc, sy)
 							if len(out) != height {
 								t.Fatalf("%s: %d lines, want %d", tag, len(out), height)
@@ -202,7 +202,7 @@ func TestBoundaryScrollbar(t *testing.T) {
 		t.Fatalf("not in boundary zone: total=%d headLen=%d bodyH=%d", total, headLen, bodyH)
 	}
 
-	out := m.View()
+	out := m.View().Content
 	for i, l := range strings.Split(out, "\n") {
 		if got, want := lipgloss.Width(l), m.width; got != want {
 			t.Errorf("line %d width %d, want %d: %q", i, got, want, l)
@@ -263,7 +263,7 @@ func TestLargeDiffLayout(t *testing.T) {
 	m = nm.(Model)
 
 	check := func(tag string) {
-		out := m.View()
+		out := m.View().Content
 		lines := strings.Split(out, "\n")
 		if len(lines) != m.height {
 			t.Errorf("%s: rendered %d lines, want %d", tag, len(lines), m.height)
@@ -278,7 +278,7 @@ func TestLargeDiffLayout(t *testing.T) {
 	check("open")
 
 	for i := 0; i < 60; i++ {
-		nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		nm, _ = m.Update(keyPress(string('j')))
 		m = nm.(Model)
 		check(fmt.Sprintf("j%d", i))
 	}
@@ -292,16 +292,16 @@ func TestLargeDiffLayout(t *testing.T) {
 	// Close and reopen. Render once while still loading (before the load
 	// message lands) — this is what panics when a stale layout survives the
 	// close.
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	nm, _ = m.Update(keyPress(string('q')))
 	m = nm.(Model)
 	nm, cmd3 := m.openRevisionDiff(e.ChangeID, e.CommitID, e.ChangeIDPrefixLen, e.Subject)
 	m = nm.(Model)
-	_ = m.View() // loading frame
+	_ = m.View().Content // loading frame
 	nm, _ = m.Update(cmd3())
 	m = nm.(Model)
 	check("reopen")
 	if t.Failed() {
-		out := m.View()
+		out := m.View().Content
 		t.Logf("frame:\n%s", out)
 	}
 }

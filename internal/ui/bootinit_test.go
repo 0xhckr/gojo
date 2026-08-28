@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"gojo/internal/jj"
 )
@@ -71,7 +71,7 @@ func TestBootInitPromptAppears(t *testing.T) {
 // question falls back to the classic boot-error screen with quit shortcuts.
 func TestBootInitDecline(t *testing.T) {
 	m := bootPromptModel(t, "/bin/true")
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m = step(t, m, keyPress("n"))
 	if m.bootInitStage != 0 {
 		t.Fatalf("bootInitStage = %d, want 0 after decline", m.bootInitStage)
 	}
@@ -83,7 +83,7 @@ func TestBootInitDecline(t *testing.T) {
 		t.Fatalf("fallback error view missing text: %s", plain)
 	}
 	// q still quits from the fallback screen.
-	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}); cmd == nil {
+	if _, cmd := m.Update(keyPress("q")); cmd == nil {
 		t.Fatal("q did not quit from the fallback error screen")
 	}
 }
@@ -96,7 +96,7 @@ func TestBootInitFlowEndToEnd(t *testing.T) {
 	m := bootPromptModel(t, jjPath)
 
 	// Question 1: initialize? → y advances to the colocate question.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = step(t, m, keyPress("y"))
 	if m.bootInitStage != 2 {
 		t.Fatalf("bootInitStage = %d, want 2", m.bootInitStage)
 	}
@@ -106,7 +106,7 @@ func TestBootInitFlowEndToEnd(t *testing.T) {
 
 	// Question 2: colocate? → y starts the init (stage 3) and returns the
 	// init command. Run it synchronously and feed the result back in.
-	m1, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m1, cmd := m.Update(keyPress("y"))
 	m = m1.(Model)
 	if m.bootInitStage != 3 {
 		t.Fatalf("bootInitStage = %d, want 3 (init running)", m.bootInitStage)
@@ -150,8 +150,8 @@ func TestBootInitFlowEndToEnd(t *testing.T) {
 func TestBootInitNoColocate(t *testing.T) {
 	jjPath, argsFile := fakeJJ(t)
 	m := bootPromptModel(t, jjPath)
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
-	m1, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m = step(t, m, keyPress("y"))
+	m1, cmd := m.Update(keyPress("n"))
 	m = m1.(Model)
 	if m.bootInitStage != 3 || cmd == nil {
 		t.Fatalf("stage=%d cmd=%v, want 3 + init command", m.bootInitStage, cmd)
@@ -171,8 +171,8 @@ func TestBootInitNoColocate(t *testing.T) {
 // error rendered, so the user can retry or bail.
 func TestBootInitFailure(t *testing.T) {
 	m := bootPromptModel(t, failJJ(t))
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
-	m1, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m = step(t, m, keyPress("y"))
+	m1, cmd := m.Update(keyPress("n"))
 	m = m1.(Model)
 	done := cmd().(initDoneMsg)
 	if done.err == nil {
@@ -195,8 +195,8 @@ func TestBootInitFailure(t *testing.T) {
 // back to the init question instead of cancelling outright.
 func TestBootInitEscFromColocate(t *testing.T) {
 	m := bootPromptModel(t, "/bin/true")
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = step(t, m, keyPress("y"))
+	m = step(t, m, keyCode(tea.KeyEscape))
 	if m.bootInitStage != 1 {
 		t.Fatalf("bootInitStage = %d, want 1 after esc", m.bootInitStage)
 	}

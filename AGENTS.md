@@ -10,9 +10,9 @@ written in Go with [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 ## Project Structure
 
 ```
-main.go                 — entry point: tea.NewProgram(ui.NewModel(), WithAltScreen,
-                          WithReportFocus, WithMouse{Cell,All}Motion,
-                          WithANSICompressor); also enables terminal mode 2031
+main.go                 — entry point: tea.NewProgram(ui.NewModel()); Model.View
+                          declaratively enables alt screen, focus reporting,
+                          and all-motion mouse events; main also enables mode 2031
                           (CSI ? 2031 h) so dark/light scheme changes are reported
 internal/
   jj/
@@ -53,10 +53,10 @@ internal/
                           minimal TOML theme parser
     themepicker.go      — theme picker view (key T): live preview on move,
                           ⏎ applies + saves via jj.SaveTheme, esc restores
-    darkmode.go         — follows OS dark/light scheme changes live: decodes the
-                          mode-2031 DSR (CSI ? 997 ; 1|2 n) from bubbletea's
-                          unrecognized-CSI messages, flips the lipgloss
-                          background flag, re-applies the active theme, and
+    darkmode.go         — follows OS dark/light scheme changes live: handles the
+                          mode-2031 DSR (CSI ? 997 ; 1|2 n) parsed by
+                          Ultraviolet, updates explicit UI background state,
+                          re-applies the active theme, and
                           re-highlights chroma-cached content (open diff rows,
                           file-view blame)
     logview.go          — commit list rendering + variable-height scroll windowing

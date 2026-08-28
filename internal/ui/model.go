@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"gojo/internal/jj"
 )
@@ -198,8 +198,8 @@ type Model struct {
 	polling bool
 
 	// scrollDragging is true while the user is click-and-dragging the
-	// scrollbar thumb. Set on MouseActionPress inside the scrollbar area,
-	// cleared on MouseActionRelease.
+	// scrollbar thumb. Set on MouseClickMsg inside the scrollbar area and
+	// cleared on MouseReleaseMsg.
 	scrollDragging bool
 
 	// Wheel coalescing. macOS trackpads emit wheel events at very high rates
@@ -419,7 +419,7 @@ type fileHistoryMsg struct {
 // Init kicks off configuration loading, the auto-refresh poll loop, and the
 // top-bar animation tick.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(boot, pollTick())
+	return tea.Batch(boot, pollTick(), tea.RequestBackgroundColor)
 }
 
 func boot() tea.Msg {
@@ -767,14 +767,18 @@ func (m Model) refreshFocusedCmds() []tea.Cmd {
 
 // Update handles incoming messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Terminal-reported OS dark/light scheme change (mode 2031 DSR — arrives
-	// as an unrecognized-CSI message, see darkmode.go). Applies in every view.
+	// Terminal-reported OS dark/light scheme change (mode 2031 DSR, parsed by
+	// Ultraviolet; see darkmode.go). Applies in every view.
 	if dark, ok := decodeColorScheme(msg); ok {
 		m.applyColorScheme(dark)
 		return m, nil
 	}
 
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		m.applyColorScheme(msg.IsDark())
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.recomputeOffset()
@@ -1253,11 +1257,81 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.handleMouse(msg)
 
-	case tea.KeyMsg:
+	case tea.PasteMsg:
+		return m.handlePaste(msg.Content), nil
+
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
 
 	return m, nil
+}
+
+// handlePaste inserts bracketed-paste content only into active text inputs.
+// Paste data must bypass keybindings: pasting "q" into a query is text, not
+// the cancel action associated with a q key press.
+func (m Model) handlePaste(content string) Model {
+	content = singleLinePaste(content)
+	if content == "" || !m.ready {
+		return m
+	}
+	if m.searchMode {
+		m.searchQuery += content
+		m.searchFilter()
+		return m
+	}
+	if m.view == viewFile && m.fileView.phase == filePicker {
+		fv := &m.fileView
+		if len(fv.files) == 0 {
+			return m
+		}
+		fv.fzfActive = true
+		fv.fzfQuery += content
+		fv.fzfCursor = 0
+		fv.fzfOffset = 0
+		fv.fzfFilter()
+		return m
+	}
+	if m.bookmarkMode && m.bookmarkAction != "" {
+		m.bookmarkInput += content
+		m.acOriginal = nil
+		m.acIdx = 0
+		return m
+	}
+	if m.tagMode && m.tagAction != "" {
+		m.tagInput += content
+		m.acOriginal = nil
+		m.acIdx = 0
+		return m
+	}
+	if m.renameMode {
+		m.renameInput += content
+		return m
+	}
+	if m.gitMode {
+		switch {
+		case m.pushMode:
+			m.pushInput += content
+			m.acOriginal = nil
+			m.acIdx = 0
+		case m.remoteMode && m.remoteAction != "":
+			m.remoteInput += content
+		}
+	}
+	return m
+}
+
+func singleLinePaste(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\r', '\n', '\t':
+			return ' '
+		}
+		if r < ' ' || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 func (m *Model) recomputeOffset() {
@@ -1820,7 +1894,7 @@ func (m Model) handleBootInitKey(k string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 
 	// Force quit fires even from an unrecoverable boot error screen.
@@ -1958,27 +2032,31 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	// Update hover highlighting on any mouse movement or click inside the
 	// content area (the context menu has its own hover handling).
-	m = m.updateHover(msg.X, msg.Y)
+	mouse := msg.Mouse()
+	m = m.updateHover(mouse.X, mouse.Y)
 
 	// Wheel events work regardless of cursor position. They are coalesced,
 	// not handled one-by-one: macOS trackpads emit them far faster than the
 	// terminal can repaint during momentum scrolling.
-	if msg.Action == tea.MouseActionPress {
-		switch msg.Button {
-		case tea.MouseButtonWheelUp:
+	switch msg.(type) {
+	case tea.MouseWheelMsg:
+		switch mouse.Button {
+		case tea.MouseWheelUp:
 			return m.accumulateWheel(msg, -1)
-		case tea.MouseButtonWheelDown:
+		case tea.MouseWheelDown:
 			return m.accumulateWheel(msg, 1)
-		case tea.MouseButtonRight:
-			return m.openContextMenuCmd(msg.X, msg.Y)
+		}
+	case tea.MouseClickMsg:
+		if mouse.Button == tea.MouseRight {
+			return m.openContextMenuCmd(mouse.X, mouse.Y)
 		}
 	}
 
 	if m.scrollDragging {
-		switch msg.Action {
-		case tea.MouseActionMotion:
-			return m.applyScrollBarDrag(msg.Y)
-		case tea.MouseActionRelease:
+		switch msg.(type) {
+		case tea.MouseMotionMsg:
+			return m.applyScrollBarDrag(mouse.Y)
+		case tea.MouseReleaseMsg:
 			m.scrollDragging = false
 		}
 		return m, nil
@@ -1988,11 +2066,11 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// captures motion/release until the button is let go. A release on a
 	// different revision fires jj bookmark move.
 	if m.bookmarkDrag != nil {
-		switch msg.Action {
-		case tea.MouseActionMotion:
-			return m.updateBookmarkDrag(msg.Y)
-		case tea.MouseActionRelease:
-			return m.finishBookmarkDrag(msg.Y)
+		switch msg.(type) {
+		case tea.MouseMotionMsg:
+			return m.updateBookmarkDrag(mouse.Y)
+		case tea.MouseReleaseMsg:
+			return m.finishBookmarkDrag(mouse.Y)
 		}
 		return m, nil
 	}
@@ -2000,15 +2078,15 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Left-click in the content area selects (or activates) the row under the
 	// mouse. Clicks inside the scrollbar fall through to drag handling, and
 	// modal input modes (menus, elevation prompt) ignore clicks.
-	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+	if _, ok := msg.(tea.MouseClickMsg); ok && mouse.Button == tea.MouseLeft {
 		// Shortcut clicks (help bar / status bar menus) work in all modes.
-		if nm, cmd, ok := m.tryShortcutClick(msg.X, msg.Y); ok {
+		if nm, cmd, ok := m.tryShortcutClick(mouse.X, mouse.Y); ok {
 			return nm, cmd
 		}
-		if msg.X < m.width-scrollbarWidth && !m.modalInputActive() {
+		if mouse.X < m.width-scrollbarWidth && !m.modalInputActive() {
 			// A press on a bookmark segment starts a drag instead of
 			// selecting the row.
-			if name, idx, ok := m.bookmarkAtMouse(msg.X, msg.Y); ok {
+			if name, idx, ok := m.bookmarkAtMouse(mouse.X, mouse.Y); ok {
 				m.bookmarkDrag = &bookmarkDragState{
 					name:      name,
 					sourceIdx: idx,
@@ -2016,7 +2094,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			return m.handleClick(msg.X, msg.Y)
+			return m.handleClick(mouse.X, mouse.Y)
 		}
 	}
 
@@ -2025,20 +2103,20 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	trackH := ch - 1
 
 	// Not dragging: a press must land inside the scrollbar to start one.
-	if msg.X < m.width-scrollbarWidth || msg.X >= m.width {
+	if mouse.X < m.width-scrollbarWidth || mouse.X >= m.width {
 		return m, nil
 	}
-	if msg.Y < trackStartY || msg.Y >= trackStartY+trackH || trackH < 1 {
+	if mouse.Y < trackStartY || mouse.Y >= trackStartY+trackH || trackH < 1 {
 		return m, nil
 	}
 
-	switch msg.Action {
-	case tea.MouseActionPress:
-		if msg.Button == tea.MouseButtonLeft {
+	switch msg.(type) {
+	case tea.MouseClickMsg:
+		if mouse.Button == tea.MouseLeft {
 			m.scrollDragging = true
-			return m.applyScrollBarDrag(msg.Y)
+			return m.applyScrollBarDrag(mouse.Y)
 		}
-	case tea.MouseActionRelease:
+	case tea.MouseReleaseMsg:
 		m.scrollDragging = false
 	}
 
@@ -2264,7 +2342,8 @@ func (m Model) applyScrollBarDrag(mouseY int) (tea.Model, tea.Cmd) {
 // state change — so the frame stays identical and the renderer repaints
 // nothing for them.
 func (m Model) accumulateWheel(msg tea.MouseMsg, dir int) (tea.Model, tea.Cmd) {
-	m.wheelX, m.wheelY = msg.X, msg.Y
+	mouse := msg.Mouse()
+	m.wheelX, m.wheelY = mouse.X, mouse.Y
 	if m.wheelPending {
 		m.wheelAccum += dir
 		return m, nil
@@ -2430,7 +2509,7 @@ func (m Model) handleHelpKey(k string) Model {
 // handleFilePickerKey drives the tree-style file browser. Any typed
 // character launches the inline fuzzy finder (pre-filled with that
 // character) as a telescoped overlay; navigation keys move/expand the tree.
-func (m Model) handleFilePickerKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+func (m Model) handleFilePickerKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 	fv := &m.fileView
 	if fv.fzfActive {
 		return m.handleFzfKey(msg, k)
@@ -2518,7 +2597,7 @@ func (m Model) handleFilePickerKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd
 // handleFzfKey drives the inline fuzzy finder overlay. Typed characters
 // append to the query; backspace removes the last character; enter opens
 // the selected file; esc returns to the tree.
-func (m Model) handleFzfKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+func (m Model) handleFzfKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 	fv := &m.fileView
 	switch m.keys.resolve(ctxFzf, k) {
 	case actCancel:
@@ -2838,7 +2917,7 @@ func (m Model) findEntryByChangeID(changeID string) *jj.LogEntry {
 	return nil
 }
 
-func (m Model) handleFileKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+func (m Model) handleFileKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 	// A diff opened from the blame/history sub-view overlays the file view.
 	if m.diffOpen {
 		return m.handleDiffKey(k)
@@ -2853,7 +2932,7 @@ func (m Model) handleFileKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+func (m Model) handleLogKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 	action := m.keys.resolve(ctxLog, k)
 
 	// Any key other than navigation and enter leaves the edge-line cursor.
@@ -3077,7 +3156,7 @@ func (m Model) handleLogKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
 // append to the query and re-filter; backspace removes the last character;
 // ctrl+u clears the query; enter jumps the cursor to the selected result;
 // navigation keys move through results; esc/q cancels and returns to the log.
-func (m Model) handleSearchKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+func (m Model) handleSearchKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 	switch m.keys.resolve(ctxSearch, k) {
 	case actCancel:
 		m.searchMode = false
@@ -3247,7 +3326,7 @@ func (m Model) execRebase() (tea.Model, tea.Cmd) {
 	})
 }
 
-func (m Model) handleBookmarkKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+func (m Model) handleBookmarkKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 	if m.bookmarkAction != "" {
 		switch m.keys.resolve(ctxInput, k) {
 		case actCancel:
@@ -3325,7 +3404,7 @@ func (m Model) handleBookmarkKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
-func (m Model) handleGitKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+func (m Model) handleGitKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 	if m.pushMode {
 		switch m.keys.resolve(ctxInput, k) {
 		case actCancel:
@@ -3544,7 +3623,7 @@ func (m Model) execBookmark(action, input string) tea.Cmd {
 	}
 }
 
-func (m Model) handleTagKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+func (m Model) handleTagKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 	if m.tagAction != "" {
 		switch m.keys.resolve(ctxInput, k) {
 		case actCancel:
@@ -3667,7 +3746,7 @@ func (m Model) execTag(action, input string) tea.Cmd {
 	}
 }
 
-func (m Model) handleRenameKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+func (m Model) handleRenameKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 	switch m.keys.resolve(ctxRename, k) {
 	case actCancel:
 		m.renameMode = false
@@ -3857,17 +3936,11 @@ func (m Model) suggestionsVisible() bool {
 	return (m.bookmarkAction != "" || m.tagAction != "" || m.pushMode) && len(m.displaySuggestions()) > 0
 }
 
-func typed(msg tea.KeyMsg) (string, bool) {
-	switch msg.Type {
-	case tea.KeySpace:
-		return " ", true
-	case tea.KeyRunes:
-		if msg.Alt || len(msg.Runes) == 0 {
-			return "", false
-		}
-		return string(msg.Runes), true
+func typed(msg tea.KeyPressMsg) (string, bool) {
+	if msg.Mod.Contains(tea.ModAlt) || msg.Text == "" {
+		return "", false
 	}
-	return "", false
+	return msg.Text, true
 }
 
 func trimLastRune(s string) string {
@@ -3935,8 +4008,17 @@ func (m Model) bootInitLines() []string {
 	return lines
 }
 
-// View renders the full screen.
-func (m Model) View() string {
+// View renders the full screen and declares the terminal capabilities gojo
+// needs. All-motion mouse reporting is required for unpressed hover events.
+func (m Model) View() tea.View {
+	v := tea.NewView(m.viewContent())
+	v.AltScreen = true
+	v.ReportFocus = true
+	v.MouseMode = tea.MouseModeAllMotion
+	return v
+}
+
+func (m Model) viewContent() string {
 	if m.width <= 0 || m.height <= 0 {
 		return ""
 	}
@@ -4291,7 +4373,7 @@ func (m Model) renderStatusBar() []string {
 
 // renderMenuRows renders a subcommand menu, wrapping onto extra rows when the
 // terminal is too narrow to fit all items on one line.
-func (m Model) renderMenuRows(prefix string, base, hl lipgloss.TerminalColor, items [][2]string) []string {
+func (m Model) renderMenuRows(prefix string, base, hl terminalColor, items [][2]string) []string {
 	packed := wrapMenu(m.width, prefix, base, hl, colDarkerGray, " ", items, m.hoverShortcut)
 	out := make([]string, len(packed))
 	for i, row := range packed {
@@ -4505,7 +4587,7 @@ func (m Model) tagMenuItems() [][2]string {
 // and barBg is non-nil, the item's fg/bg are inverted (bg becomes base, fg
 // becomes barBg) so it reads as a hovered button. A lone item wider than the
 // terminal is allowed to overflow and is clipped by the caller.
-func wrapMenu(width int, prefix string, base, hl, barBg lipgloss.TerminalColor, sep string, items [][2]string, hoverKey string) [][]seg {
+func wrapMenu(width int, prefix string, base, hl, barBg terminalColor, sep string, items [][2]string, hoverKey string) [][]seg {
 	if width <= 1 {
 		return [][]seg{{}}
 	}
@@ -4540,7 +4622,7 @@ func wrapMenu(width int, prefix string, base, hl, barBg lipgloss.TerminalColor, 
 		// On hover, invert fg/bg so the item reads as a pressed button.
 		itemBase := base
 		itemHl := hl
-		var itemBg lipgloss.TerminalColor
+		var itemBg terminalColor
 		if it[1] == hoverKey && barBg != nil {
 			itemBase, itemBg = barBg, base
 			itemHl = barBg
@@ -4610,7 +4692,7 @@ func (m Model) renderHelpBar() []string {
 	return out
 }
 
-func hlSegs(items [][2]string, base, hlc lipgloss.TerminalColor, sep string, bg lipgloss.TerminalColor) []seg {
+func hlSegs(items [][2]string, base, hlc terminalColor, sep string, bg terminalColor) []seg {
 	var out []seg
 	for i, it := range items {
 		text, match := it[0], it[1]

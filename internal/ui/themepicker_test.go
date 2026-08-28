@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"gojo/internal/jj"
 )
@@ -61,7 +61,7 @@ func TestThemePickerFlow(t *testing.T) {
 	}
 
 	// Open the picker from the log view.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("T")})
+	m = step(t, m, keyPress("T"))
 	if !m.themeOpen {
 		t.Fatal("picker did not open on T")
 	}
@@ -70,7 +70,7 @@ func TestThemePickerFlow(t *testing.T) {
 	}
 
 	// Move down: live-previews terminal (index 1) — observable via colText.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = step(t, m, keyPress("j"))
 	if m.themeCursor != 1 {
 		t.Fatalf("themeCursor = %d", m.themeCursor)
 	}
@@ -79,7 +79,7 @@ func TestThemePickerFlow(t *testing.T) {
 	}
 
 	// Apply with enter: commits + saves.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = step(t, m, keyCode(tea.KeyEnter))
 	if m.themeOpen {
 		t.Fatal("picker should close on enter")
 	}
@@ -91,12 +91,12 @@ func TestThemePickerFlow(t *testing.T) {
 	}
 
 	// Reopen, preview something else, cancel: original theme restored.
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("T")})
+	m = step(t, m, keyPress("T"))
 	if m.themeCursor != 1 {
 		t.Fatalf("picker should open on the active theme, cursor = %d", m.themeCursor)
 	}
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")}) // up → gojo
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = step(t, m, keyPress("k")) // up → gojo
+	m = step(t, m, keyCode(tea.KeyEscape))
 	if m.themeOpen {
 		t.Fatal("picker should close on esc")
 	}
@@ -111,14 +111,14 @@ func TestThemePickerFlow(t *testing.T) {
 func TestThemePickerWheel(t *testing.T) {
 	defer applyTheme(gojoTheme())
 	m := themeBootModel(t, "", loadThemes("", "", filepath.Join("..", "..")))
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("T")})
-	m = step(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	m = step(t, m, keyPress("T"))
+	m = step(t, m, mousePress(tea.MouseWheelDown, 0, 0))
 	if m.themeCursor != 1 {
 		t.Fatalf("wheel down should move cursor, got %d", m.themeCursor)
 	}
 	// Further burst steps accumulate, then flush as one batch.
-	m = step(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
-	m = step(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	m = step(t, m, mousePress(tea.MouseWheelDown, 0, 0))
+	m = step(t, m, mousePress(tea.MouseWheelDown, 0, 0))
 	m = step(t, m, wheelTickMsg{})
 	if m.themeCursor != 3 {
 		t.Fatalf("batched wheel burst should land at 3, got %d", m.themeCursor)

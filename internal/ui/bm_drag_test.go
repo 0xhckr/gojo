@@ -1,10 +1,10 @@
 package ui
 
 import (
+	tea "charm.land/bubbletea/v2"
+	"gojo/internal/jj"
 	"strings"
 	"testing"
-	tea "github.com/charmbracelet/bubbletea"
-	"gojo/internal/jj"
 )
 
 func bookmarkTestModel() Model {
@@ -69,7 +69,7 @@ func TestBookmarkDragReleaseOnSameCommitNoOp(t *testing.T) {
 	m = m2.(Model)
 
 	// Release on the same entry — no cmd, drag cleared.
-	m2, cmd := m.Update(tea.MouseMsg{Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft, X: 10, Y: y0})
+	m2, cmd := m.Update(mouseRelease(tea.MouseLeft, 10, y0))
 	m = m2.(Model)
 	if m.bookmarkDrag != nil {
 		t.Error("drag not cleared on release")
@@ -87,7 +87,7 @@ func TestBookmarkDragReleaseOnDifferentCommitProducesCmd(t *testing.T) {
 	m = m2.(Model)
 
 	// Release on entry 1 (Y=5).
-	m2, cmd := m.Update(tea.MouseMsg{Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft, X: 10, Y: 5})
+	m2, cmd := m.Update(mouseRelease(tea.MouseLeft, 10, 5))
 	m = m2.(Model)
 	if m.bookmarkDrag != nil {
 		t.Error("drag not cleared on release")
@@ -107,7 +107,7 @@ func TestBookmarkDragRenderShowsDropMarker(t *testing.T) {
 	m2, _ = m.Update(motion(10, 5)) // hover over entry 1
 	m = m2.(Model)
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "drop") {
 		t.Fatal("drag view does not show drop marker")
 	}

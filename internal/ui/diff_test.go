@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"gojo/internal/jj"
@@ -416,7 +416,7 @@ func TestDiffWheelScrollsWithoutCursor(t *testing.T) {
 
 	// Message level: one wheel event scrolls the viewport one step without
 	// touching the cursor.
-	nm, _ := m.Update(wheelPress(tea.MouseButtonWheelDown, 10, 5))
+	nm, _ := m.Update(wheelPress(tea.MouseWheelDown, 10, 5))
 	m = nm.(Model)
 	if m.diffCurChunk != 1 || m.diffCurLine != 0 {
 		t.Fatalf("wheel moved cursor to chunk=%d line=%d, want 1,0", m.diffCurChunk, m.diffCurLine)
@@ -444,7 +444,7 @@ func TestDiffWheelScrollsWithoutCursor(t *testing.T) {
 
 	// The next cursor movement reclaims the viewport: j advances the cursor
 	// and the view snaps back so the cursor is visible again.
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	nm, _ = m.Update(keyPress("j"))
 	m = nm.(Model)
 	if m.diffCurChunk != 1 || m.diffCurLine != 1 {
 		t.Fatalf("after j: chunk=%d line=%d, want 1,1", m.diffCurChunk, m.diffCurLine)
@@ -487,17 +487,17 @@ func TestDiffPageKeysScrollWithoutCursor(t *testing.T) {
 		}
 	}
 	start := m.diffScrollY
-	press(tea.KeyMsg{Type: tea.KeyPgDown}, min(m.diffMaxScroll(), start+half))
-	press(tea.KeyMsg{Type: tea.KeyCtrlD}, min(m.diffMaxScroll(), start+2*half))
-	press(tea.KeyMsg{Type: tea.KeyPgDown}, min(m.diffMaxScroll(), start+3*half))
-	press(tea.KeyMsg{Type: tea.KeyCtrlU}, min(m.diffMaxScroll(), start+2*half))
+	press(keyCode(tea.KeyPgDown), min(m.diffMaxScroll(), start+half))
+	press(keyCtrl('d'), min(m.diffMaxScroll(), start+2*half))
+	press(keyCode(tea.KeyPgDown), min(m.diffMaxScroll(), start+3*half))
+	press(keyCtrl('u'), min(m.diffMaxScroll(), start+2*half))
 
 	// Clamps at the top without touching the cursor.
 	for i := 0; m.diffScrollY > 0; i++ {
 		if i > 10 {
 			t.Fatalf("pgup never clamped: scrollY %d", m.diffScrollY)
 		}
-		nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+		nm, _ := m.Update(keyCode(tea.KeyPgUp))
 		m = nm.(Model)
 	}
 	if m.diffCurChunk != 1 || m.diffCurLine != 0 || m.diffCursorBodyRow() != cur {
@@ -936,28 +936,28 @@ func TestDiffCollapseKeyboard(t *testing.T) {
 	}
 
 	// Press 'h' → should collapse a.go (cursor is on its header).
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	m2, _ := m.Update(keyPress("h"))
 	m = m2.(Model)
 	if !m.diffCollapsed["a.go"] {
 		t.Fatal("'h' did not collapse a.go when cursor was on its header")
 	}
 
 	// Press 'l' → should expand a.go (cursor still on its header).
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	m2, _ = m.Update(keyPress("l"))
 	m = m2.(Model)
 	if m.diffCollapsed["a.go"] {
 		t.Fatal("'l' did not expand a.go when cursor was on its header")
 	}
 
 	// Press left arrow → collapse again.
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m2, _ = m.Update(keyCode(tea.KeyLeft))
 	m = m2.(Model)
 	if !m.diffCollapsed["a.go"] {
 		t.Fatal("left arrow did not collapse a.go")
 	}
 
 	// Press right arrow → expand.
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m2, _ = m.Update(keyCode(tea.KeyRight))
 	m = m2.(Model)
 	if m.diffCollapsed["a.go"] {
 		t.Fatal("right arrow did not expand a.go")
@@ -970,13 +970,13 @@ func TestDiffCollapseKeyboard(t *testing.T) {
 		t.Fatal("cursor should NOT be on a file header after moving to chunk 1")
 	}
 	// 'h' from within the code collapses the owning file.
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	m2, _ = m.Update(keyPress("h"))
 	m = m2.(Model)
 	if !m.diffCollapsed["a.go"] {
 		t.Fatal("'h' should collapse a.go even when cursor is on a code line")
 	}
 	// 'l' from within the code expands the owning file.
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	m2, _ = m.Update(keyPress("l"))
 	m = m2.(Model)
 	if m.diffCollapsed["a.go"] {
 		t.Fatal("'l' should expand a.go even when cursor is on a code line")

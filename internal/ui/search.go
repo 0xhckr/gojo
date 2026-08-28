@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"gojo/internal/jj"
 )
@@ -101,7 +101,7 @@ func (m *Model) searchFilter() {
 // highlightMatched splits s into styled segments, colouring matched runes (per
 // the matched mask) with hl and the rest with base. A nil mask produces a
 // single base-coloured segment.
-func highlightMatched(s string, matched []bool, base, hl, bg lipgloss.TerminalColor) []seg {
+func highlightMatched(s string, matched []bool, base, hl, bg terminalColor) []seg {
 	if s == "" {
 		return nil
 	}

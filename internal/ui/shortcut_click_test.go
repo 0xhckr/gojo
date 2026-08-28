@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // helpBarY computes the terminal Y of the first help bar row for a model
@@ -181,7 +181,7 @@ func TestKeyMsgFromHint(t *testing.T) {
 		{"↑", "up"},
 		{"↓", "down"},
 		{"esc", "esc"},
-		{"space", " "},
+		{"space", "space"},
 		{"q", "q"},
 	}
 	for _, c := range cases {

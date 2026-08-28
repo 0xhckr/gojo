@@ -4,17 +4,16 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
-	"github.com/muesli/termenv"
 )
 
 // seg is a styled run of text used to compose a single terminal line.
 // A nil fg or bg means "use the terminal default".
 type seg struct {
 	text      string
-	fg, bg    lipgloss.TerminalColor
+	fg, bg    terminalColor
 	bold      bool
 	underline bool
 	faint     bool
@@ -31,12 +30,10 @@ type seg struct {
 // fast path against real Render output) and reuse the escape sequences.
 
 type styleKey struct {
-	fg, bg    lipgloss.TerminalColor
+	fg, bg    terminalColor
 	bold      bool
 	underline bool
 	faint     bool
-	profile   termenv.Profile
-	dark      bool
 }
 
 type renderMode uint8
@@ -68,10 +65,8 @@ var (
 const styleCacheMax = 8192
 
 func styleFor(s seg) cachedStyle {
-	r := lipgloss.DefaultRenderer()
 	k := styleKey{
 		fg: s.fg, bg: s.bg, bold: s.bold, underline: s.underline, faint: s.faint,
-		profile: r.ColorProfile(), dark: r.HasDarkBackground(),
 	}
 	styleCacheMu.RLock()
 	cs, ok := styleCache[k]
@@ -219,7 +214,7 @@ func segTextWidth(s string) int {
 
 // bgStyler returns the cached style that carries only a background color —
 // used for full-width fills and padding. A nil bg means "no styling".
-func bgStyler(bg lipgloss.TerminalColor) cachedStyle {
+func bgStyler(bg terminalColor) cachedStyle {
 	return styleFor(seg{bg: bg})
 }
 
@@ -256,7 +251,7 @@ func plainRow(width int, segs ...seg) string {
 // ANSI-aware widths equals the width of the concatenation for all text the UI
 // produces), avoiding a second ANSI-stripping scan of the rendered row; the
 // clip is skipped entirely when nothing overflows (the common case).
-func bgRow(width int, bg lipgloss.TerminalColor, segs ...seg) string {
+func bgRow(width int, bg terminalColor, segs ...seg) string {
 	for i := range segs {
 		if segs[i].bg == nil {
 			segs[i].bg = bg
@@ -283,12 +278,11 @@ func bgRow(width int, bg lipgloss.TerminalColor, segs ...seg) string {
 // blankRow returns a width-wide row filled with bg (or empty if bg == nil).
 // Rendered rows are cached: padding to full height re-requests the same blank
 // row many times per frame.
-func blankRow(width int, bg lipgloss.TerminalColor) string {
+func blankRow(width int, bg terminalColor) string {
 	if bg == nil || width <= 0 {
 		return ""
 	}
-	r := lipgloss.DefaultRenderer()
-	k := blankKey{width: width, bg: bg, profile: r.ColorProfile(), dark: r.HasDarkBackground()}
+	k := blankKey{width: width, bg: bg}
 	blankMu.RLock()
 	s, ok := blankCache[k]
 	blankMu.RUnlock()
@@ -303,10 +297,8 @@ func blankRow(width int, bg lipgloss.TerminalColor) string {
 }
 
 type blankKey struct {
-	width   int
-	bg      lipgloss.TerminalColor
-	profile termenv.Profile
-	dark    bool
+	width int
+	bg    terminalColor
 }
 
 var (

@@ -3,8 +3,6 @@ package ui
 import (
 	"fmt"
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 type helpBinding struct {
@@ -14,7 +12,7 @@ type helpBinding struct {
 
 type helpSection struct {
 	title    string
-	color    lipgloss.TerminalColor
+	color    terminalColor
 	bindings []helpBinding
 }
 

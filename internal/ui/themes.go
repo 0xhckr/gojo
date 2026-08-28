@@ -26,7 +26,7 @@ import (
 	"reflect"
 	"strconv"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // paletteDef holds every color slot the UI consumes. All fields are color
@@ -163,10 +163,10 @@ func (t Theme) variant(dark bool) paletteDef {
 
 // previewColors returns the theme's core accent colors for the picker's
 // color swatch, resolved for the terminal's background class.
-func (t Theme) previewColors(dark bool) []lipgloss.TerminalColor {
+func (t Theme) previewColors(dark bool) []terminalColor {
 	p := t.variant(dark)
 	cols := []string{p.Red, p.Orange, p.Yellow, p.Green, p.Cyan, p.Blue, p.Purple, p.Pink}
-	out := make([]lipgloss.TerminalColor, 0, len(cols))
+	out := make([]terminalColor, 0, len(cols))
 	for _, c := range cols {
 		if c != "" {
 			out = append(out, lipgloss.Color(c))
@@ -421,12 +421,9 @@ func resolve(p paletteDef) paletteDef {
 // color: adaptive when the variants differ, a plain color when both are the
 // same (single-variant themes pinned to both backgrounds), nil ("terminal
 // default") when both are empty.
-func themeColor(light, dark string) lipgloss.TerminalColor {
+func themeColor(light, dark string) terminalColor {
 	if light != "" && dark != "" {
-		if light == dark {
-			return lipgloss.Color(dark)
-		}
-		return lipgloss.AdaptiveColor{Light: light, Dark: dark}
+		return adaptiveColor(light, dark)
 	}
 	if dark != "" {
 		return lipgloss.Color(dark)
@@ -477,15 +474,15 @@ func applyTheme(t Theme) {
 	colDarkPurple = colElement
 	colDarkerGray = colPanel
 
-	fileSectionBg = []lipgloss.TerminalColor{
+	fileSectionBg = []terminalColor{
 		themeColor(l.SectionBgA, d.SectionBgA),
 		themeColor(l.SectionBgB, d.SectionBgB),
 	}
-	fileSectionBarDim = []lipgloss.TerminalColor{
+	fileSectionBarDim = []terminalColor{
 		themeColor(l.SectionBarDimA, d.SectionBarDimA),
 		themeColor(l.SectionBarDimB, d.SectionBarDimB),
 	}
-	fileSectionBarBright = []lipgloss.TerminalColor{
+	fileSectionBarBright = []terminalColor{
 		themeColor(l.SectionBarBrightA, d.SectionBarBrightA),
 		themeColor(l.SectionBarBrightB, d.SectionBarBrightB),
 	}

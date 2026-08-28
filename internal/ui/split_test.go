@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // setupSplitModel builds a model with a diff panel open on sampleDiff, ready
@@ -33,7 +33,7 @@ func setupSplitModel() Model {
 func TestSplitEnterMode(t *testing.T) {
 	m := setupSplitModel()
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	next, cmd := m.Update(keyPress("s"))
 	m = next.(Model)
 	if cmd != nil {
 		t.Fatal("s should not produce a command")
@@ -58,9 +58,9 @@ func TestSplitCancel(t *testing.T) {
 
 		var next tea.Model
 		if key == "esc" {
-			next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+			next, _ = m.Update(keyCode(tea.KeyEscape))
 		} else {
-			next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+			next, _ = m.Update(keyPress(key))
 		}
 		m = next.(Model)
 		if m.splitMode {
@@ -355,7 +355,7 @@ func TestSplitConfirmNothingToSplit(t *testing.T) {
 		}
 	}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	next, cmd := m.Update(keyPress("c"))
 	m = next.(Model)
 	if cmd != nil {
 		t.Errorf("confirm with all marked should not produce a command")
@@ -373,21 +373,21 @@ func TestSplitNavigation(t *testing.T) {
 
 	// down should move the cursor.
 	initialChunk := m.diffCurChunk
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	next, _ := m.Update(keyPress("j"))
 	m = next.(Model)
 	if m.diffCurChunk == initialChunk {
 		t.Error("j did not advance cursor in split mode")
 	}
 
 	// up should move it back.
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	next, _ = m.Update(keyPress("k"))
 	m = next.(Model)
 	if m.diffCurChunk != initialChunk {
 		t.Error("k did not move cursor back in split mode")
 	}
 
 	// home should jump to top.
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	next, _ = m.Update(keyPress("g"))
 	m = next.(Model)
 	if m.diffCurChunk != 0 || m.diffCurLine != 0 {
 		t.Errorf("g did not jump to top: chunk=%d line=%d", m.diffCurChunk, m.diffCurLine)
