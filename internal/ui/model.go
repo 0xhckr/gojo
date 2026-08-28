@@ -316,6 +316,16 @@ type diffLoadedMsg struct {
 	unchanged bool
 }
 
+// diffHighlightedMsg replaces fast plain diff rows with syntax-highlighted
+// rows after the panel is already usable. raw and style reject stale work.
+type diffHighlightedMsg struct {
+	rev   string
+	raw   string
+	style string
+	dark  bool
+	rows  []diffRow
+}
+
 type actionDoneMsg struct {
 	message string
 	err     error
@@ -496,7 +506,15 @@ func (m Model) openDiffCmd(commitID, changeID string) tea.Cmd {
 			diff == m.diffSrcRaw && (desc == "" || desc == m.diffDesc) {
 			return diffLoadedMsg{rev: changeID, status: status, unchanged: true}
 		}
-		return diffLoadedMsg{rev: changeID, desc: desc, status: status, rows: renderDiff(diff), raw: diff}
+		return diffLoadedMsg{rev: changeID, desc: desc, status: status, rows: renderDiffPlain(diff), raw: diff}
+	}
+}
+
+func (m Model) highlightDiffCmd(rev, raw string) tea.Cmd {
+	return func() tea.Msg {
+		_, style := chromaStyle()
+		dark := hasDarkBackground
+		return diffHighlightedMsg{rev: rev, raw: raw, style: style, dark: dark, rows: renderDiff(raw)}
 	}
 }
 
@@ -940,6 +958,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if r := m.diffCursorBodyRow(); r >= 0 && (r < m.diffScrollY || r >= m.diffScrollY+m.diffBodyHeight()) {
 			m.diffFollowCursor()
 		}
+		if msg.raw != "" {
+			return m, m.highlightDiffCmd(msg.rev, msg.raw)
+		}
+		return m, nil
+
+	case diffHighlightedMsg:
+		_, style := chromaStyle()
+		if !m.diffOpen || !m.diffIsRevision || msg.rev != m.diffRev ||
+			msg.raw != m.diffSrcRaw || msg.style != style || msg.dark != hasDarkBackground ||
+			len(msg.rows) != len(m.diffRows) {
+			return m, nil
+		}
+		m.diffRows = msg.rows
 		return m, nil
 
 	case actionDoneMsg:

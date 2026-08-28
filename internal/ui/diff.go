@@ -86,6 +86,16 @@ func atoi(s string) int {
 // renderDiff parses raw git-format unified diff text into styled rows,
 // syntax-highlighting line content via chroma.
 func renderDiff(raw string) []diffRow {
+	return renderDiffMode(raw, true)
+}
+
+// renderDiffPlain parses a diff without syntax highlighting. It is used on the
+// diff-open critical path; syntax-highlighted rows replace it asynchronously.
+func renderDiffPlain(raw string) []diffRow {
+	return renderDiffMode(raw, false)
+}
+
+func renderDiffMode(raw string, syntaxHighlight bool) []diffRow {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
@@ -221,7 +231,9 @@ func renderDiff(raw string) []diffRow {
 		}
 	}
 
-	highlightDiffFiles(files)
+	if syntaxHighlight {
+		highlightDiffFiles(files)
+	}
 
 	var rows []diffRow
 	for _, f := range files {

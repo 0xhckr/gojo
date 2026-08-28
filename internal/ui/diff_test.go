@@ -89,6 +89,56 @@ func TestRenderDiffEmpty(t *testing.T) {
 	}
 }
 
+func TestDiffSyntaxHighlightingIsAppliedAsynchronously(t *testing.T) {
+	plain := renderDiffPlain(sampleDiff)
+	for _, r := range plain {
+		for _, s := range r.spans {
+			if s.fg != "" {
+				t.Fatal("plain diff unexpectedly contains syntax highlighting")
+			}
+		}
+	}
+
+	m := Model{width: 80, height: 24, diffOpen: true, diffIsRevision: true, diffRev: "abc"}
+	nm, cmd := m.Update(diffLoadedMsg{rev: "abc", raw: sampleDiff, rows: plain})
+	m = nm.(Model)
+	if cmd == nil {
+		t.Fatal("diff load did not schedule syntax highlighting")
+	}
+	msg, ok := cmd().(diffHighlightedMsg)
+	if !ok {
+		t.Fatalf("highlight command returned %T", msg)
+	}
+	nm, _ = m.Update(msg)
+	m = nm.(Model)
+
+	hasSyntaxColor := false
+	for _, r := range m.diffRows {
+		for _, s := range r.spans {
+			if s.fg != "" {
+				hasSyntaxColor = true
+				break
+			}
+		}
+	}
+	if !hasSyntaxColor {
+		t.Error("asynchronous result did not apply syntax highlighting")
+	}
+
+	// A completed command for older content must not overwrite newer rows.
+	m.diffSrcRaw = "newer diff"
+	m.diffRows = plain
+	nm, _ = m.Update(msg)
+	m = nm.(Model)
+	for _, r := range m.diffRows {
+		for _, s := range r.spans {
+			if s.fg != "" {
+				t.Fatal("stale syntax highlighting replaced newer rows")
+			}
+		}
+	}
+}
+
 func TestComputeDiffChunks(t *testing.T) {
 	rows := renderDiff(sampleDiff)
 	chunks := computeDiffChunks(rows, 0, nil)

@@ -149,3 +149,21 @@ func BenchmarkRenderDiff(b *testing.B) {
 		_ = renderDiff(raw)
 	}
 }
+
+// BenchmarkParseDiff measures the latency-critical first stage used to open a
+// diff before syntax highlighting finishes in the background.
+func BenchmarkParseDiff(b *testing.B) {
+	var sb strings.Builder
+	for f := 0; f < 8; f++ {
+		fmt.Fprintf(&sb, "diff --git a/file%d.go b/file%d.go\n--- a/file%d.go\n+++ b/file%d.go\n@@ -1,6 +1,6 @@\n package p%d\n", f, f, f, f, f)
+		for i := 0; i < 30; i++ {
+			fmt.Fprintf(&sb, "-old value %d = compute(x%d)\n+new value %d = recompute(x%d)\n", i, i, i, i)
+		}
+		sb.WriteString(" ctx tail\n")
+	}
+	raw := sb.String()
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = renderDiffPlain(raw)
+	}
+}
