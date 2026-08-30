@@ -14,12 +14,25 @@ adheres to [Semantic Versioning][semver].
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-08-30
+
 ### Added
 - Workspace management from the log with `w`: list and switch workspaces, add
   workspace directories, rename, forget safely without deleting files, and
   update stale workspaces.
 - Workspace ownership labels (`name@`) on working-copy commits in the log and
   revision search.
+
+### Changed
+- Typing in the file browser now starts fuzzy search; arrow keys remain
+  available for tree navigation without conflicting single-letter shortcuts.
+- Diff content appears immediately and gains syntax highlighting
+  asynchronously, with faster highlighting for large diffs.
+- Updated the terminal runtime for improved input, mouse, focus, and rendering
+  compatibility.
+
+### Removed
+- x86_64 Darwin support from the Nix flake; supported Darwin builds are arm64.
 
 ## [1.4.0] - 2026-08-09
 
@@ -51,6 +64,7 @@ First tagged release.
 - TOML config at `~/.config/gojo/gojo.toml` (or `[tools.gojo]` in jj config).
 - Nix flake (devShell + package), Homebrew formula, and release automation.
 
-[Unreleased]: https://github.com/0xhckr/gojo/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/0xhckr/gojo/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/0xhckr/gojo/releases/tag/v1.7.0
 [1.4.0]: https://github.com/0xhckr/gojo/releases/tag/v1.4.0
 [1.0.0]: https://github.com/0xhckr/gojo/releases/tag/v1.0.0
