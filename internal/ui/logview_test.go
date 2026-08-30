@@ -130,3 +130,15 @@ func TestRenderLogMarkersSurviveClipping(t *testing.T) {
 		t.Errorf("marker missing with scrollbar: %s", plain(bar))
 	}
 }
+
+func TestRenderLogWorkspaceLabels(t *testing.T) {
+	entries := []jj.LogEntry{{
+		ChangeID: "abcdefgh", CommitID: "12345678", Authors: "me@example.com",
+		HeaderPrefix: "@  ", BodyPrefix: "│  ", Subject: "workspace change",
+		Workspaces: []string{"default", "feature"},
+	}}
+	view := ansi.Strip(strings.Join(renderLog(100, 4, entries, 0, 0, -1, nil, 0, rebaseView{}, squashView{}, bookmarkDragView{}, -1, -1, "", ""), "\n"))
+	if !strings.Contains(view, "default@") || !strings.Contains(view, "feature@") {
+		t.Fatalf("workspace labels missing from log:\n%s", view)
+	}
+}

@@ -4,6 +4,7 @@ package jj
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,7 +16,9 @@ import (
 
 // logTemplate is a two-line jj template using a \x01 marker byte to separate
 // the graph prefix from structured field data. See parseLog for the layout.
-const logTemplate = `"\x01" ++ change_id.short(8) ++ "|" ++ change_id.shortest() ++ "|" ++ commit_id.short(8) ++ "|" ++ commit_id.shortest() ++ "|" ++ author.email() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "|" ++ tags.join(",") ++ "|" ++ if(conflict, "Y", "N") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"`
+const logTemplate = `"\x01" ++ change_id.short(8) ++ "|" ++ change_id.shortest() ++ "|" ++ commit_id.short(8) ++ "|" ++ commit_id.shortest() ++ "|" ++ author.email() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "|" ++ tags.join(",") ++ "|" ++ if(conflict, "Y", "N") ++ "|" ++ working_copies.map(|w| w.name()).join(",") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"`
+
+const workspaceTemplate = `"{" ++ "\"name\":" ++ json(name) ++ ",\"root\":" ++ if(root, json(root.absolute()), "null") ++ ",\"change_id\":" ++ json(target.change_id()) ++ ",\"commit_id\":" ++ json(target.commit_id()) ++ "}\n"`
 
 // LogEntry is one commit in the log, plus the surrounding graph rendering.
 type LogEntry struct {
@@ -28,6 +31,7 @@ type LogEntry struct {
 	Subject           string
 	Bookmarks         []string
 	Tags              []string
+	Workspaces        []string
 	IsWorkingCopy     bool
 	IsImmutable       bool
 	HasConflict       bool
@@ -50,6 +54,15 @@ const (
 type StatusEntry struct {
 	Path   string
 	Status StatusKind
+}
+
+// Workspace is a working copy attached to the repository. Root is empty when
+// jj knows the workspace name but its directory no longer resolves.
+type Workspace struct {
+	Name     string `json:"name"`
+	Root     string `json:"root"`
+	ChangeID string `json:"change_id"`
+	CommitID string `json:"commit_id"`
 }
 
 // Runner executes jj commands inside a repository.
@@ -335,6 +348,77 @@ func (r *Runner) Undo() error {
 // Redo re-applies an undone operation.
 func (r *Runner) Redo() error {
 	_, err := r.run("redo")
+	return err
+}
+
+// WorkspaceList returns every workspace attached to the repository.
+func (r *Runner) WorkspaceList() ([]Workspace, error) {
+	out, err := r.run("workspace", "list", "--ignore-working-copy", "--color", "never", "-T", workspaceTemplate)
+	if err != nil {
+		return nil, err
+	}
+	var workspaces []Workspace
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var workspace Workspace
+		if err := json.Unmarshal([]byte(line), &workspace); err != nil {
+			return nil, fmt.Errorf("parse jj workspace list: %w", err)
+		}
+		workspaces = append(workspaces, workspace)
+	}
+	return workspaces, nil
+}
+
+// WorkspaceAdd creates a workspace at destination. An empty name lets jj use
+// the destination basename; revisions become parents of its working copy.
+func (r *Runner) WorkspaceAdd(destination, name string, revisions ...string) error {
+	if strings.TrimSpace(destination) == "" {
+		return fmt.Errorf("workspace destination is required")
+	}
+	args := []string{"workspace", "add"}
+	if name != "" {
+		args = append(args, "--name", name)
+	}
+	for _, rev := range revisions {
+		if rev != "" {
+			args = append(args, "-r", rev)
+		}
+	}
+	args = append(args, "--", destination)
+	_, err := r.run(args...)
+	return err
+}
+
+// WorkspaceForget detaches named workspaces without deleting their files.
+func (r *Runner) WorkspaceForget(names ...string) error {
+	if len(names) == 0 {
+		return fmt.Errorf("at least one workspace name is required")
+	}
+	args := []string{"workspace", "forget", "--"}
+	for _, name := range names {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("workspace name is required")
+		}
+		args = append(args, name)
+	}
+	_, err := r.run(args...)
+	return err
+}
+
+// WorkspaceRename renames the workspace containing this runner's RepoRoot.
+func (r *Runner) WorkspaceRename(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("workspace name is required")
+	}
+	_, err := r.run("workspace", "rename", "--", name)
+	return err
+}
+
+// WorkspaceUpdateStale updates the workspace containing this runner's RepoRoot.
+func (r *Runner) WorkspaceUpdateStale() error {
+	_, err := r.run("workspace", "update-stale")
 	return err
 }
 
@@ -848,6 +932,11 @@ func parseLog(raw string) []LogEntry {
 			}
 		}
 
+		var workspaces []string
+		if len(fields) > 11 && fields[11] != "" {
+			workspaces = strings.Split(fields[11], ",")
+		}
+
 		entry := LogEntry{
 			HeaderPrefix:      p.prefix,
 			ChangeID:          fields[0],
@@ -861,6 +950,7 @@ func parseLog(raw string) []LogEntry {
 			HasConflict:       fields[10] == "Y",
 			Bookmarks:         bookmarks,
 			Tags:              tags,
+			Workspaces:        workspaces,
 		}
 
 		// Next line should be the body (subject).

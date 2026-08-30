@@ -194,6 +194,10 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 		hs = append(hs, seg{text: e.Date, fg: colTextMuted, bg: bg})
 		hs = append(hs, seg{text: " ", bg: bg})
 		hs = append(hs, seg{text: e.CommitID, fg: colTextMuted, bg: bg})
+		for _, workspace := range e.Workspaces {
+			hs = append(hs, seg{text: " ", bg: bg})
+			hs = append(hs, seg{text: expandTabs(workspace) + "@", fg: colCyan, bold: true, bg: bg})
+		}
 		for _, bm := range e.Bookmarks {
 			hs = append(hs, seg{text: " ", bg: bg})
 			dragging := bd.active && i == bd.sourceIdx && bm == bd.name

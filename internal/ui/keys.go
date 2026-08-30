@@ -24,29 +24,30 @@ import (
 
 // Key contexts — the config-key prefix before the dot.
 const (
-	ctxGlobal   = "global"   // always active (quit, help)
-	ctxBoot     = "boot"     // boot init prompt / boot error screen
-	ctxElev     = "elevate"  // elevation retry prompt (any other key cancels)
-	ctxMenu     = "menu"     // right-click context menu
-	ctxInput    = "input"    // shared text-input editing (bookmark/tag/push/remote inputs)
-	ctxLog      = "log"      // commit list
-	ctxDiff     = "diff"     // diff panel
-	ctxSplit    = "split"    // interactive split mode
-	ctxHelp     = "help"     // help view scrolling
-	ctxSearch   = "search"   // revision search overlay
-	ctxRebase   = "rebase"   // rebase destination picking
-	ctxSquash   = "squash"   // squash destination picking
-	ctxBookmark = "bookmark" // bookmark menu
-	ctxTag      = "tag"      // tag menu
-	ctxGit      = "git"      // git menu
-	ctxRemote   = "remote"   // git > remote menu
-	ctxRename   = "rename"   // bookmark/tag rename input
-	ctxConflict = "conflict" // conflict resolution view
-	ctxPicker   = "picker"   // file tree picker
-	ctxFzf      = "fzf"      // inline fuzzy file finder
-	ctxBlame    = "blame"    // file blame view
-	ctxHist     = "history"  // file history view
-	ctxTheme    = "theme"    // theme picker
+	ctxGlobal    = "global"    // always active (quit, help)
+	ctxBoot      = "boot"      // boot init prompt / boot error screen
+	ctxElev      = "elevate"   // elevation retry prompt (any other key cancels)
+	ctxMenu      = "menu"      // right-click context menu
+	ctxInput     = "input"     // shared text-input editing (bookmark/tag/push/remote inputs)
+	ctxLog       = "log"       // commit list
+	ctxDiff      = "diff"      // diff panel
+	ctxSplit     = "split"     // interactive split mode
+	ctxHelp      = "help"      // help view scrolling
+	ctxSearch    = "search"    // revision search overlay
+	ctxRebase    = "rebase"    // rebase destination picking
+	ctxSquash    = "squash"    // squash destination picking
+	ctxBookmark  = "bookmark"  // bookmark menu
+	ctxTag       = "tag"       // tag menu
+	ctxGit       = "git"       // git menu
+	ctxRemote    = "remote"    // git > remote menu
+	ctxRename    = "rename"    // bookmark/tag rename input
+	ctxConflict  = "conflict"  // conflict resolution view
+	ctxPicker    = "picker"    // file tree picker
+	ctxFzf       = "fzf"       // inline fuzzy file finder
+	ctxBlame     = "blame"     // file blame view
+	ctxHist      = "history"   // file history view
+	ctxTheme     = "theme"     // theme picker
+	ctxWorkspace = "workspace" // workspace manager
 )
 
 // Action names — the config-key suffix after the dot.
@@ -119,6 +120,8 @@ const (
 	actAdd        = "add"
 	actRemove     = "remove"
 	actTheme      = "theme" // open the theme picker
+	actWorkspace  = "workspace"
+	actUpdate     = "update"
 )
 
 // keyBind declares the default keys for one action.
@@ -189,6 +192,7 @@ var defaultKeymap = []struct {
 		{actSquash, []string{"s"}},
 		{actAbsorb, []string{"x"}},
 		{actTheme, []string{"T"}},
+		{actWorkspace, []string{"w"}},
 	}},
 	{ctxDiff, []keyBind{
 		{actClose, []string{"enter", "q", "esc"}},
@@ -366,6 +370,20 @@ var defaultKeymap = []struct {
 		{actBottom, []string{"end", "G"}},
 		{actPageUp, []string{"pgup", "ctrl+u"}},
 		{actPageDown, []string{"pgdown", "ctrl+d"}},
+	}},
+	{ctxWorkspace, []keyBind{
+		{actCancel, []string{"esc", "q"}},
+		{actOpen, []string{"enter"}},
+		{actUp, []string{"up", "k"}},
+		{actDown, []string{"down", "j"}},
+		{actTop, []string{"home", "g"}},
+		{actBottom, []string{"end", "G"}},
+		{actPageUp, []string{"pgup", "ctrl+u"}},
+		{actPageDown, []string{"pgdown", "ctrl+d"}},
+		{actAdd, []string{"a"}},
+		{actRename, []string{"r"}},
+		{actForget, []string{"f"}},
+		{actUpdate, []string{"u"}},
 	}},
 }
 

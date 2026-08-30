@@ -59,6 +59,17 @@ func (m Model) helpSections() []helpSection {
 			{kv(ctxLog, actSquash), "squash mode"},
 			{kv(ctxLog, actAbsorb), "jj absorb  (move changes into ancestors)"},
 			{kv(ctxLog, actTheme), "theme picker  (live preview, saves to gojo.toml)"},
+			{kv(ctxLog, actWorkspace), "manage jj workspaces"},
+		}},
+		{title: "Workspace Manager", color: colCyan, bindings: []helpBinding{
+			{kv(ctxLog, actWorkspace) + " (from log)", "open workspace manager"},
+			{kvs(ctxWorkspace, actUp) + ", " + kvs(ctxWorkspace, actDown), "browse workspaces"},
+			{kv(ctxWorkspace, actOpen), "switch gojo to selected workspace"},
+			{kv(ctxWorkspace, actAdd), "add workspace  (enter destination path)"},
+			{kv(ctxWorkspace, actRename), "rename selected workspace"},
+			{kv(ctxWorkspace, actForget), "forget selected workspace  (files stay on disk)"},
+			{kv(ctxWorkspace, actUpdate), "update selected stale workspace"},
+			{m.hkN(ctxWorkspace, actCancel, 2, " / "), "cancel prompt / close manager"},
 		}},
 		{title: "Theme Picker", color: colMagenta, bindings: []helpBinding{
 			{kv(ctxLog, actTheme) + " (from log)", "open the theme picker"},

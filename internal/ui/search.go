@@ -14,19 +14,21 @@ import (
 // matched masks are rune-indexed into the corresponding LogEntry field string;
 // nil means the query did not match that field.
 type searchResult struct {
-	entryIdx  int
-	score     int
-	changeID  []bool
-	commitID  []bool
-	subject   []bool
-	author    []bool
-	bookmarks []bool // matched against space-joined bookmarks
-	tags      []bool // matched against space-joined tags
+	entryIdx   int
+	score      int
+	changeID   []bool
+	commitID   []bool
+	subject    []bool
+	author     []bool
+	bookmarks  []bool // matched against space-joined bookmarks
+	tags       []bool // matched against space-joined tags
+	workspaces []bool // matched against space-joined workspace labels
 }
 
 // matchEntry fuzzy-matches query against an entry's searchable fields: change
 // ID, commit ID, description (subject), author email, bookmark names, and git
-// tags. The best score across all matched fields is used for ranking.
+// tags, and workspace names. The best score across all matched fields is used
+// for ranking.
 func matchEntry(query string, e jj.LogEntry) (searchResult, bool) {
 	if query == "" {
 		return searchResult{}, true
@@ -62,6 +64,11 @@ func matchEntry(query string, e jj.LogEntry) (searchResult, bool) {
 	if tg := strings.Join(e.Tags, " "); tg != "" {
 		if r, ok := fuzzyMatch(query, tg); ok {
 			take(r, &best.tags)
+		}
+	}
+	if ws := workspaceLabels(e.Workspaces); ws != "" {
+		if r, ok := fuzzyMatch(query, ws); ok {
+			take(r, &best.workspaces)
 		}
 	}
 
@@ -281,9 +288,23 @@ func (m Model) renderSearch(width, height int) []string {
 			segs = append(segs, highlightMatched(tg, r.tags, colTeal, colYellow, bg)...)
 		}
 
+		// Workspaces.
+		if ws := workspaceLabels(e.Workspaces); ws != "" {
+			segs = append(segs, seg{text: " ", bg: bg})
+			segs = append(segs, highlightMatched(ws, r.workspaces, colCyan, colYellow, bg)...)
+		}
+
 		out = append(out, renderRowWithBar(scrollW, width, bg, hasBar, contentLine, thumbStart, thumbEnd, segs))
 		contentLine++
 	}
 
 	return padLines(out, height, width)
+}
+
+func workspaceLabels(workspaces []string) string {
+	labels := make([]string, len(workspaces))
+	for i, workspace := range workspaces {
+		labels[i] = workspace + "@"
+	}
+	return strings.Join(labels, " ")
 }

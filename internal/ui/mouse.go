@@ -19,7 +19,7 @@ import (
 // modalInputActive reports whether a text-input/menu mode is capturing all
 // input. Clicks are ignored in those states (the wheel still scrolls).
 func (m Model) modalInputActive() bool {
-	return m.pendingElev != nil || m.bookmarkMode || m.tagMode || m.renameMode || m.gitMode || m.searchMode
+	return m.pendingElev != nil || m.bookmarkMode || m.tagMode || m.renameMode || m.gitMode || m.searchMode || (m.workspaceOpen && m.workspaceAction != "")
 }
 
 // handleClick dispatches a left-press at the given terminal coordinates
@@ -27,6 +27,8 @@ func (m Model) modalInputActive() bool {
 // outside the scrollbar area.
 func (m Model) handleClick(x, mouseY int) (tea.Model, tea.Cmd) {
 	switch {
+	case m.workspaceOpen:
+		return m.handleWorkspaceClick(mouseY)
 	case m.themeOpen:
 		return m.handleThemeClick(mouseY)
 	case m.conflictOpen:
@@ -402,7 +404,7 @@ func (m Model) handleHistoryClick(mouseY int) (tea.Model, tea.Cmd) {
 // scrollbar. Clicks are also fed through here so pressing sets the highlight
 // even if no motion event preceded the press.
 func (m Model) updateHover(x, y int) Model {
-	m.hover = hoverState{valid: true, logIdx: -1, logEdge: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1, searchRow: -1, conflictBlock: -1, refName: "", refKind: "", themeRow: -1}
+	m.hover = hoverState{valid: true, logIdx: -1, logEdge: -1, diffRow: -1, pickerRow: -1, fzfRow: -1, blameLine: -1, histIdx: -1, searchRow: -1, conflictBlock: -1, refName: "", refKind: "", themeRow: -1, workspaceRow: -1}
 
 	// Check shortcut hover (help bar / status bar menus) first — this works
 	// regardless of content area bounds.
@@ -422,6 +424,10 @@ func (m Model) updateHover(x, y int) Model {
 	}
 
 	switch {
+	case m.workspaceOpen:
+		if idx, ok := m.workspaceRowAtMouseY(y); ok {
+			m.hover.workspaceRow = idx
+		}
 	case m.themeOpen:
 		if idx, ok := m.themeRowAtMouseY(y); ok {
 			m.hover.themeRow = idx

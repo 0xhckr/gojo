@@ -139,13 +139,13 @@ by feeding messages to `Update` and asserting on `View()` (see
 
 A literal `\x01` marker byte precedes both the data line and the body line, so
 the graph prefix (everything before the marker) can be separated from the
-fields. Fields are `|`-separated (11 total):
+fields. Fields are `|`-separated (12 total):
 
 ```
 0: change_id.short(8) | 1: change_id.shortest() | 2: commit_id.short(8) |
 3: commit_id.shortest() | 4: author.email() | 5: date | 6: working_copy (Y/N) |
 7: immutable (Y/N) | 8: bookmarks (comma-separated) | 9: tags (comma-separated) |
-10: conflict (Y/N)
+10: conflict (Y/N) | 11: workspaces (comma-separated names)
 ```
 
 Lines without a marker byte are graph edge lines, attached to the preceding

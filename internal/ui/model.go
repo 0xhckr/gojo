@@ -266,6 +266,16 @@ type Model struct {
 	themeCursor int
 	themeOffset int
 	themeReturn string
+
+	// Workspace manager. Enter switches gojo's active runner; mutations reload
+	// the list. workspaceAction is "add", "rename", or "forget" while a prompt
+	// captures input/confirmation.
+	workspaceOpen   bool
+	workspaces      []jj.Workspace
+	workspaceCursor int
+	workspaceOffset int
+	workspaceAction string
+	workspaceInput  string
 }
 
 // NewModel builds the initial model.
@@ -422,6 +432,16 @@ type fileAnnotateMsg struct {
 
 type fileHistoryMsg struct {
 	entries []jj.LogEntry
+	err     error
+}
+
+type workspaceListMsg struct {
+	workspaces []jj.Workspace
+	err        error
+}
+
+type workspaceDoneMsg struct {
+	message string
 	err     error
 }
 
@@ -1283,6 +1303,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fileView.phase = fileHistory
 		return m, nil
 
+	case workspaceListMsg:
+		m.popBusy()
+		if msg.err != nil {
+			m.errMsg = msg.err.Error()
+			return m, nil
+		}
+		m.workspaces = msg.workspaces
+		m.workspaceClamp()
+		m.errMsg = ""
+		return m, nil
+
+	case workspaceDoneMsg:
+		m.popBusy()
+		if msg.err != nil {
+			m.errMsg = msg.err.Error()
+			return m, nil
+		}
+		m.message = msg.message
+		m.workspaceAction = ""
+		m.workspaceInput = ""
+		m, tick := m.startBusy("loading workspaces…")
+		return m, tea.Batch(tick, m.loadWorkspacesCmd(), m.refreshCmd())
+
 	case tea.MouseMsg:
 		if m.contextMenuOpen {
 			return m.handleContextMenuMouse(msg)
@@ -1310,6 +1353,10 @@ func (m Model) handlePaste(content string) Model {
 	if m.searchMode {
 		m.searchQuery += content
 		m.searchFilter()
+		return m
+	}
+	if m.workspaceOpen && m.workspaceAction != "" && m.workspaceAction != actForget {
+		m.workspaceInput += content
 		return m
 	}
 	if m.view == viewFile && m.fileView.phase == filePicker {
@@ -1987,6 +2034,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleSquashKey(k)
 	}
 
+	// The workspace manager handles its own navigation and prompts.
+	if m.workspaceOpen {
+		return m.handleWorkspaceKey(msg, k)
+	}
+
 	// The theme picker handles its own keys (including q/esc to cancel).
 	if m.themeOpen {
 		nm, cmd := m.handleThemeKey(k)
@@ -2257,6 +2309,10 @@ func (m Model) applyScrollBarDrag(mouseY int) (tea.Model, tea.Cmd) {
 	}
 
 	switch {
+	case m.workspaceOpen:
+		if total := len(m.workspaces); total > 0 {
+			m.workspaceMove(trackY * (total - 1) / max(1, trackH-1))
+		}
 	case m.themeOpen:
 		if total := len(m.themes); total > 0 {
 			m.themeMove(trackY * (total - 1) / max(1, trackH-1))
@@ -2408,6 +2464,10 @@ func (m Model) flushWheel() (tea.Model, tea.Cmd) {
 		m.themeMove(m.themeCursor + dir*n)
 		return m.updateHover(m.wheelX, m.wheelY), nil
 	}
+	if m.workspaceOpen {
+		m.workspaceMove(m.workspaceCursor + dir*n)
+		return m.updateHover(m.wheelX, m.wheelY), nil
+	}
 	for ; n > 0; n-- {
 		m.wheelStep(dir)
 	}
@@ -2418,6 +2478,8 @@ func (m Model) flushWheel() (tea.Model, tea.Cmd) {
 // (−1 = up, +1 = down). Mutates in place; flushWheel loops it for batches.
 func (m *Model) wheelStep(dir int) {
 	switch {
+	case m.workspaceOpen:
+		m.workspaceMove(m.workspaceCursor + dir)
 	case m.themeOpen:
 		m.themeMove(m.themeCursor + dir)
 
@@ -3145,6 +3207,14 @@ func (m Model) handleLogKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) 
 		return m.busySimpleCmd("redoing…", func() error { return r.Redo() }, "redone")
 	case actTheme:
 		return m.openThemePicker(), nil
+	case actWorkspace:
+		m.workspaceOpen = true
+		m.workspaceAction = ""
+		m.workspaceInput = ""
+		m.errMsg = ""
+		m.message = ""
+		m, tick := m.startBusy("loading workspaces…")
+		return m, tea.Batch(tick, m.loadWorkspacesCmd())
 	case actRebase:
 		if len(m.entries) < 2 {
 			m.errMsg = "need at least two revisions to rebase"
@@ -4114,6 +4184,8 @@ func (m Model) viewContent() string {
 	// Content area.
 	ch := m.contentHeight()
 	switch {
+	case m.workspaceOpen:
+		lines = append(lines, m.renderWorkspacePicker(m.width, ch)...)
 	case m.themeOpen:
 		lines = append(lines, m.renderThemePicker(m.width, ch)...)
 	case m.conflictOpen:
@@ -4241,6 +4313,8 @@ func (m Model) renderStatusBar() []string {
 	switch {
 	case m.view == viewFile:
 		return m.renderFileStatusBar()
+	case m.workspaceOpen:
+		return m.renderWorkspaceStatusBar()
 	case m.themeOpen:
 		var name string
 		if m.themeCursor >= 0 && m.themeCursor < len(m.themes) {
@@ -4483,6 +4557,7 @@ func (m Model) defaultHelpBarItems() [][2]string {
 		{"edit", hk(actEdit)},
 		{"new", hk(actNew)},
 		{"themes", hk(actTheme)},
+		{"workspaces", hk(actWorkspace)},
 		{"conflicts", hk(actConflict)},
 		{"abandon", hk(actAbandon)},
 		{"file", hk(actFiles)},
@@ -4501,6 +4576,8 @@ func (m Model) helpBarItems() [][2]string {
 		return [][2]string{{m.hkN(ctx, actUp, 0, "/"), m.hk(ctx, actUp)}, {m.hkN(ctx, actDown, 0, "/"), m.hk(ctx, actDown)}}
 	}
 	switch {
+	case m.workspaceOpen:
+		return nil
 	case m.themeOpen:
 		// Keys for the picker are shown inline in the status bar.
 		return nil
