@@ -14,6 +14,10 @@ adheres to [Semantic Versioning][semver].
 
 ## [Unreleased]
 
+### Added
+- CLI flags to print the version with `gojo --version` or `gojo -v`, and the
+  full changelog with `gojo --changelog`.
+
 ## [1.7.0] - 2026-08-30
 
 ### Added

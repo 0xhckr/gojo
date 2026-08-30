@@ -2,8 +2,10 @@
 package main
 
 import (
+	_ "embed"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	tea "charm.land/bubbletea/v2"
@@ -15,11 +17,18 @@ import (
 // to "dev" for `go run` / `go build` without flags.
 var version = "dev"
 
+//go:embed CHANGELOG.md
+var changelog string
+
 func main() {
-	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
-	if *showVersion {
-		fmt.Println("gojo", version)
+	handled, err := handleFlags(os.Args[1:], os.Stdout, os.Stderr)
+	if err != nil {
+		if err == flag.ErrHelp {
+			return
+		}
+		os.Exit(2)
+	}
+	if handled {
 		return
 	}
 
@@ -38,4 +47,27 @@ func main() {
 		fmt.Fprintln(os.Stderr, "fatal:", err)
 		os.Exit(1)
 	}
+}
+
+func handleFlags(args []string, stdout, stderr io.Writer) (bool, error) {
+	flags := flag.NewFlagSet("gojo", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+
+	var showVersion bool
+	flags.BoolVar(&showVersion, "version", false, "print version and exit")
+	flags.BoolVar(&showVersion, "v", false, "print version and exit")
+	showChangelog := flags.Bool("changelog", false, "print changelog and exit")
+	if err := flags.Parse(args); err != nil {
+		return true, err
+	}
+
+	if showVersion {
+		fmt.Fprintln(stdout, "gojo", version)
+		return true, nil
+	}
+	if *showChangelog {
+		fmt.Fprint(stdout, changelog)
+		return true, nil
+	}
+	return false, nil
 }
