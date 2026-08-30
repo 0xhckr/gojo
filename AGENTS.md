@@ -95,6 +95,18 @@ VERSION                 — single source of truth for the version (flake + gore
 .envrc                  — direnv: `use flake`
 ```
 
+## Versioning and Changelogs
+
+- Follow Semantic Versioning. `VERSION` remains the release version source of
+  truth; feature work updates changelogs but does not bump `VERSION`.
+- Every user-facing feature must add a concise entry under `## [Unreleased]` in
+  both `CHANGELOG.md` and `../gojo-www/CHANGELOG.md` in the same change.
+- Use Keep a Changelog categories (`Added`, `Changed`, `Deprecated`, `Removed`,
+  `Fixed`, `Security`). Describe user-visible behavior, not implementation
+  details or commit history.
+- Keep the two Unreleased sections synchronized. During a release, move those
+  entries into the new version/date section in both files before tagging.
+
 ## Nix / Dev Environment
 
 - **Go 1.24+** (build)

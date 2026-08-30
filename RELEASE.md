@@ -19,7 +19,9 @@ That's it — no setup steps.
 ## Releasing
 
 The **VERSION** file at the repo root is the single source of truth for the
-version number. To release:
+version number. Before bumping it, move every `Unreleased` entry into the new
+version/date section in both `CHANGELOG.md` and `../gojo-www/CHANGELOG.md`.
+Keep the two product changelogs synchronized before tagging. To release:
 
 ```sh
 # 1. bump VERSION (it must match the tag, minus the leading `v`).
