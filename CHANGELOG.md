@@ -14,6 +14,8 @@ adheres to [Semantic Versioning][semver].
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-08-31
+
 ### Added
 - CLI flags to print the version with `gojo --version` or `gojo -v`, and the
   full changelog with `gojo --changelog`.
@@ -70,7 +72,8 @@ First tagged release.
 - TOML config at `~/.config/gojo/gojo.toml` (or `[tools.gojo]` in jj config).
 - Nix flake (devShell + package), Homebrew formula, and release automation.
 
-[Unreleased]: https://github.com/0xhckr/gojo/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/0xhckr/gojo/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/0xhckr/gojo/releases/tag/v1.8.0
 [1.7.0]: https://github.com/0xhckr/gojo/releases/tag/v1.7.0
 [1.4.0]: https://github.com/0xhckr/gojo/releases/tag/v1.4.0
 [1.0.0]: https://github.com/0xhckr/gojo/releases/tag/v1.0.0
