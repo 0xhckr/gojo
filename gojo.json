@@ -1,0 +1,25 @@
+{
+    "version": "1.8.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/0xhckr/gojo/releases/download/v1.8.0/gojo_1.8.0_windows_amd64.zip",
+            "bin": [
+                "gojo.exe"
+            ],
+            "hash": "65b9f56020022d3c07d1920b85cb280cf4104fa2923237726cf0015bd7c6e7d1"
+        },
+        "arm64": {
+            "url": "https://github.com/0xhckr/gojo/releases/download/v1.8.0/gojo_1.8.0_windows_arm64.zip",
+            "bin": [
+                "gojo.exe"
+            ],
+            "hash": "f0ecb7bd451054d78f77229091e0716e9f702927adaac6df4473331a8ccfae37"
+        }
+    },
+    "homepage": "https://github.com/0xhckr/gojo",
+    "license": "MIT",
+    "description": "Fullscreen terminal UI for jj (Jujutsu VCS)",
+    "depends": [
+        "jj"
+    ]
+}
