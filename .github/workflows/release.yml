@@ -34,6 +34,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No separate tap token needed: the Homebrew cask is committed
-          # back into this same repo (Casks/gojo.rb), which GITHUB_TOKEN
-          # can already write to thanks to the `contents: write` permission.
+          # No separate package-repo token needed: the Homebrew cask and Scoop
+          # manifest are committed back into this repo, which GITHUB_TOKEN can
+          # already write to thanks to the `contents: write` permission.

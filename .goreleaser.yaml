@@ -19,6 +19,7 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -28,6 +29,9 @@ builds:
 
 archives:
   - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
     # name example: gojo_1.0.0_darwin_arm64.tar.gz
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_
@@ -167,3 +171,24 @@ homebrew_casks:
       name: goreleaserbot
       email: bot@goreleaser.com
     commit_msg_template: "Brew cask update for {{ .ProjectName }} version {{ .Tag }}"
+
+# Generate a Scoop manifest at the repository root so this repo also acts as
+# a bucket. Windows archives use zip, as required by GoReleaser's Scoop pipe.
+# Users install via: scoop bucket add gojo https://github.com/0xhckr/gojo
+#                    scoop install gojo/gojo
+scoops:
+  - name: gojo
+    repository:
+      owner: 0xhckr
+      name: gojo
+      branch: main
+    homepage: https://github.com/0xhckr/gojo
+    description: "Fullscreen terminal UI for jj (Jujutsu VCS)"
+    license: MIT
+    skip_upload: auto
+    depends:
+      - jj
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Scoop update for {{ .ProjectName }} version {{ .Tag }}"

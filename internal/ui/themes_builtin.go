@@ -3,9 +3,10 @@ package ui
 // Built-in theme loading. The "gojo" default and the ANSI "terminal" theme
 // are compiled in — they must exist even when gojo runs from an install that
 // shipped no theme files. Everything else is read from *.toml files found in
-// themeSearchDirs: the directory next to the binary (share/gojo/themes), the
-// system share dirs, ./themes (repo-root dev builds), and finally the user
-// dir ~/.config/gojo/themes (marked Custom; wins id collisions).
+// themeSearchDirs: themes beside the binary (release archives), the adjacent
+// share/gojo/themes path (system packages), system share dirs, ./themes
+// (repo-root dev builds), and finally the user dir ~/.config/gojo/themes
+// (marked Custom; wins id collisions).
 
 import (
 	"os"
@@ -28,7 +29,11 @@ func userThemesDir(home string) string {
 func themeSearchDirs(home, exePath, cwd string) []string {
 	var dirs []string
 	if exePath != "" {
-		dirs = append(dirs, filepath.Join(filepath.Dir(exePath), "..", "share", "gojo", "themes"))
+		exeDir := filepath.Dir(exePath)
+		dirs = append(dirs,
+			filepath.Join(exeDir, "themes"),
+			filepath.Join(exeDir, "..", "share", "gojo", "themes"),
+		)
 	}
 	dirs = append(dirs,
 		filepath.Join("/usr", "local", "share", "gojo", "themes"),

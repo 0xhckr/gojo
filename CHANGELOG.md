@@ -17,6 +17,8 @@ adheres to [Semantic Versioning][semver].
 ### Added
 - CLI flags to print the version with `gojo --version` or `gojo -v`, and the
   full changelog with `gojo --changelog`.
+- Windows amd64 and arm64 packages installable through Scoop, including the
+  required `jj` runtime dependency.
 
 ## [1.7.0] - 2026-08-30
 

@@ -49,6 +49,16 @@ Detects your OS/distro and runs the right installer below: macOS
 openSUSE (zypper), or a plain tarball into `~/.local/bin` on other Linux.
 NixOS users get pointed at the [Nix/NixOS](#nixnixos) instructions.
 
+### Windows (Scoop)
+
+```powershell
+scoop bucket add gojo https://github.com/0xhckr/gojo
+scoop install gojo/gojo
+```
+
+Scoop installs both `gojo` and its `jj` runtime dependency. Windows amd64 and
+arm64 packages are available.
+
 ### Homebrew
 
 ```sh

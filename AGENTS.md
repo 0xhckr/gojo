@@ -88,9 +88,9 @@ scripts/bump.go         — version bumper: writes VERSION, refreshes the
 .goreleaser.yaml        — release pipeline: tarballs, distro packages (nfpm:
                           archlinux pacman pkg + deb + rpm; one entry per
                           format so jujutsu is a hard dep on Arch, recommended
-                          on deb, weak recommend on rpm), Homebrew cask
-                          commit-back to Casks/. Validates VERSION == tag in a
-                          before hook.
+                          on deb, weak recommend on rpm), Windows ZIPs, and
+                          Homebrew/Scoop manifest commit-back. Validates
+                          VERSION == tag in a before hook.
 VERSION                 — single source of truth for the version (flake + goreleaser read it)
 .envrc                  — direnv: `use flake`
 ```
@@ -268,10 +268,11 @@ theme. Picking `terminal` makes gojo follow the terminal's own ANSI scheme.
 
 Theme sources (later shadows earlier by id):
 1. compiled-in: `gojo` (default), `terminal`
-2. `<exe>/../share/gojo/themes` (nix store / /usr installs)
-3. `/usr/local/share/gojo/themes`, `/usr/share/gojo/themes`
-4. `./themes` (repo root, for `go run .` dev)
-5. `~/.config/gojo/themes` (user custom; tagged "user" in the picker)
+2. `<exe>/themes` (release archives, including Scoop)
+3. `<exe>/../share/gojo/themes` (nix store / /usr installs)
+4. `/usr/local/share/gojo/themes`, `/usr/share/gojo/themes`
+5. `./themes` (repo root, for `go run .` dev)
+6. `~/.config/gojo/themes` (user custom; tagged "user" in the picker)
 
 File format (one theme per file, id = file name stem, `name` = display
 title, optional `syntax`/`syntax_light` set the chroma diff-highlighting

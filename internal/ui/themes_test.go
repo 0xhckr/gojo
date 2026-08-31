@@ -119,6 +119,18 @@ func TestLoadThemesMergeAndShadow(t *testing.T) {
 	}
 }
 
+func TestLoadThemesBesideExecutable(t *testing.T) {
+	tmp := t.TempDir()
+	exe := filepath.Join(tmp, "gojo.exe")
+	writeThemeFile(t, filepath.Join(tmp, "themes", "archive.toml"),
+		"[dark]\nbackground = \"#111111\"\ntext = \"#eeeeee\"\n")
+
+	themes := loadThemes("", exe, "")
+	if findTheme(themes, "archive") < 0 {
+		t.Fatal("theme beside executable was not loaded")
+	}
+}
+
 func writeThemeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

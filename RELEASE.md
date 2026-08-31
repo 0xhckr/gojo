@@ -1,12 +1,12 @@
 # Releasing gojo
 
 gojo uses [goreleaser](https://goreleaser.com) (v2) to cross-build binaries,
-publish a GitHub Release, and auto-update the Homebrew cask.
+publish a GitHub Release, and auto-update the Homebrew cask and Scoop manifest.
 
-The cask lives in **this same repo** at `Casks/gojo.rb` — there is no
-separate tap repo and no PAT to manage. The default `GITHUB_TOKEN` (granted
-`contents: write` by the release workflow) is enough to commit the cask
-back into `0xhckr/gojo`.
+The cask and Scoop manifest live in **this same repo** at `Casks/gojo.rb` and
+`gojo.json` — there are no separate package repositories or PATs to manage.
+The default `GITHUB_TOKEN` (granted `contents: write` by the release workflow)
+is enough to commit both back into `0xhckr/gojo`.
 
 ## Prerequisites
 
@@ -38,17 +38,29 @@ git push origin v1.0.0
 The goreleaser `before` hook errors if VERSION != the tag, so they can't
 drift silently. The `release` workflow then:
 
-1. Builds `gojo` for `linux/{amd64,arm64}` and `darwin/{amd64,arm64}`.
+1. Builds `gojo` for `linux/{amd64,arm64}`, `darwin/{amd64,arm64}`, and
+   `windows/{amd64,arm64}`.
 2. Stamps `main.version` via ldflags (`gojo --version` → `gojo 1.0.0`).
 3. Builds distro packages via nfpm:
    - **Arch Linux** — `.pkg.tar.zst` (pacman -U install)
    - **Debian/Ubuntu** — `.deb` (apt install)
    - **Fedora/RHEL** — `.rpm` (dnf install)
    - **openSUSE** — same `.rpm` (zypper install)
-4. Publishes tarballs, distro packages + checksums to the GitHub Release.
+4. Publishes tarballs, Windows ZIPs, distro packages + checksums to the GitHub
+   Release.
 5. Generates `Casks/gojo.rb` and commits it back to `main` in this repo.
+6. Generates the root `gojo.json` Scoop manifest and commits it back to `main`.
 
 ## Installing (end users)
+
+**Windows:**
+
+```powershell
+scoop bucket add gojo https://github.com/0xhckr/gojo
+scoop install gojo/gojo
+```
+
+The Scoop manifest installs `jj` as a runtime dependency.
 
 **macOS:**
 
