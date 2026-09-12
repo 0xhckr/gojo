@@ -2,6 +2,7 @@ package jj
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,17 +33,23 @@ type chatRequest struct {
 type chatResponse struct {
 	Choices []struct {
 		Message struct {
-			Content  string `json:"content"`
+			Content   string `json:"content"`
 			Reasoning string `json:"reasoning"`
 		} `json:"message"`
 	} `json:"choices"`
 }
 
-// AIDescribe generates a commit message for rev's diff via any
-// OpenAI-compatible chat-completions API.
+// AIDescribe generates a commit message for rev's diff using the configured
+// provider. Applying the message remains the caller's responsibility.
 func (r *Runner) AIDescribe(rev string) (string, error) {
-	if r.cfg.AIAPIKey == "" {
-		return "", errors.New("No AI API key configured. Add ai_api_key to ~/.config/gojo/gojo.toml")
+	switch r.cfg.AIProvider {
+	case "", "api":
+		if r.cfg.AIAPIKey == "" {
+			return "", errors.New("No AI API key configured. Add ai_api_key or set ai_provider = \"codex\" in ~/.config/gojo/gojo.toml")
+		}
+	case "codex":
+	default:
+		return "", fmt.Errorf("Unknown AI provider %q: use api or codex", r.cfg.AIProvider)
 	}
 
 	diffText, err := r.Diff(rev)
@@ -52,7 +59,21 @@ func (r *Runner) AIDescribe(rev string) (string, error) {
 	if strings.TrimSpace(diffText) == "" {
 		return "", errors.New("No diff available for this commit")
 	}
+	prompt := r.cfg.CommitPrompt
+	if prompt == "" {
+		prompt = defaultCommitPrompt
+	}
+	prompt += diffText
 
+	if r.cfg.AIProvider == "codex" {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		return r.codexDescribe(ctx, prompt)
+	}
+	return r.apiDescribe(prompt)
+}
+
+func (r *Runner) apiDescribe(prompt string) (string, error) {
 	baseURL := r.cfg.AIBaseURL
 	if baseURL == "" {
 		baseURL = DefaultAIBaseURL
@@ -61,14 +82,9 @@ func (r *Runner) AIDescribe(rev string) (string, error) {
 	if model == "" {
 		model = DefaultAIModel
 	}
-	prompt := r.cfg.CommitPrompt
-	if prompt == "" {
-		prompt = defaultCommitPrompt
-	}
-
 	reqBody, err := json.Marshal(chatRequest{
 		Model:     model,
-		Messages:  []chatMessage{{Role: "user", Content: prompt + diffText}},
+		Messages:  []chatMessage{{Role: "user", Content: prompt}},
 		MaxTokens: 2048,
 	})
 	if err != nil {

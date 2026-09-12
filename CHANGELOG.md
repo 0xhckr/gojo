@@ -14,6 +14,10 @@ adheres to [Semantic Versioning][semver].
 
 ## [Unreleased]
 
+### Added
+- AI commit messages using a ChatGPT subscription through Codex CLI with
+  `ai_provider = "codex"`. Nix packages and the development shell include Codex.
+
 ## [1.9.0] - 2026-09-12
 
 ### Added

@@ -21,7 +21,7 @@ A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), b
 - **Conflict resolution** — side-by-side 3-way merge view: pick left / right / both per hunk, apply with `jj resolve`
 - **Bookmark management** — create, delete, move, rename, set, track, untrack, and list bookmarks
 - **Git integration** — fetch, push, and remote management from within the TUI
-- **AI commit messages** — generate a description from a commit's diff via any OpenAI-compatible API
+- **AI commit messages** — generate a description from a commit's diff via an OpenAI-compatible API or your ChatGPT subscription through Codex CLI
 - **Undo / redo** — one-key `jj undo` / `jj redo`
 - **Graph rendering** — native jj graph output with styled nodes (@/○/◆) and edges
 
@@ -76,9 +76,13 @@ caveat for an optional `gj` shorthand alias.
 ```sh
 nix run github:0xhckr/gojo      # run directly
 # or, for development:
-nix develop                     # drops you into a shell with go + jujutsu
+nix develop                     # drops you into a shell with Go tooling + Codex
 go run .
 ```
+
+The Nix package bundles Codex CLI as a runtime dependency and exposes `codex`
+for login; the development shell includes it too. See [ChatGPT subscription](#chatgpt-subscription)
+below to enable AI commit messages with your subscription.
 
 ### Debian / Ubuntu
 
@@ -150,6 +154,9 @@ may also be placed under a `[tools.gojo]` section in `~/.config/jj/config.toml`
 (the standalone gojo file takes precedence).
 
 ```toml
+# AI provider: "api" (default) or "codex" (ChatGPT subscription)
+ai_provider = "api"
+
 # API key for AI-generated commit messages (optional)
 ai_api_key = "sk-or-..."
 
@@ -163,6 +170,36 @@ ai_model = "anthropic/claude-sonnet-4"
 # Custom prompt template for AI commit messages (optional)
 commit_prompt = "You are a software developer. Write a clear, concise commit message given the diff: "
 ```
+
+### ChatGPT subscription
+
+Use [Codex CLI](https://developers.openai.com/codex/cli) with a ChatGPT plan
+that includes Codex. Nix installs Codex automatically with gojo; on other
+platforms, install Codex CLI separately and make sure `codex` is in `$PATH`.
+
+1. Run `codex login` and choose **Sign in with ChatGPT**. If you only use
+   `nix run`, enter `nix shell github:0xhckr/gojo` first to access the bundled
+   `codex` command.
+2. Set this at the top level of `~/.config/gojo/gojo.toml` (before any section
+   headers), or under `[tools.gojo]` in jj's config:
+
+   ```toml
+   ai_provider = "codex"
+   ```
+
+3. Start gojo and press `D` on a commit to generate its description.
+
+Gojo reuses Codex's saved login, including automatic token refresh. With ChatGPT
+sign-in, generation uses your plan's Codex allowance. No `ai_api_key` is needed;
+`ai_base_url` is only used by the API provider.
+
+Leave `ai_model` unset to use Codex's configured/default model, or set it to a
+Codex-supported model name. Remove any API-specific `ai_model` value when
+switching providers. `commit_prompt` works with both providers.
+
+Generation runs non-interactively in a temporary directory with a read-only
+sandbox and a 90-second timeout. Gojo supplies the selected commit's diff and
+applies the resulting description through jj.
 
 ## Keybindings
 

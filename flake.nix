@@ -38,8 +38,14 @@
             # Stable across systems thanks to proxyVendor above.
             vendorHash = "sha256-ZMbhQw9mk/+UI2g8f5WpcEBCU/RS30wuzEdEK+/bv4A=";
 
+            nativeBuildInputs = [ pkgs.makeWrapper ];
+
             postInstall = ''
+              wrapProgram $out/bin/gojo \
+                --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.codex ]}
               ln -s gojo $out/bin/gj
+              # Expose login as well as making Codex available to `nix run`.
+              ln -s ${pkgs.codex}/bin/codex $out/bin/codex
               # Theme files: gojo looks for share/gojo/themes next to bin/.
               mkdir -p $out/share/gojo/themes
               cp themes/*.toml $out/share/gojo/themes/
@@ -87,6 +93,7 @@
             go
             gopls
             go-tools
+            codex
           ];
 
           shellHook = ''

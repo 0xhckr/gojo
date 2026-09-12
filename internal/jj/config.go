@@ -13,9 +13,12 @@ type Config struct {
 	JJPath   string
 	RepoRoot string
 
-	// AI configuration — any OpenAI-compatible chat-completions endpoint.
+	// AI configuration — an OpenAI-compatible API (default) or Codex CLI.
+	// AIProvider is "api" (also when empty) or "codex".
 	// AIAPIKey is the bearer token, AIBaseURL is the API root (defaults to
-	// OpenRouter), AIModel is the model name.
+	// OpenRouter), AIModel is the model name (empty uses Codex's own default
+	// for the codex provider, DefaultAIModel for the API provider).
+	AIProvider   string
 	AIAPIKey     string
 	AIBaseURL    string
 	AIModel      string
@@ -106,6 +109,8 @@ func applyTOMLConfig(cfg *Config, raw string, section string) {
 		}
 
 		switch key {
+		case "ai_provider":
+			cfg.AIProvider = val
 		case "ai_api_key", "openrouter_api_key":
 			cfg.AIAPIKey = val
 		case "ai_base_url", "openrouter_base_url":

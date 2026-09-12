@@ -631,9 +631,9 @@ func (m Model) busySimpleCmd(label string, fn func() error, okMsg string) (tea.M
 	return m, tea.Batch(tick, m.simpleCmd(fn, okMsg))
 }
 
-// aiGenerateCmd calls the AI API to generate a commit message for changeID.
+// aiGenerateCmd calls the AI provider to generate a commit message for changeID.
 // This is safe to run concurrently with other generations (read-only: it
-// fetches the diff and calls the AI API but does not mutate the repo).
+// fetches the diff and generates a message but does not mutate the repo).
 func (m Model) aiGenerateCmd(changeID string) tea.Cmd {
 	r := m.runner
 	return func() tea.Msg {

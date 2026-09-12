@@ -7,6 +7,18 @@ import (
 	"testing"
 )
 
+func TestApplyTOMLConfigAIProvider(t *testing.T) {
+	var cfg Config
+	applyTOMLConfig(&cfg, "[tools.gojo]\nai_provider = \"api\"\nai_model = \"test-model\"\n", "tools.gojo")
+	if cfg.AIProvider != "api" {
+		t.Fatalf("jj provider = %q", cfg.AIProvider)
+	}
+	applyTOMLConfig(&cfg, "ai_provider = \"codex\" # use subscription\nai_model = \"\"\n", "")
+	if cfg.AIProvider != "codex" || cfg.AIModel != "" {
+		t.Fatalf("standalone override = %+v", cfg)
+	}
+}
+
 func TestApplyTOMLConfigKeymap(t *testing.T) {
 	var cfg Config
 	raw := `

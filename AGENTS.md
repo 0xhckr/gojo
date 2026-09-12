@@ -29,7 +29,9 @@ internal/
                           and the top-level `theme` key → Config.Theme),
                           ConfigDir/ConfigPath/ThemesDir helpers, SaveTheme
                           (upserts `theme = "<id>"` into gojo.toml for the picker)
-    ai.go               — AIDescribe: OpenAI-compatible chat-completions client (net/http)
+    ai.go               — AIDescribe: provider dispatch + OpenAI-compatible chat-completions client (net/http)
+    ai_codex.go         — Codex CLI backend: saved login, ephemeral read-only exec,
+                          prompt/diff on stdin, final-message file, 90s timeout
   ui/
     model.go            — Bubble Tea Model: state, Update (msgs + keys), View, commands
     keys.go             — configurable keybindings: key contexts/actions, default
