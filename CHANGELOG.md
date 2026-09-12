@@ -14,6 +14,8 @@ adheres to [Semantic Versioning][semver].
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-09-12
+
 ### Added
 - AI commit messages using a ChatGPT subscription through Codex CLI with
   `ai_provider = "codex"`. Nix packages and the development shell include Codex.
@@ -82,7 +84,8 @@ First tagged release.
 - TOML config at `~/.config/gojo/gojo.toml` (or `[tools.gojo]` in jj config).
 - Nix flake (devShell + package), Homebrew formula, and release automation.
 
-[Unreleased]: https://github.com/0xhckr/gojo/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/0xhckr/gojo/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/0xhckr/gojo/releases/tag/v1.10.0
 [1.9.0]: https://github.com/0xhckr/gojo/releases/tag/v1.9.0
 [1.8.0]: https://github.com/0xhckr/gojo/releases/tag/v1.8.0
 [1.7.0]: https://github.com/0xhckr/gojo/releases/tag/v1.7.0
