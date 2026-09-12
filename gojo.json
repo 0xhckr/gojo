@@ -1,19 +1,19 @@
 {
-    "version": "1.8.0",
+    "version": "1.9.0",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/0xhckr/gojo/releases/download/v1.8.0/gojo_1.8.0_windows_amd64.zip",
+            "url": "https://github.com/0xhckr/gojo/releases/download/v1.9.0/gojo_1.9.0_windows_amd64.zip",
             "bin": [
                 "gojo.exe"
             ],
-            "hash": "65b9f56020022d3c07d1920b85cb280cf4104fa2923237726cf0015bd7c6e7d1"
+            "hash": "ed254f8ad185dcbf045234889400dd4f8442250360fd380e5feb25acd45a1d44"
         },
         "arm64": {
-            "url": "https://github.com/0xhckr/gojo/releases/download/v1.8.0/gojo_1.8.0_windows_arm64.zip",
+            "url": "https://github.com/0xhckr/gojo/releases/download/v1.9.0/gojo_1.9.0_windows_arm64.zip",
             "bin": [
                 "gojo.exe"
             ],
-            "hash": "f0ecb7bd451054d78f77229091e0716e9f702927adaac6df4473331a8ccfae37"
+            "hash": "35aaf245930e4b712e220b2181689a64549c0e7c89136a85376e7b415904cecc"
         }
     },
     "homepage": "https://github.com/0xhckr/gojo",
