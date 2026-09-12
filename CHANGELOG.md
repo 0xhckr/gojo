@@ -14,6 +14,8 @@ adheres to [Semantic Versioning][semver].
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-12
+
 ### Added
 - Sticky file headers in the diff viewer keep the current filename visible
   while scrolling through long files.
@@ -76,7 +78,8 @@ First tagged release.
 - TOML config at `~/.config/gojo/gojo.toml` (or `[tools.gojo]` in jj config).
 - Nix flake (devShell + package), Homebrew formula, and release automation.
 
-[Unreleased]: https://github.com/0xhckr/gojo/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/0xhckr/gojo/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/0xhckr/gojo/releases/tag/v1.9.0
 [1.8.0]: https://github.com/0xhckr/gojo/releases/tag/v1.8.0
 [1.7.0]: https://github.com/0xhckr/gojo/releases/tag/v1.7.0
 [1.4.0]: https://github.com/0xhckr/gojo/releases/tag/v1.4.0
