@@ -138,6 +138,30 @@ func diffFileHeaderForRow(rows []diffRow, rowIdx int) int {
 	return -1
 }
 
+// diffStickyHeader returns the file header pinned over the top of the body
+// window and its visible height. scroll is relative to the diff rows (without
+// the description/status head). Reuse the wrapped header, leaving at least one
+// content line on short screens, and let the next file header push it away.
+// The overlay doesn't change document offsets or scrollbar geometry.
+func diffStickyHeader(layout diffLayout, rows []diffRow, scroll, height int) (header, lines int) {
+	if scroll < 0 || scroll >= layout.total || height <= 1 || len(rows) == 0 || len(layout.starts) != len(rows) {
+		return -1, 0
+	}
+	ri, _ := layout.rowAt(scroll)
+	header = diffFileHeaderForRow(rows, ri)
+	if header < 0 || scroll <= layout.starts[header] {
+		return -1, 0
+	}
+	lines = min(layout.counts[header], height-1)
+	for i := ri + 1; i < len(rows) && layout.starts[i] < scroll+lines; i++ {
+		if rows[i].kind == rowFileHeader {
+			lines = layout.starts[i] - scroll
+			break
+		}
+	}
+	return header, lines
+}
+
 // diffContentPrefixW is the number of columns a rendered diff content line
 // spends left of the highlighted body: the ┃ bar (1), the old+new line-number
 // gutter (2*digits+3), and the sign column (4). Split mode swaps the gutter's
@@ -257,9 +281,9 @@ func computeDiffLayoutPure(width, contentH, headLen int, rows []diffRow, raw str
 // titleHint is the key-hint suffix on the title bar (e.g.
 // "  (enter/q to close) "), resolved from the configured keymap by callers.
 func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bool, aiLoading bool, spinnerFrame int, desc string, showDesc bool, rows []diffRow, digits int, status []jj.StatusEntry, rawContent string, scrollY int, cursorBodyRow int, chunkFirst, chunkLast int, collapsed map[string]bool, sv splitView, fileMode bool, fileHead []string, preLayout *diffLayout, hoverRow int, titleHint string) []string {
-	// Title bar — the only sticky chrome; description + status + separator +
-	// diff all scroll together below it as one body. The revision ID uses the
-	// same two-tone highlighting as the log view: the shortest-unique prefix
+	// Title bar — description + status + separator + diff scroll together
+	// below it, with the current file header pinned at the top. The revision ID
+	// uses the same two-tone highlighting as the log view: the shortest-unique prefix
 	// in magenta, the rest in purple. In file mode the title shows the file
 	// path in bold text with a "back" hint instead of the diff close hint.
 	var titleSegs []seg
@@ -325,6 +349,10 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 	bodyTotal := headLen + layout.total
 
 	start, end := visibleRange(scrollY, contentH, bodyTotal)
+	stickyHeader, stickyLines := -1, 0
+	if !fileMode {
+		stickyHeader, stickyLines = diffStickyHeader(layout, rows, start-headLen, contentH)
+	}
 
 	// Scrollbar: the layout already reserved columns when content overflows.
 	scrollW := layout.scrollW
@@ -360,6 +388,9 @@ func renderDiffPanel(width, height int, rev string, revPrefixLen int, loading bo
 			content = append(content, renderRowWithBarFromString(scrollW, width, colPanel, hasBar, rowLine, thumbStart, thumbEnd, str))
 		} else {
 			ri, sub := layout.rowAt(bodyLine)
+			if rowLine < stickyLines {
+				ri, sub = stickyHeader, rowLine
+			}
 			r := rows[ri]
 			isCursor := ri == cursorRowIdx
 			inChunk := chunkFirst >= 0 && headLen+ri >= chunkFirst && headLen+ri <= chunkLast

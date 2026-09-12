@@ -828,7 +828,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// show the status section); just clamp into the valid range for the
 			// new height.
 			m.diffClampMax()
-			if r := m.diffCursorBodyRow(); r >= 0 && (r < m.diffScrollY || r >= m.diffScrollY+m.diffBodyHeight()) {
+			if r := m.diffCursorBodyRow(); r >= 0 && !m.diffBodyRowVisible(r) {
 				// Only re-anchor if the cursor itself fell out of view.
 				m.diffFollowCursor()
 			}
@@ -939,7 +939,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				m.diffClampMax()
-				if r := m.diffCursorBodyRow(); r >= 0 && (r < m.diffScrollY || r >= m.diffScrollY+m.diffBodyHeight()) {
+				if r := m.diffCursorBodyRow(); r >= 0 && !m.diffBodyRowVisible(r) {
 					m.diffFollowCursor()
 				}
 			}
@@ -976,7 +976,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Preserve the viewport across a refresh (the user may have free-scrolled
 		// to the status section); only re-anchor if the cursor fell out of view.
 		m.diffClampMax()
-		if r := m.diffCursorBodyRow(); r >= 0 && (r < m.diffScrollY || r >= m.diffScrollY+m.diffBodyHeight()) {
+		if r := m.diffCursorBodyRow(); r >= 0 && !m.diffBodyRowVisible(r) {
 			m.diffFollowCursor()
 		}
 		if msg.raw != "" {
@@ -1601,6 +1601,14 @@ func (m Model) diffBodyHeight() int {
 	return h
 }
 
+func (m Model) diffBodyRowVisible(row int) bool {
+	header, lines := diffStickyHeader(m.diffLayout, m.diffRows, m.diffScrollY-m.diffHeadLen(), m.diffBodyHeight())
+	if lines > 0 && row == m.diffHeadLen()+m.rowStartTerm(header) {
+		return true
+	}
+	return row >= m.diffScrollY+lines && row < m.diffScrollY+m.diffBodyHeight()
+}
+
 // diffCursorBodyRow is the terminal body-line index of the focused line's
 // first wrapped sub-line, or -1 if the diff has no chunks to navigate. With
 // wrapping this is the top terminal line of the cursor's logical row so the
@@ -1675,7 +1683,11 @@ func (m *Model) diffFollowCursor() {
 	}
 	first, last := m.chunkTerminalSpan()
 	h := m.diffBodyHeight()
-	if last-first+1 <= h {
+	available := h
+	if ri := diffFileHeaderForRow(m.diffRows, m.diffChunks[m.diffCurChunk][0]-m.diffHeadLen()); ri >= 0 {
+		available -= min(m.rowCountTerm(ri), h-1)
+	}
+	if last-first+1 <= available {
 		// Whole chunk fits: keep it entirely in view (scroll only if needed).
 		if first < m.diffScrollY {
 			m.diffScrollY = first
@@ -1693,6 +1705,23 @@ func (m *Model) diffFollowCursor() {
 		}
 	}
 	m.diffClampMax()
+	if last-first+1 <= available {
+		m.diffRevealBelowSticky(first)
+	} else {
+		m.diffRevealBelowSticky(row)
+	}
+}
+
+// diffRevealBelowSticky keeps a keyboard target out from under the pinned
+// header. A target that is the pinned header itself is already visible.
+func (m *Model) diffRevealBelowSticky(row int) {
+	headLen := m.diffHeadLen()
+	header, lines := diffStickyHeader(m.diffLayout, m.diffRows, m.diffScrollY-headLen, m.diffBodyHeight())
+	if lines == 0 || row >= m.diffScrollY+lines || row == headLen+m.rowStartTerm(header) {
+		return
+	}
+	m.diffScrollY = max(headLen+m.rowStartTerm(header), row-min(m.rowCountTerm(header), m.diffBodyHeight()-1))
+	m.diffClampMax()
 }
 
 // diffCenterCursor scrolls so the cursor row sits at the vertical middle of
@@ -1707,6 +1736,7 @@ func (m *Model) diffCenterCursor() {
 	}
 	m.diffScrollY = row - (m.diffBodyHeight()-1)/2
 	m.diffClampMax()
+	m.diffRevealBelowSticky(row)
 }
 
 // diffMoveDown advances the cursor one line (stepping within a chunk, then to

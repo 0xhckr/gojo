@@ -63,7 +63,9 @@ internal/
     diff.go             — git unified-diff parser + chroma highlighting → diffRow
                           (lexer + token-fg caches; LCS word diff with prefix/
                           suffix trim, flat matrix, cell-count budget)
-    diffpanel.go        — diff viewer rendering (gutter, status, file/hunk/line rows)
+    diffpanel.go        — diff viewer rendering (gutter, status, file/hunk/line rows);
+                          current file header sticks below the title while scrolling,
+                          with shared overlay geometry for rendering and mouse hits
     merge3.go           — 3-way merge on line slices: LCS line diff (prefix/suffix
                           trim + cell budget) → context/auto/conflict blocks;
                           composeResolved emits the file from per-block choices

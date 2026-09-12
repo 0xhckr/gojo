@@ -14,6 +14,10 @@ adheres to [Semantic Versioning][semver].
 
 ## [Unreleased]
 
+### Added
+- Sticky file headers in the diff viewer keep the current filename visible
+  while scrolling through long files.
+
 ## [1.8.0] - 2026-08-31
 
 ### Added

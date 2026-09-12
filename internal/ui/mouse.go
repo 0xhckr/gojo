@@ -238,8 +238,15 @@ func (m Model) handleDiffClick(mouseY int) (tea.Model, tea.Cmd) {
 // outside the body, or on a raw list view (which has no diffRows).
 func (m Model) diffRowAtMouseY(mouseY int) (int, bool) {
 	bodyStartY := contentTopBarHeight + 1 // top bar + diff title bar
-	bodyLine := mouseY - bodyStartY + m.diffScrollY
+	windowLine := mouseY - bodyStartY
+	if windowLine < 0 || windowLine >= m.contentHeight()-1 {
+		return 0, false
+	}
+	bodyLine := windowLine + m.diffScrollY
 	headLen := m.diffHeadLen()
+	if header, lines := diffStickyHeader(m.diffLayout, m.diffRows, m.diffScrollY-headLen, m.diffBodyHeight()); windowLine < lines {
+		return header, true
+	}
 	if bodyLine < headLen {
 		return 0, false
 	}
