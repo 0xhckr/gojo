@@ -154,6 +154,8 @@ may also be placed under a `[tools.gojo]` section in `~/.config/jj/config.toml`
 (the standalone gojo file takes precedence).
 
 ```toml
+#:schema https://gojo.rocks/schemas/gojo.json
+
 # AI provider: "api" (default) or "codex" (ChatGPT subscription)
 ai_provider = "api"
 
@@ -170,6 +172,45 @@ ai_model = "anthropic/claude-sonnet-4"
 # Custom prompt template for AI commit messages (optional)
 commit_prompt = "You are a software developer. Write a clear, concise commit message given the diff: "
 ```
+
+### Editor schemas
+
+Add the `#:schema` comment above to the top of `gojo.toml` to enable
+autocomplete, hover documentation, and validation in Taplo-compatible editors
+(such as VS Code with Even Better TOML). The
+[configuration schema](https://gojo.rocks/schemas/gojo.json) covers AI settings,
+theme selection, and every keybinding context/action. It describes the standalone
+gojo file; do not apply it to jj's entire `config.toml`.
+
+Write keybinding overrides as unquoted dotted keys under `[keymap]`:
+
+```toml
+[keymap]
+log.down = "j,down"
+global.quit = "Q"
+diff.absorb = "" # unbind
+```
+
+Use this spelling rather than `[keymap.log]`, quoted `"log.down"` keys, or inline
+tables: gojo's minimal TOML parser reads the dotted key directly. JSON Schema
+validates the parsed TOML data, so it cannot distinguish every equivalent TOML
+spelling. Keep values on a single line.
+
+For custom theme files in `~/.config/gojo/themes/`, use the
+[theme schema](https://gojo.rocks/schemas/theme.json) instead:
+
+```toml
+#:schema https://gojo.rocks/schemas/theme.json
+name = "My theme"
+
+[dark]
+background = "#282a36"
+text = "#f8f8f2"
+purple = "#bd93f9"
+```
+
+The theme schema covers metadata and all `[dark]`/`[light]` palette slots,
+including hex colors, quoted ANSI indices, and empty values for derived colors.
 
 ### ChatGPT subscription
 

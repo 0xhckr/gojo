@@ -14,6 +14,10 @@ adheres to [Semantic Versioning][semver].
 
 ## [Unreleased]
 
+### Added
+- Editor schemas for gojo configuration and theme TOML files, hosted on gojo.rocks
+  with autocomplete, documentation, and validation.
+
 ## [1.10.0] - 2026-09-12
 
 ### Added

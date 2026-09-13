@@ -111,6 +111,23 @@ VERSION                 — single source of truth for the version (flake + gore
 - Keep the two Unreleased sections synchronized. During a release, move those
   entries into the new version/date section in both files before tagging.
 
+## TOML schemas
+
+- The canonical editor schemas live in the website repository:
+  `../gojo-www/public/schemas/gojo.json` and
+  `../gojo-www/public/schemas/theme.json`, served at
+  `https://gojo.rocks/schemas/gojo.json` and `/schemas/theme.json`.
+- Whenever config keys, aliases, types, defaults, keybinding contexts/actions,
+  theme metadata, or palette slots change, update the corresponding schema and
+  affected documentation in the same change. Source owners are
+  `internal/jj/config.go`, `internal/jj/ai*.go`, `internal/ui/keys.go`,
+  `internal/ui/themes.go`, and `internal/ui/themes_builtin.go`.
+- Model `[keymap]` dotted keys as nested context/action objects in JSON Schema;
+  document the unquoted `log.down = "j,down"` syntax supported by gojo's parser.
+- Validate representative config and shipped theme TOML with Taplo after schema
+  changes, including rejected unknown keys and invalid values. Build the website
+  with `npm run build` from `../gojo-www` to verify the public assets are included.
+
 ## Nix / Dev Environment
 
 - **Go 1.24+** (build)
