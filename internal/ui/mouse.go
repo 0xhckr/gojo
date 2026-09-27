@@ -200,7 +200,7 @@ func (m Model) handleLogClick(mouseY int) (tea.Model, tea.Cmd) {
 	if idx == m.cursor {
 		if e := m.selectedEntry(); e != nil {
 			m.logEdgeCursor = -1
-			return m.openRevisionDiff(e.ChangeID, e.CommitID, e.ChangeIDPrefixLen, e.Subject)
+			return m.openEntryDiff(*e)
 		}
 		return m, nil
 	}
@@ -399,7 +399,7 @@ func (m Model) handleHistoryClick(mouseY int) (tea.Model, tea.Cmd) {
 	}
 	if idx == fv.histCur {
 		e := fv.hist[idx]
-		return m.openRevisionDiff(e.ChangeID, e.CommitID, e.ChangeIDPrefixLen, e.Subject)
+		return m.openEntryDiff(e)
 	}
 	fv.histCur = idx
 	m.recomputeFileHistOffset()
@@ -549,6 +549,10 @@ func refSegmentAt(entries []jj.LogEntry, focus, offset, contentY, contentX, heig
 				runeWidthStr(entries[i].Authors) + 1 +
 				runeWidthStr(entries[i].Date) + 1 +
 				runeWidthStr(entries[i].CommitID)
+			if entries[i].IsDivergent {
+				// The commit ID moves into the badge after the refs.
+				prefix -= 1 + runeWidthStr(entries[i].CommitID)
+			}
 			x := contentX
 			for _, bm := range entries[i].Bookmarks {
 				segStart := prefix + 1 // separating space

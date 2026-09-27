@@ -23,12 +23,13 @@ type searchResult struct {
 	bookmarks  []bool // matched against space-joined bookmarks
 	tags       []bool // matched against space-joined tags
 	workspaces []bool // matched against space-joined workspace labels
+	divergent  []bool // matched against the divergent label
 }
 
 // matchEntry fuzzy-matches query against an entry's searchable fields: change
-// ID, commit ID, description (subject), author email, bookmark names, and git
-// tags, and workspace names. The best score across all matched fields is used
-// for ranking.
+// ID, commit ID, description (subject), author email, bookmark names, git tags,
+// workspace names, and the divergent label. The best score across all matched
+// fields is used for ranking.
 func matchEntry(query string, e jj.LogEntry) (searchResult, bool) {
 	if query == "" {
 		return searchResult{}, true
@@ -69,6 +70,11 @@ func matchEntry(query string, e jj.LogEntry) (searchResult, bool) {
 	if ws := workspaceLabels(e.Workspaces); ws != "" {
 		if r, ok := fuzzyMatch(query, ws); ok {
 			take(r, &best.workspaces)
+		}
+	}
+	if e.IsDivergent {
+		if r, ok := fuzzyMatch(query, "divergent"); ok {
+			take(r, &best.divergent)
 		}
 	}
 
@@ -257,6 +263,12 @@ func (m Model) renderSearch(width, height int) []string {
 		// Change ID.
 		segs = append(segs, highlightMatched(e.ChangeID, r.changeID, colMagenta, colYellow, bg)...)
 		segs = append(segs, seg{text: " ", bg: bg})
+		if e.IsDivergent {
+			segs = append(segs, highlightMatched(e.CommitID, r.commitID, colTextMuted, colYellow, bg)...)
+			segs = append(segs, seg{text: " ", bg: bg})
+			segs = append(segs, highlightMatched("divergent", r.divergent, colRed, colYellow, bg)...)
+			segs = append(segs, seg{text: " ", bg: bg})
+		}
 
 		// Author.
 		segs = append(segs, highlightMatched(e.Authors, r.author, colBlue, colYellow, bg)...)

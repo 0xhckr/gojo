@@ -539,9 +539,19 @@ func (m Model) highlightDiffCmd(rev, raw string) tea.Cmd {
 	}
 }
 
+// openEntryDiff pins divergent previews to the selected version, including
+// background refreshes; a shared change ID cannot identify that version.
+func (m Model) openEntryDiff(e jj.LogEntry) (tea.Model, tea.Cmd) {
+	rev, prefix := e.ChangeID, e.ChangeIDPrefixLen
+	if e.IsDivergent {
+		rev, prefix = e.CommitID, e.CommitIDPrefixLen
+	}
+	return m.openRevisionDiff(rev, e.CommitID, prefix, e.Subject)
+}
+
 // openRevisionDiff switches the model to the diff panel for a revision and
-// returns the command to load it. changeID is the panel's revset (stable
-// across working-copy edits); commitID is what jj diff resolves.
+// returns the command to load it. changeID is the panel's revset (a stable
+// change ID or a pinned divergent commit ID); commitID is what jj diff resolves.
 func (m Model) openRevisionDiff(changeID, commitID string, prefixLen int, subject string) (tea.Model, tea.Cmd) {
 	m.diffOpen = true
 	m.diffRev = changeID
@@ -796,7 +806,7 @@ func wheelTick() tea.Cmd {
 func (m Model) refreshFocusedCmds() []tea.Cmd {
 	cmds := []tea.Cmd{m.refreshCmd()}
 	if m.diffOpen && m.diffIsRevision && !m.splitMode {
-		// diffRev is the change ID, a stable revset across working-copy edits.
+		// diffRev follows a change ID, or pins a divergent version by commit ID.
 		cmds = append(cmds, m.openDiffCmd(m.diffRev, m.diffRev))
 	}
 	return cmds
@@ -887,7 +897,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.logErr != nil {
 			m.errMsg = msg.logErr.Error()
 		} else {
+			selected := m.selectedEntry()
+			var searchSelected *jj.LogEntry
+			if m.searchMode && m.searchCursor < len(m.searchResults) {
+				searchSelected = &m.entries[m.searchResults[m.searchCursor].entryIdx]
+			}
 			m.entries = msg.entries
+			if i := refreshedEntryIndex(m.entries, selected); i >= 0 {
+				m.cursor = i
+			}
+			if m.searchMode {
+				m.searchFilter()
+				if idx := refreshedEntryIndex(m.entries, searchSelected); idx >= 0 {
+					for i, result := range m.searchResults {
+						if result.entryIdx == idx {
+							m.searchCursor = i
+							break
+						}
+					}
+				}
+			}
 			m.errMsg = ""
 			m.message = ""
 		}
@@ -2868,7 +2897,7 @@ func (m Model) handleFileHistoryKey(k string) (tea.Model, tea.Cmd) {
 	case actOpen:
 		if fv.histCur >= 0 && fv.histCur < len(fv.hist) {
 			e := fv.hist[fv.histCur]
-			return m.openRevisionDiff(e.ChangeID, e.CommitID, e.ChangeIDPrefixLen, e.Subject)
+			return m.openEntryDiff(e)
 		}
 	}
 	return m, nil
@@ -3102,7 +3131,7 @@ func (m Model) handleLogKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) 
 			return m.toggleShowAllRev()
 		}
 		if e := m.selectedEntry(); e != nil {
-			return m.openRevisionDiff(e.ChangeID, e.CommitID, e.ChangeIDPrefixLen, e.Subject)
+			return m.openEntryDiff(*e)
 		}
 		return m, nil
 	case actSearch:
@@ -3180,7 +3209,9 @@ func (m Model) handleLogKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) 
 				m.errMsg = "cannot abandon the working copy"
 				return m, nil
 			}
-			rev := e.ChangeID
+			// Always use the displayed version, even if divergence appeared
+			// after the log was loaded.
+			rev := e.CommitID
 			r := m.runner
 			return m.busyActionCmd("abandoning "+rev+"…", actionSpec{
 				run:     func() error { return r.Abandon(rev) },

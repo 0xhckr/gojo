@@ -13,6 +13,32 @@ const scrollbarWidth = 2
 
 func commitLines(e jj.LogEntry) int { return 2 + len(e.EdgeLines) }
 
+// refreshedEntryIndex preserves the exact version when rows move. Follow a
+// rewrite only for an unambiguous change, never a sibling divergent version.
+func refreshedEntryIndex(entries []jj.LogEntry, previous *jj.LogEntry) int {
+	if previous == nil {
+		return -1
+	}
+	for i, e := range entries {
+		if e.CommitID != "" && e.CommitID == previous.CommitID {
+			return i
+		}
+	}
+	if !previous.IsDivergent && previous.ChangeID != "" {
+		found := -1
+		for i, e := range entries {
+			if e.ChangeID == previous.ChangeID {
+				if e.IsDivergent || found >= 0 {
+					return -1
+				}
+				found = i
+			}
+		}
+		return found
+	}
+	return -1
+}
+
 // entryAtLine returns the index of the entry whose content lines contain the
 // given absolute line number (0-based). Used to map a scrollbar drag position
 // back to a commit index for cursor-driven views like the log.
@@ -192,8 +218,10 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 		hs = append(hs, seg{text: e.Authors, fg: colBlue, bg: bg})
 		hs = append(hs, seg{text: " ", bg: bg})
 		hs = append(hs, seg{text: e.Date, fg: colTextMuted, bg: bg})
-		hs = append(hs, seg{text: " ", bg: bg})
-		hs = append(hs, seg{text: e.CommitID, fg: colTextMuted, bg: bg})
+		if !e.IsDivergent { // divergent versions show the ID in the pinned badge below
+			hs = append(hs, seg{text: " ", bg: bg})
+			hs = append(hs, seg{text: e.CommitID, fg: colTextMuted, bg: bg})
+		}
 		for _, workspace := range e.Workspaces {
 			hs = append(hs, seg{text: " ", bg: bg})
 			hs = append(hs, seg{text: expandTabs(workspace) + "@", fg: colCyan, bold: true, bg: bg})
@@ -217,6 +245,9 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 		// end of the row, after all metadata — and are never clipped by long
 		// authors/bookmarks ahead of them.
 		var ms []seg
+		if e.IsDivergent {
+			ms = append(ms, seg{text: "divergent " + e.CommitID, fg: colRed, bold: true, bg: bg})
+		}
 		if bd.active && i == bd.sourceIdx {
 			ms = append(ms, seg{text: "● dragging " + bd.name, fg: colMagenta, bold: true, bg: bg})
 		}

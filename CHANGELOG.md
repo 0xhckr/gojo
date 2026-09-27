@@ -15,8 +15,13 @@ adheres to [Semantic Versioning][semver].
 ## [Unreleased]
 
 ### Added
+- Divergent revision labels and search, with commit IDs to distinguish versions.
 - Editor schemas for gojo configuration and theme TOML files, hosted on gojo.rocks
   with autocomplete, documentation, and validation.
+
+### Fixed
+- Abandon targets the exact selected commit; divergent diff previews and selection
+  stay on the chosen version across refreshes.
 
 ## [1.10.0] - 2026-09-12
 

@@ -16,7 +16,7 @@ import (
 
 // logTemplate is a two-line jj template using a \x01 marker byte to separate
 // the graph prefix from structured field data. See parseLog for the layout.
-const logTemplate = `"\x01" ++ change_id.short(8) ++ "|" ++ change_id.shortest() ++ "|" ++ commit_id.short(8) ++ "|" ++ commit_id.shortest() ++ "|" ++ author.email() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "|" ++ tags.join(",") ++ "|" ++ if(conflict, "Y", "N") ++ "|" ++ working_copies.map(|w| w.name()).join(",") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"`
+const logTemplate = `"\x01" ++ change_id.short(8) ++ "|" ++ change_id.shortest() ++ "|" ++ commit_id.short(8) ++ "|" ++ commit_id.shortest() ++ "|" ++ author.email() ++ "|" ++ author.timestamp().local().format("%Y-%m-%d %H:%M") ++ "|" ++ if(current_working_copy, "Y", "N") ++ "|" ++ if(immutable, "Y", "N") ++ "|" ++ bookmarks.join(",") ++ "|" ++ tags.join(",") ++ "|" ++ if(conflict, "Y", "N") ++ "|" ++ working_copies.map(|w| w.name()).join(",") ++ "|" ++ if(divergent, "Y", "N") ++ "\n" ++ "\x01" ++ description.first_line() ++ "\n"`
 
 const workspaceTemplate = `"{" ++ "\"name\":" ++ json(name) ++ ",\"root\":" ++ if(root, json(root.absolute()), "null") ++ ",\"change_id\":" ++ json(target.change_id()) ++ ",\"commit_id\":" ++ json(target.commit_id()) ++ "}\n"`
 
@@ -34,6 +34,7 @@ type LogEntry struct {
 	Workspaces        []string
 	IsWorkingCopy     bool
 	IsImmutable       bool
+	IsDivergent       bool
 	HasConflict       bool
 	HeaderPrefix      string
 	BodyPrefix        string
@@ -947,6 +948,7 @@ func parseLog(raw string) []LogEntry {
 			Date:              fields[5],
 			IsWorkingCopy:     fields[6] == "Y",
 			IsImmutable:       fields[7] == "Y",
+			IsDivergent:       len(fields) > 12 && fields[12] == "Y",
 			HasConflict:       fields[10] == "Y",
 			Bookmarks:         bookmarks,
 			Tags:              tags,

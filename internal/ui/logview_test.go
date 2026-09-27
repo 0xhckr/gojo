@@ -142,3 +142,23 @@ func TestRenderLogWorkspaceLabels(t *testing.T) {
 		t.Fatalf("workspace labels missing from log:\n%s", view)
 	}
 }
+
+func TestDivergentLogRefHit(t *testing.T) {
+	entries := []jj.LogEntry{{
+		ChangeID: "abcdefgh", CommitID: "12345678", Authors: "me@example.com",
+		HeaderPrefix: "○ ", Date: "2026-09-27", IsDivergent: true,
+		Bookmarks: []string{"keep-me"}, Tags: []string{"v2"},
+	}}
+	lines := renderLog(100, 4, entries, 0, 0, -1, nil, 0, rebaseView{}, squashView{}, bookmarkDragView{}, -1, -1, "", "")
+	header := ansi.Strip(lines[1])
+	if strings.Count(header, entries[0].CommitID) != 1 {
+		t.Fatalf("commit ID should appear once in the divergent badge: %s", header)
+	}
+	for _, ref := range []struct{ kind, name string }{{"bookmark", "keep-me"}, {"tag", "v2"}} {
+		x := runeWidthStr(strings.SplitN(header, ref.name, 2)[0])
+		kind, name, idx, ok := refSegmentAt(entries, 0, 0, 1, x, 4)
+		if !ok || kind != ref.kind || name != ref.name || idx != 0 {
+			t.Fatalf("click on %s: got %s %s %d %v", ref.name, kind, name, idx, ok)
+		}
+	}
+}

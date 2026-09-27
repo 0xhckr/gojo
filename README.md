@@ -260,6 +260,7 @@ applies the resulting description through jj.
 | `G` | Jump to last commit |
 | `Home` | Jump to first commit |
 | `enter` | Open diff panel |
+| `/` | Search revisions (including the `divergent` label) |
 | `d` | `jj describe` (opens `$EDITOR`) |
 | `D` | AI-generate commit message |
 | `e` | `jj edit` (set working copy) |
@@ -270,6 +271,15 @@ applies the resulting description through jj.
 | `g` | Git mode |
 | `u` | `jj undo` |
 | `U` | `jj redo` |
+
+#### Cleaning up divergent revisions
+
+Divergent versions share a change ID. Each is marked `divergent` with its
+commit ID in the log and search results. Press `/`, type `divergent` (or the
+shared change ID), choose a version with the arrow keys, and press `enter`
+to jump to its row. Press `enter` again to inspect that version's diff,
+then close the diff and press `a` to abandon exactly that commit. `u` undoes
+the abandon. The current working-copy revision cannot be abandoned.
 
 ### Diff panel
 
