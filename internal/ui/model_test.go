@@ -484,6 +484,74 @@ func TestRebaseModeFlow(t *testing.T) {
 	}
 }
 
+func TestRevertModeFlow(t *testing.T) {
+	m := bootedModel(t)
+	if len(m.entries) < 2 {
+		t.Skip("need at least two revisions")
+	}
+
+	m = step(t, m, keyPress("R"))
+	if !m.rebaseMode || !m.rebaseRevert {
+		t.Fatal("R did not enter revert mode")
+	}
+	plain := stripView(m)
+	if !strings.Contains(plain, "[revert]") {
+		t.Error("status bar missing revert menu")
+	}
+	if !strings.Contains(plain, "● reverting") {
+		t.Error("log missing reverting source marker")
+	}
+
+	m = step(t, m, keyPress("s"))
+	if m.rebaseSubtree {
+		t.Error("s should not toggle subtree scope in revert mode")
+	}
+	m = step(t, m, keyCode(tea.KeyTab))
+	if m.rebasePlace != 1 {
+		t.Errorf("rebasePlace = %d, want 1 (after)", m.rebasePlace)
+	}
+
+	m = step(t, m, keyCode(tea.KeyEscape))
+	if m.rebaseMode {
+		t.Error("esc did not exit revert mode")
+	}
+	if m.message != "revert cancelled" {
+		t.Errorf("message = %q, want %q", m.message, "revert cancelled")
+	}
+
+	m = step(t, m, keyPress("r"))
+	if m.rebaseRevert {
+		t.Error("r after R should enter plain rebase mode")
+	}
+}
+
+func TestRevertDefaultDestination(t *testing.T) {
+	withWC := []jj.LogEntry{{ChangeID: "a"}, {ChangeID: "b"}, {ChangeID: "c", IsWorkingCopy: true}}
+	noWC := []jj.LogEntry{{ChangeID: "a"}, {ChangeID: "b"}, {ChangeID: "c"}}
+	cases := []struct {
+		name    string
+		entries []jj.LogEntry
+		cursor  int
+		want    int
+	}{
+		{"jumps to the working copy", withWC, 0, 2},
+		{"source is the working copy", withWC, 2, 2},
+		{"working copy not listed: next neighbour", noWC, 0, 1},
+		{"working copy not listed: previous neighbour at the end", noWC, 2, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := step(t, NewModel(), tea.WindowSizeMsg{Width: 100, Height: 30})
+			m.entries = c.entries
+			m.cursor = c.cursor
+			m = m.enterRebaseMode(true)
+			if m.rebaseDest != c.want {
+				t.Errorf("rebaseDest = %d, want %d", m.rebaseDest, c.want)
+			}
+		})
+	}
+}
+
 func TestSquashModeFlow(t *testing.T) {
 	m := bootedModel(t)
 	if len(m.entries) < 2 {

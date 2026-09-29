@@ -597,6 +597,9 @@ func (m Model) logContextMenuItems() []contextMenuItem {
 		items = append(items, m.logKeyItem("absorb", actAbsorb))
 	}
 	items = append(items, m.logKeyItem("rebase", actRebase))
+	if hasSel {
+		items = append(items, m.logKeyItem("revert", actRevert))
+	}
 	items = append(items, m.logKeyItem("squash", actSquash))
 	items = append(items, m.logKeyItem("bookmark", actBookmark))
 	items = append(items, m.logKeyItem("tag", actTag))

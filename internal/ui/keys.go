@@ -89,6 +89,7 @@ const (
 	actUndo       = "undo"
 	actRedo       = "redo"
 	actRebase     = "rebase"
+	actRevert     = "revert"
 	actSquash     = "squash"
 	actAbsorb     = "absorb"
 	actSplit      = "split"
@@ -189,6 +190,7 @@ var defaultKeymap = []struct {
 		{actUndo, []string{"u"}},
 		{actRedo, []string{"U"}},
 		{actRebase, []string{"r"}},
+		{actRevert, []string{"R"}},
 		{actSquash, []string{"s"}},
 		{actAbsorb, []string{"x"}},
 		{actTheme, []string{"T"}},

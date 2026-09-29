@@ -435,6 +435,15 @@ func (r *Runner) Rebase(srcFlag, src, placeFlag, dest string, extra ...string) e
 	return err
 }
 
+// Revert applies the reverse of src at dest, placed by placeFlag
+// (--onto, --insert-after, --insert-before). Extra flags are appended for
+// elevation retries.
+func (r *Runner) Revert(src, placeFlag, dest string, extra ...string) error {
+	args := appendExtra([]string{"revert", "-r", src, placeFlag, dest}, extra)
+	_, err := r.run(args...)
+	return err
+}
+
 // BookmarkCreate creates a bookmark, optionally at rev. Extra flags are
 // appended for elevation retries.
 func (r *Runner) BookmarkCreate(name, rev string, extra ...string) error {

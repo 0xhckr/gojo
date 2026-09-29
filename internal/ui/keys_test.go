@@ -10,6 +10,7 @@ func TestKeymapDefaultsResolve(t *testing.T) {
 		{ctxLog, "k", actUp},
 		{ctxLog, "d", actDescribe},
 		{ctxLog, "/", actSearch},
+		{ctxLog, "R", actRevert},
 		{ctxDiff, "x", actAbsorb},
 		{ctxDiff, "pgup", actPageUp},
 		{ctxDiff, "ctrl+d", actPageDown},

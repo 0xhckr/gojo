@@ -18,6 +18,8 @@ adheres to [Semantic Versioning][semver].
 - Divergent revision labels and search, with commit IDs to distinguish versions.
 - Editor schemas for gojo configuration and theme TOML files, hosted on gojo.rocks
   with autocomplete, documentation, and validation.
+- Revert mode (`R` in the log): pick a destination and placement (onto, after,
+  or before) to apply the reverse of a commit with `jj revert`.
 
 ### Fixed
 - Abandon targets the exact selected commit; divergent diff previews and selection

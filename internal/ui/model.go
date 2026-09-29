@@ -153,6 +153,7 @@ type Model struct {
 	rebaseDest    int  // index into entries of the drop target (moves with j/k)
 	rebaseSubtree bool // false → -r (single), true → -s (commit + descendants)
 	rebasePlace   int  // index into rebasePlaceFlags: 0 onto, 1 after, 2 before
+	rebaseRevert  bool // jj revert the source at the destination instead of moving it
 
 	// Squash mode. Pick the selected commit, then move a destination indicator
 	// through the log to choose which commit to fold its changes into.
@@ -3281,22 +3282,9 @@ func (m Model) handleLogKey(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) 
 			m.errMsg = "need at least two revisions to rebase"
 			return m, nil
 		}
-		if e := m.selectedEntry(); e != nil {
-			m.rebaseMode = true
-			m.rebaseSource = m.cursor
-			m.rebaseSubtree = false
-			m.rebasePlace = 0
-			// Start the destination on a neighbouring commit so it is never
-			// equal to the source on entry.
-			m.rebaseDest = m.cursor + 1
-			if m.rebaseDest >= len(m.entries) {
-				m.rebaseDest = m.cursor - 1
-			}
-			m.errMsg = ""
-			m.message = ""
-			m.recomputeOffset()
-		}
-		return m, nil
+		return m.enterRebaseMode(false), nil
+	case actRevert:
+		return m.enterRebaseMode(true), nil
 	case actSquash:
 		if len(m.entries) < 2 {
 			m.errMsg = "need at least two revisions to squash"
@@ -3442,11 +3430,46 @@ func (m Model) execSquash() (tea.Model, tea.Cmd) {
 	return m, m.squashCmd(from, into)
 }
 
+// enterRebaseMode picks up the selected commit as the source of a rebase or,
+// with revert, of a jj revert (same destination picker and placements).
+func (m Model) enterRebaseMode(revert bool) Model {
+	if m.selectedEntry() == nil {
+		return m
+	}
+	m.rebaseMode = true
+	m.rebaseRevert = revert
+	m.rebaseSource = m.cursor
+	m.rebaseSubtree = false
+	m.rebasePlace = 0
+	// Rebase starts the destination on a neighbouring commit so it never equals
+	// the source on entry; revert prefers the working copy when it is listed
+	// (which may be the source itself) and otherwise keeps that neighbour.
+	m.rebaseDest = m.cursor + 1
+	if m.rebaseDest >= len(m.entries) {
+		m.rebaseDest = max(0, m.cursor-1)
+	}
+	if revert {
+		for i, e := range m.entries {
+			if e.IsWorkingCopy {
+				m.rebaseDest = i
+				break
+			}
+		}
+	}
+	m.errMsg = ""
+	m.message = ""
+	m.recomputeOffset()
+	return m
+}
+
 func (m Model) handleRebaseKey(k string) (tea.Model, tea.Cmd) {
 	switch m.keys.resolve(ctxRebase, k) {
 	case actCancel:
 		m.rebaseMode = false
 		m.message = "rebase cancelled"
+		if m.rebaseRevert {
+			m.message = "revert cancelled"
+		}
 		m.recomputeOffset()
 		return m, nil
 	case actUp:
@@ -3470,7 +3493,7 @@ func (m Model) handleRebaseKey(k string) (tea.Model, tea.Cmd) {
 		m.recomputeOffset()
 		return m, nil
 	case actScope:
-		m.rebaseSubtree = !m.rebaseSubtree
+		m.rebaseSubtree = !m.rebaseSubtree && !m.rebaseRevert
 		return m, nil
 	case actPlace:
 		m.rebasePlace = (m.rebasePlace + 1) % len(rebasePlaceFlags)
@@ -3487,7 +3510,12 @@ func (m Model) execRebase() (tea.Model, tea.Cmd) {
 		m.rebaseMode = false
 		return m, nil
 	}
-	if m.rebaseSource == m.rebaseDest {
+	src := m.entries[m.rebaseSource].ChangeID
+	dest := m.entries[m.rebaseDest].ChangeID
+	placeFlag := rebasePlaceFlags[m.rebasePlace]
+	label := rebasePlaceLabels[m.rebasePlace]
+	r := m.runner
+	if !m.rebaseRevert && m.rebaseSource == m.rebaseDest {
 		m.errMsg = "rebase destination is the source"
 		return m, nil
 	}
@@ -3495,18 +3523,17 @@ func (m Model) execRebase() (tea.Model, tea.Cmd) {
 	if m.rebaseSubtree {
 		srcFlag = "-s"
 	}
-	src := m.entries[m.rebaseSource].ChangeID
-	dest := m.entries[m.rebaseDest].ChangeID
-	placeFlag := rebasePlaceFlags[m.rebasePlace]
-	label := rebasePlaceLabels[m.rebasePlace]
+	busy, done := "rebasing…", "rebased "
+	run := func(extra ...string) error { return r.Rebase(srcFlag, src, placeFlag, dest, extra...) }
+	if m.rebaseRevert {
+		busy, done = "reverting…", "reverted "
+		run = func(extra ...string) error { return r.Revert(src, placeFlag, dest, extra...) }
+	}
 	m.rebaseMode = false
-	r := m.runner
-	return m.busyActionCmd("rebasing…", actionSpec{
-		run:   func() error { return r.Rebase(srcFlag, src, placeFlag, dest) },
-		okMsg: "rebased " + src + " " + label + " " + dest,
-		elevate: func(flag string) func() error {
-			return func() error { return r.Rebase(srcFlag, src, placeFlag, dest, flag) }
-		},
+	return m.busyActionCmd(busy, actionSpec{
+		run:     func() error { return run() },
+		okMsg:   done + src + " " + label + " " + dest,
+		elevate: func(flag string) func() error { return func() error { return run(flag) } },
 	})
 }
 
@@ -4268,6 +4295,7 @@ func (m Model) viewContent() string {
 			dest:    m.rebaseDest,
 			subtree: m.rebaseSubtree,
 			place:   m.rebasePlace,
+			revert:  m.rebaseRevert,
 		}
 		sq := squashView{
 			active: m.squashMode,
@@ -4516,12 +4544,16 @@ func (m Model) renderStatusBar() []string {
 		if m.rebaseDest >= 0 && m.rebaseDest < len(m.entries) {
 			dest = m.entries[m.rebaseDest].ChangeID
 		}
-		segs := []seg{{text: " [rebase] ", fg: colYellow, bold: true}}
-		segs = append(segs, seg{text: scope + " ", fg: colMagenta})
+		segs := []seg{{text: " [rebase] ", fg: colYellow, bold: true}, {text: scope + " ", fg: colMagenta}}
+		hints := m.modeHints(ctxRebase, actScope, actPlace)
+		if m.rebaseRevert {
+			segs = []seg{{text: " [revert] ", fg: colYellow, bold: true}}
+			hints = m.modeHints(ctxRebase, actPlace)
+		}
 		segs = append(segs, seg{text: src, fg: colMagenta, bold: true})
 		segs = append(segs, seg{text: " " + rebasePlaceLabels[m.rebasePlace] + " ", fg: colYellow})
 		segs = append(segs, seg{text: dest, fg: colMagenta, bold: true})
-		segs = append(segs, seg{text: "   " + m.modeHints(ctxRebase, actScope, actPlace), fg: colGray})
+		segs = append(segs, seg{text: "   " + hints, fg: colGray})
 		return []string{bgRow(m.width, colDarkerGray, segs...)}
 
 	case m.squashMode:
@@ -4613,6 +4645,7 @@ func (m Model) defaultHelpBarItems() [][2]string {
 		{"undo", hk(actUndo)},
 		{"redo", hk(actRedo)},
 		{"rebase", hk(actRebase)},
+		{"revert", hk(actRevert)},
 		{"squash", hk(actSquash)},
 		{"absorb", hk(actAbsorb)},
 		{"edit", hk(actEdit)},

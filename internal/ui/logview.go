@@ -65,6 +65,7 @@ type rebaseView struct {
 	dest    int // index into entries of the drop target
 	subtree bool
 	place   int // index into rebasePlaceLabels
+	revert  bool
 }
 
 // squashView carries the live squash-mode selection into log rendering so the
@@ -258,6 +259,9 @@ func renderLog(width, height int, entries []jj.LogEntry, cursor, offset, edgeCur
 			tag := "● moving"
 			if rb.subtree {
 				tag = "● moving +descendants"
+			}
+			if rb.revert {
+				tag = "● reverting"
 			}
 			ms = append(ms, seg{text: tag, fg: colMagenta, bold: true, bg: bg})
 		}

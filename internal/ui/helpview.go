@@ -56,6 +56,7 @@ func (m Model) helpSections() []helpSection {
 			{kv(ctxLog, actUndo), "jj undo"},
 			{kv(ctxLog, actRedo), "jj redo"},
 			{kv(ctxLog, actRebase), "rebase mode"},
+			{kv(ctxLog, actRevert), "jj revert  (pick destination, like rebase)"},
 			{kv(ctxLog, actSquash), "squash mode"},
 			{kv(ctxLog, actAbsorb), "jj absorb  (move changes into ancestors)"},
 			{kv(ctxLog, actTheme), "theme picker  (live preview, saves to gojo.toml)"},
