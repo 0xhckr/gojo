@@ -18,6 +18,7 @@ A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), b
 
 - **Log view** — scrollable commit graph with change IDs, authors, dates, bookmarks, and working copy highlighting
 - **Diff panel** — file status summary + syntax-highlighted diff for any commit
+- **Image diffs** — before/after previews using the Kitty graphics protocol
 - **Conflict resolution** — side-by-side 3-way merge view: pick left / right / both per hunk, apply with `jj resolve`
 - **Bookmark management** — create, delete, move, rename, set, track, untrack, and list bookmarks
 - **Git integration** — fetch, push, and remote management from within the TUI
@@ -146,6 +147,23 @@ go build -o gojo .
 - [Go](https://go.dev) 1.26+ (to build)
 - [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS) v0.44+ in `$PATH`
 - A jj repository (run `gojo` inside any `.jj` directory)
+
+## Image previews
+
+Open a revision with `enter` to see its changed images side by side: **before**
+on the left, **after** on the right. Added and deleted images mark the missing
+side as “not present”. Previews scroll and collapse with their file headers.
+
+PNG, JPEG, GIF, WebP, BMP, and TIFF are supported (GIF shows the first frame).
+Previews preserve aspect ratio and transparency. They require a terminal with
+Kitty graphics and Unicode placeholder support, such as Kitty 0.28+. Other
+terminals show image metadata instead. Direct terminal transmission works over
+SSH; multiplexers that filter graphics commands are not supported.
+
+Images larger than 16 MiB or 24 megapixels show a size notice. Unsupported or
+damaged images show a notice in the affected pane. For merge commits, the
+before pane reports that the merged-parent preview is unavailable rather than
+showing an arbitrary parent.
 
 ## Configuration
 

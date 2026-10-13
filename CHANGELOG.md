@@ -15,6 +15,7 @@ adheres to [Semantic Versioning][semver].
 ## [Unreleased]
 
 ### Added
+- Before/after image previews in revision diffs using the Kitty graphics protocol.
 - Divergent revision labels and search, with commit IDs to distinguish versions.
 - Editor schemas for gojo configuration and theme TOML files, hosted on gojo.rocks
   with autocomplete, documentation, and validation.

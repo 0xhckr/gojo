@@ -52,7 +52,9 @@ func (m *Model) applyColorScheme(dark bool) {
 	// Content parsed with chroma-resolved hex colors carries the old scheme's
 	// style; rebuild it. Everything else resolves colors at render time.
 	if m.diffOpen && m.diffIsRevision && m.diffSrcRaw != "" {
-		m.diffRows = renderDiff(m.diffSrcRaw)
+		rows := renderDiff(m.diffSrcRaw)
+		preserveImages(rows, m.diffRows)
+		m.diffRows = rows
 	}
 	if m.view == viewFile {
 		m.fileView.highlights = nil

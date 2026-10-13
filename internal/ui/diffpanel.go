@@ -185,6 +185,8 @@ func diffContentPrefixW(digits int, splitActive bool) int {
 // column), so the prefix is narrower.
 func diffRowWrapCount(scrollW, digits int, r diffRow, fileCollapsed bool, splitActive bool, fileMode bool) int {
 	switch r.kind {
+	case rowImage:
+		return imageHeight + 1
 	case rowFileHeader:
 		indicator := "▼ "
 		if fileCollapsed {
@@ -475,6 +477,8 @@ func renderRawSubLine(scrollW int, line string, sub int) string {
 // wrapped line stays visually marked end-to-end.
 func renderDiffRowSubLine(scrollW, digits int, r diffRow, sub int, barColor terminalColor, fileCollapsed bool, isCursor bool, splitIndicator string, splitActive bool, fileMode bool) string {
 	switch r.kind {
+	case rowImage:
+		return renderImageRow(scrollW, r, sub)
 	case rowFileHeader:
 		indicator := "▼ "
 		if fileCollapsed {

@@ -82,18 +82,20 @@ type Model struct {
 	showAllRev bool
 
 	// Diff panel.
-	diffOpen       bool
-	diffRev        string
-	diffRevPrefix  int  // shortest-unique-prefix length for diffRev (0 = none)
-	diffIsRevision bool // true: showing a revision diff (reloadable); false: a list view
-	diffLoading    bool
-	diffDesc       string // revision description shown above the status section
-	diffStatus     []jj.StatusEntry
-	diffRows       []diffRow
-	diffDigits     int    // gutter width, computed once when the diff loads
-	diffRaw        string // raw list-view content (non-revision diffs)
-	diffSrcRaw     string // git-format diff text behind diffRows (revision diffs)
-	diffScrollY    int
+	diffOpen        bool
+	diffRev         string
+	diffRevPrefix   int  // shortest-unique-prefix length for diffRev (0 = none)
+	diffIsRevision  bool // true: showing a revision diff (reloadable); false: a list view
+	diffLoading     bool
+	diffDesc        string // revision description shown above the status section
+	diffStatus      []jj.StatusEntry
+	diffRows        []diffRow
+	diffDigits      int    // gutter width, computed once when the diff loads
+	diffRaw         string // raw list-view content (non-revision diffs)
+	diffSrcRaw      string // git-format diff text behind diffRows (revision diffs)
+	diffScrollY     int
+	diffImageCommit string
+	images          imageTerminal
 
 	// diffCollapsed tracks which file diffs are collapsed, keyed by file path.
 	// Collapsed files show only their header row (with a ▶ indicator); their
@@ -314,6 +316,7 @@ type refreshMsg struct {
 }
 
 type diffLoadedMsg struct {
+	commit string
 	rev    string
 	desc   string
 	status []jj.StatusEntry
@@ -450,7 +453,7 @@ type workspaceDoneMsg struct {
 // Init kicks off configuration loading, the auto-refresh poll loop, and the
 // top-bar animation tick.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(boot, pollTick(), tea.RequestBackgroundColor)
+	return tea.Batch(boot, pollTick(), tea.RequestBackgroundColor, tea.Raw(kittyQuery))
 }
 
 func boot() tea.Msg {
@@ -501,6 +504,10 @@ func (m Model) refreshCmd() tea.Cmd {
 func (m Model) openDiffCmd(commitID, changeID string) tea.Cmd {
 	r := m.runner
 	return func() tea.Msg {
+		pinned, err := r.CommitID(commitID)
+		if err != nil {
+			return diffLoadedMsg{rev: changeID, err: err}
+		}
 		// The three queries are independent subprocesses; run them
 		// concurrently to cut the diff-open latency.
 		var (
@@ -509,9 +516,9 @@ func (m Model) openDiffCmd(commitID, changeID string) tea.Cmd {
 		)
 		var wg sync.WaitGroup
 		wg.Add(2)
-		go func() { defer wg.Done(); status, _ = r.DiffSummary(commitID) }()
-		go func() { defer wg.Done(); desc, _ = r.Description(commitID) }()
-		diff, err := r.Diff(commitID)
+		go func() { defer wg.Done(); status, _ = r.DiffSummary(pinned) }()
+		go func() { defer wg.Done(); desc, _ = r.Description(pinned) }()
+		diff, err := r.Diff(pinned)
 		wg.Wait()
 		if err != nil {
 			return diffLoadedMsg{rev: changeID, err: err}
@@ -527,7 +534,7 @@ func (m Model) openDiffCmd(commitID, changeID string) tea.Cmd {
 			diff == m.diffSrcRaw && (desc == "" || desc == m.diffDesc) {
 			return diffLoadedMsg{rev: changeID, status: status, unchanged: true}
 		}
-		return diffLoadedMsg{rev: changeID, desc: desc, status: status, rows: renderDiffPlain(diff), raw: diff}
+		return diffLoadedMsg{rev: changeID, commit: pinned, desc: desc, status: status, rows: renderDiffPlain(diff), raw: diff}
 	}
 }
 
@@ -814,8 +821,19 @@ func (m Model) refreshFocusedCmds() []tea.Cmd {
 
 // ── Update ──────────────────────────────────────────────────────────────────
 
-// Update handles incoming messages.
+// Update handles messages and serializes terminal image transfers.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.applyImageMessage(msg)
+	updated, cmd := m.update(msg)
+	m = updated.(Model)
+	graphics := m.syncImages()
+	if graphics == nil {
+		return m, cmd
+	}
+	return m, tea.Batch(cmd, graphics)
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Terminal-reported OS dark/light scheme change (mode 2031 DSR, parsed by
 	// Ultraviolet; see darkmode.go). Applies in every view.
 	if dark, ok := decodeColorScheme(msg); ok {
@@ -935,6 +953,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case diffLoadedMsg:
+		if msg.rev != m.diffRev {
+			return m, nil
+		}
 		m.diffLoading = false
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
@@ -985,6 +1006,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.diffStatus = msg.status
 		m.diffRows = msg.rows
+		m.diffImageCommit = ""
+		if hasImageRows(msg.rows) {
+			m.diffImageCommit = msg.commit
+		}
 		m.diffSrcRaw = msg.raw
 		m.diffDigits = maxLineDigits(msg.rows)
 		m.computeDiffLayout()
@@ -1009,6 +1034,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.diffFollowCursor()
 		}
 		if msg.raw != "" {
+			if hasImageRows(msg.rows) && msg.commit != "" {
+				return m, tea.Batch(m.highlightDiffCmd(msg.rev, msg.raw), m.loadImagesCmd())
+			}
 			return m, m.highlightDiffCmd(msg.rev, msg.raw)
 		}
 		return m, nil
@@ -1020,6 +1048,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			len(msg.rows) != len(m.diffRows) {
 			return m, nil
 		}
+		preserveImages(msg.rows, m.diffRows)
 		m.diffRows = msg.rows
 		return m, nil
 

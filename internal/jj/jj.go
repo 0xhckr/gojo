@@ -198,6 +198,19 @@ func (r *Runner) FileShow(rev, path string) (string, error) {
 	return r.run("file", "show", "-r", rev, path)
 }
 
+// CommitID pins a mutable revision selector before loading related data.
+func (r *Runner) CommitID(rev string) (string, error) {
+	out, err := r.run("log", "--no-graph", "--color", "never", "-r", rev, "-T", `commit_id ++ "\n"`)
+	if err != nil {
+		return "", err
+	}
+	ids := strings.Fields(out)
+	if len(ids) != 1 {
+		return "", fmt.Errorf("expected one revision, got %d", len(ids))
+	}
+	return ids[0], nil
+}
+
 // annotateTemplate emits one record per source line: blame fields joined by
 // '|', a \x01 marker, then the line's content (which jj includes with its
 // trailing newline). Bare keywords (commit, line_number, content) are the

@@ -25,6 +25,7 @@ const (
 	rowFileHeader rowKind = iota
 	rowHunkHeader
 	rowLine
+	rowImage
 )
 
 // diffRow is one rendered row: a file header, hunk header, or content line.
@@ -35,6 +36,8 @@ type diffRow struct {
 	path       string
 	prevPath   string
 	changeType string
+	image      *imagePair
+	imageCols  int // queued Kitty width; 0 unsupported, -1 pending
 
 	// hunk header
 	hunkText string
@@ -259,6 +262,10 @@ func renderDiffMode(raw string, syntaxHighlight bool) []diffRow {
 			prevPath:   prevPath,
 			changeType: changeType,
 		})
+		if imagePath(path) || imagePath(prevPath) {
+			rows = append(rows, diffRow{kind: rowImage, path: path, prevPath: prevPath, changeType: changeType})
+			continue
+		}
 
 		for _, c := range f.contents {
 			if c.isHunk {

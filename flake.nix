@@ -36,7 +36,7 @@
             # Hash of the downloaded Go modules. When go.sum changes, run
             # `nix build` once and replace this with the "got:" value.
             # Stable across systems thanks to proxyVendor above.
-            vendorHash = "sha256-ZMbhQw9mk/+UI2g8f5WpcEBCU/RS30wuzEdEK+/bv4A=";
+            vendorHash = "sha256-vLHrJumGeHctjkHOBdQj7bL/kVbdSuCYK1mSW651AZ0=";
 
             nativeBuildInputs = [ pkgs.makeWrapper ];
 
