@@ -833,8 +833,8 @@ func TestAIDescribeGenerateError(t *testing.T) {
 	if m.errMsg == "" {
 		t.Error("errMsg not set after generation error")
 	}
-	if cmd != nil {
-		t.Error("generation error should not produce a command")
+	if cmd == nil || m.programReport.State != "error" {
+		t.Error("generation error should report terminal error status")
 	}
 }
 

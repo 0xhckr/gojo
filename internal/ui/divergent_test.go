@@ -122,14 +122,21 @@ func TestDivergentCleanup(t *testing.T) {
 		t.Fatal("abandon did not run")
 	}
 	done := false
-	for _, command := range cmd().(tea.BatchMsg) {
-		if msg, ok := command().(actionDoneMsg); ok {
+	var checkResult func(tea.Msg)
+	checkResult = func(result tea.Msg) {
+		if commands, ok := result.(tea.BatchMsg); ok {
+			for _, command := range commands {
+				checkResult(command())
+			}
+		}
+		if msg, ok := result.(actionDoneMsg); ok {
 			if msg.err != nil {
 				t.Fatalf("abandon failed: %v", msg.err)
 			}
 			done = true
 		}
 	}
+	checkResult(cmd())
 	if !done {
 		t.Fatal("no abandon result")
 	}

@@ -15,6 +15,8 @@ adheres to [Semantic Versioning][semver].
 ## [Unreleased]
 
 ### Added
+- Terminal task status through OSC 7501 for AI generation and background actions,
+  including completion, errors, and permission prompts in supporting terminals.
 - Before/after image previews in revision diffs using the Kitty graphics protocol.
 - Divergent revision labels and search, with commit IDs to distinguish versions.
 - Editor schemas for gojo configuration and theme TOML files, hosted on gojo.rocks

@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"gojo/internal/programstatus"
 	"gojo/internal/ui"
 )
 
@@ -31,6 +32,13 @@ func main() {
 	if handled {
 		return
 	}
+	if err := runTUI(); err != nil {
+		fmt.Fprintln(os.Stderr, "fatal:", err)
+		os.Exit(1)
+	}
+}
+
+func runTUI() error {
 
 	// Ask the terminal to report OS dark/light scheme changes as DSR replies
 	// (xterm mode 2031; supported by kitty, Ghostty, VTE, Contour, …). The UI
@@ -39,14 +47,14 @@ func main() {
 	// support ignore the mode silently.
 	fmt.Fprint(os.Stdout, "\x1b[?2031h")
 	defer fmt.Fprint(os.Stdout, "\x1b[?2031l")
+	// A quit or interrupt cancels any in-flight work, including after Run errors.
+	defer fmt.Fprint(os.Stdout, programstatus.Report{State: "idle"}.Sequence())
 
 	p := tea.NewProgram(
 		ui.NewModel(),
 	)
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "fatal:", err)
-		os.Exit(1)
-	}
+	_, err := p.Run()
+	return err
 }
 
 func handleFlags(args []string, stdout, stderr io.Writer) (bool, error) {

@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"gojo/internal/jj"
+	"gojo/internal/programstatus"
 )
 
 type viewMode int
@@ -190,6 +191,11 @@ type Model struct {
 	// It's a stack so overlapping actions all keep the spinner animating.
 	busy []string
 
+	programReport  programstatus.Report
+	programFailure string
+	programSent    programstatus.Report
+	programWriting bool
+
 	// pendingElev is a pending elevation prompt. When an action fails with a
 	// recognized "needs --flag" error, gojo asks the user whether to retry with
 	// that flag appended; confirming runs pendingElev.retry.
@@ -291,6 +297,8 @@ func NewModel() Model {
 		focused:         true,
 		polling:         true,
 		aiLoading:       map[string]bool{},
+		programReport:   programstatus.Report{State: "idle"},
+		programSent:     programstatus.Report{State: "idle"},
 		aiDescribeQueue: []aiPendingDescribe{},
 		keys:            DefaultKeyMap(),
 	}
@@ -453,7 +461,10 @@ type workspaceDoneMsg struct {
 // Init kicks off configuration loading, the auto-refresh poll loop, and the
 // top-bar animation tick.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(boot, pollTick(), tea.RequestBackgroundColor, tea.Raw(kittyQuery))
+	return tea.Sequence(
+		tea.Raw(programstatus.Report{State: "idle"}.Sequence()+kittyQuery),
+		tea.Batch(boot, pollTick(), tea.RequestBackgroundColor),
+	)
 }
 
 func boot() tea.Msg {
@@ -821,16 +832,18 @@ func (m Model) refreshFocusedCmds() []tea.Cmd {
 
 // ── Update ──────────────────────────────────────────────────────────────────
 
-// Update handles messages and serializes terminal image transfers.
+// Update handles messages and synchronizes terminal graphics and program status.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	wasBusy, previousError := m.spinnerActive() || m.bootInitStage == 3, m.programError()
 	m.applyImageMessage(msg)
 	updated, cmd := m.update(msg)
 	m = updated.(Model)
 	graphics := m.syncImages()
-	if graphics == nil {
+	status := m.syncProgramStatus(msg, wasBusy, previousError)
+	if graphics == nil && status == nil {
 		return m, cmd
 	}
-	return m, tea.Batch(cmd, graphics)
+	return m, tea.Batch(cmd, graphics, status)
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {

@@ -357,8 +357,8 @@ func TestSplitConfirmNothingToSplit(t *testing.T) {
 
 	next, cmd := m.Update(keyPress("c"))
 	m = next.(Model)
-	if cmd != nil {
-		t.Errorf("confirm with all marked should not produce a command")
+	if cmd == nil || m.programReport.State != "error" {
+		t.Error("confirm with all marked should report terminal error status")
 	}
 	if m.errMsg == "" {
 		t.Error("confirm with all marked should set errMsg")

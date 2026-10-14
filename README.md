@@ -23,6 +23,7 @@ A fullscreen terminal UI for [jj](https://github.com/jj-vcs/jj) (Jujutsu VCS), b
 - **Bookmark management** — create, delete, move, rename, set, track, untrack, and list bookmarks
 - **Git integration** — fetch, push, and remote management from within the TUI
 - **AI commit messages** — generate a description from a commit's diff via an OpenAI-compatible API or your ChatGPT subscription through Codex CLI
+- **Terminal task status** — OSC 7501 reports AI generation and background actions as indeterminate work, with completion, failure, and permission prompts in supporting terminals
 - **Undo / redo** — one-key `jj undo` / `jj redo`
 - **Graph rendering** — native jj graph output with styled nodes (@/○/◆) and edges
 
