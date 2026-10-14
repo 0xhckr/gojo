@@ -14,6 +14,8 @@ adheres to [Semantic Versioning][semver].
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-10-14
+
 ### Added
 - Terminal task status through OSC 7501 for AI generation and background actions,
   including completion, errors, and permission prompts in supporting terminals.
